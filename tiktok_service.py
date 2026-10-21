@@ -14,7 +14,7 @@ import httpx
 
 try:
     from TikTokLive import TikTokLiveClient
-    from TikTokLive.client.errors import UserOfflineError
+    from TikTokLive.client.errors import AgeRestrictedError, UserOfflineError
     from TikTokLive.client.web.web_settings import WebDefaults
     from TikTokLive.events import (
         ConnectEvent,
@@ -26,6 +26,7 @@ try:
     TIKTOKLIVE_AVAILABLE = True
 except ImportError:
     TIKTOKLIVE_AVAILABLE = False
+    AgeRestrictedError = Exception  # type: ignore
     UserOfflineError = Exception  # type: ignore
     WebDefaults = None  # type: ignore
 
@@ -364,6 +365,39 @@ class StreamerWorker:
                 self.diag.authenticated_session = True
         return client
 
+    async def _start_client_with_age_bypass(self, client: Any) -> Any:
+        """
+        Startet die TikTokLive-Verbindung.
+        - Ohne hinterlegte `TIKTOK_SESSION_ID` wird `fetch_room_info=False` genutzt, da
+          TikTokLive v7.0.1 bei altersbeschränkten (18+) Streams sonst einen `AgeRestrictedError`
+          wirft, obwohl der WebSocket-Stream über den Sign-Server trotzdem empfangen werden kann!
+        - Falls trotz Session ein `AgeRestrictedError` beim Abrufen der Room-Info auftritt,
+          fällt der Worker automatisch auf `fetch_room_info=False` zurück.
+        """
+        use_room_info = bool(config.has_tiktok_session)
+        try:
+            return await client.start(
+                process_connect_events=True,
+                compress_ws_events=True,
+                fetch_room_info=use_room_info,
+                fetch_gift_info=True,
+                fetch_live_check=True,
+            )
+        except AgeRestrictedError:
+            self._log(
+                "INFO",
+                "18+ Stream erkannt (AgeRestrictedError bei Room-Info) -> Verbinde im Bypass-Modus (fetch_room_info=False)...",
+            )
+            resolved_room_id = getattr(client, "_room_id", None) or None
+            return await client.start(
+                process_connect_events=True,
+                compress_ws_events=True,
+                fetch_room_info=False,
+                fetch_gift_info=False,
+                fetch_live_check=False,
+                room_id=int(resolved_room_id) if resolved_room_id else None,
+            )
+
     async def _supervisor_loop(self) -> None:
         backoff = 5.0
 
@@ -371,7 +405,7 @@ class StreamerWorker:
             with self._lock:
                 self.diag.state = "connecting"
 
-            auth_hint = " (mit Session-Cookie)" if config.has_tiktok_session else " (anonym)"
+            auth_hint = " (mit Session-Cookie)" if config.has_tiktok_session else " (anonym / 18+ Bypass aktiv)"
             self._log("INFO", f"Prüfe Live-Status & verbinde mit TikTok Webcast{auth_hint}...")
 
             update_streamer_runtime_state(
@@ -387,13 +421,7 @@ class StreamerWorker:
             self._register_handlers(client)
 
             try:
-                ws_task = await client.start(
-                    process_connect_events=True,
-                    compress_ws_events=True,
-                    fetch_room_info=True,
-                    fetch_gift_info=True,
-                    fetch_live_check=True,
-                )
+                ws_task = await self._start_client_with_age_bypass(client)
                 backoff = 5.0
                 self.diag.reconnect_attempts = 0
 

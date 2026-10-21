@@ -1,13 +1,22 @@
 import os
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple
+
+try:
+    import pymysql
+    import pymysql.cursors
+    PYMYSQL_AVAILABLE = True
+except ImportError:
+    pymysql = None  # type: ignore
+    PYMYSQL_AVAILABLE = False
 
 from config import config
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tiktok_earnings.db")
+DB_PATH = config.db_path
 
 # Standard TikTok Umrechnungswerte:
 # 1 Coin = 1 Diamond (im TikTokLive GiftEvent entspricht gift.diamond_count dem Coin-Wert)
@@ -25,141 +34,390 @@ DEFAULT_SETTINGS: Dict[str, str] = {
 _db_init_lock = threading.Lock()
 
 
+class DBRow(dict):
+    """
+    Kompatibilitäts-Zeilenobjekt für MySQL/MariaDB, das sich exakt wie `sqlite3.Row` verhält:
+    - Unterstützt Dictionary-Zugriff (`row["username"]`, `dict(row)`, `row.get(...)`)
+    - Unterstützt numerischen Index-Zugriff (`row[0]` z.B. bei `SELECT COUNT(*) ... fetchone()[0]`)
+    """
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        super().__init__(data)
+        self._values = list(data.values())
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class MySQLCursorWrapper:
+    """Wrapper um den PyMySQL DictCursor mit `sqlite3.Cursor`-kompatibler Schnittstelle."""
+
+    def __init__(self, raw_cursor: Any) -> None:
+        self._cur = raw_cursor
+
+    @property
+    def lastrowid(self) -> int:
+        return int(self._cur.lastrowid or 0)
+
+    @property
+    def rowcount(self) -> int:
+        return int(self._cur.rowcount or 0)
+
+    def fetchone(self) -> Optional[DBRow]:
+        row = self._cur.fetchone()
+        return DBRow(row) if row is not None else None
+
+    def fetchall(self) -> List[DBRow]:
+        rows = self._cur.fetchall()
+        return [DBRow(r) for r in rows] if rows else []
+
+
+class MySQLConnectionWrapper:
+    """
+    Übersetzt die SQLite-Queries aus `database.py` automatisch für MySQL / MariaDB:
+    - `?` -> `%s`
+    - `INSERT OR IGNORE INTO` -> `INSERT IGNORE INTO`
+    - `INSERT OR REPLACE INTO` -> `REPLACE INTO`
+    - `MAX(a, b)` (2 Argumente) -> `GREATEST(a, b)`
+    """
+
+    def __init__(self, raw_conn: Any) -> None:
+        self._conn = raw_conn
+
+    @staticmethod
+    def _translate_sql(sql: str) -> str:
+        out = sql.replace("?", "%s")
+        out = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT IGNORE INTO", out, flags=re.IGNORECASE)
+        out = re.sub(r"\bINSERT\s+OR\s+REPLACE\s+INTO\b", "REPLACE INTO", out, flags=re.IGNORECASE)
+        out = re.sub(r"\bMAX\s*\(\s*last_fan_tickets\s*,\s*%s\s*\)", "GREATEST(last_fan_tickets, %s)", out, flags=re.IGNORECASE)
+        return out
+
+    def execute(self, sql: str, params: Optional[Sequence[Any]] = None) -> MySQLCursorWrapper:
+        translated = self._translate_sql(sql)
+        cur = self._conn.cursor()
+        cur.execute(translated, tuple(params) if params is not None else None)
+        return MySQLCursorWrapper(cur)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+def _open_mysql_connection(include_db: bool = True) -> Any:
+    if not PYMYSQL_AVAILABLE:
+        raise RuntimeError(
+            "Für DB_ENGINE=mysql wird das Paket 'pymysql' benötigt (pip install pymysql)."
+        )
+    conn = pymysql.connect(
+        host=config.mysql_host,
+        port=config.mysql_port,
+        user=config.mysql_user,
+        password=config.mysql_password,
+        database=config.mysql_database if include_db else None,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+        connect_timeout=10,
+    )
+    with conn.cursor() as cur:
+        cur.execute("SET SESSION sql_mode = (SELECT REPLACE(@@sql_mode, 'ONLY_FULL_GROUP_BY', ''))")
+    return conn
+
+
 @contextmanager
-def get_db() -> Generator[sqlite3.Connection, None, None]:
-    """Thread-sicherer SQLite-Context-Manager mit WAL-Journal-Modus für parallele Zugriffe."""
-    conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+def get_db() -> Generator[Any, None, None]:
+    """
+    Universeller Datenbank-Context-Manager für `toktracker`:
+    - Standard (`DB_ENGINE=sqlite`): Lokale SQLite-Datenbank im schnellen WAL-Modus.
+    - Externer SQL-Server (`DB_ENGINE=mysql`): MySQL / MariaDB über PyMySQL.
+    """
+    if config.is_mysql:
+        raw_conn = _open_mysql_connection(include_db=True)
+        wrapper = MySQLConnectionWrapper(raw_conn)
+        try:
+            yield wrapper
+            wrapper.commit()
+        except Exception:
+            wrapper.rollback()
+            raise
+        finally:
+            wrapper.close()
+    else:
+        conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
+def _ensure_column_sqlite(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
     cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
 
 
+def _ensure_index_mysql(conn: MySQLConnectionWrapper, table: str, index_name: str, columns_sql: str, unique: bool = False) -> None:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?
+        """,
+        (config.mysql_database, table, index_name),
+    ).fetchone()
+    if not row or int(row[0]) == 0:
+        uniq_kw = "UNIQUE " if unique else ""
+        conn.execute(f"CREATE {uniq_kw}INDEX {index_name} ON {table}({columns_sql})")
+
+
+def _init_mysql_schema() -> None:
+    # 1. Datenbank anlegen, falls sie noch nicht existiert
+    try:
+        bootstrap_conn = _open_mysql_connection(include_db=False)
+        try:
+            with bootstrap_conn.cursor() as cur:
+                db_name = re.sub(r"[^a-zA-Z0-9_]", "", config.mysql_database) or "toktracker"
+                cur.execute(
+                    f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                )
+            bootstrap_conn.commit()
+        finally:
+            bootstrap_conn.close()
+    except Exception:
+        # Falls der MySQL-User keine CREATE DATABASE Rechte hat und die DB bereits existiert, normal fortfahren
+        pass
+
+    with get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                `key` VARCHAR(128) PRIMARY KEY,
+                `value` TEXT NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS streamers (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(191) NOT NULL UNIQUE,
+                display_name VARCHAR(255),
+                avatar_url TEXT,
+                room_id VARCHAR(128),
+                follower_count BIGINT DEFAULT 0,
+                is_live TINYINT DEFAULT 0,
+                is_tracking TINYINT DEFAULT 0,
+                auto_monitor TINYINT DEFAULT 0,
+                current_viewers INT DEFAULT 0,
+                last_error TEXT,
+                created_at VARCHAR(64) NOT NULL,
+                last_seen_at VARCHAR(64)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stream_sessions (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                streamer_id BIGINT NOT NULL,
+                room_id VARCHAR(128),
+                title VARCHAR(512) DEFAULT '',
+                started_at VARCHAR(64) NOT NULL,
+                ended_at VARCHAR(64),
+                peak_viewers INT DEFAULT 0,
+                last_fan_tickets BIGINT DEFAULT 0,
+                status VARCHAR(32) DEFAULT 'active',
+                CONSTRAINT fk_sessions_streamer FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gift_events (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                streamer_id BIGINT NOT NULL,
+                session_id BIGINT NULL,
+                event_uid VARCHAR(191) UNIQUE,
+                sender_user_id VARCHAR(128) DEFAULT '',
+                sender_username VARCHAR(191) NOT NULL,
+                sender_nickname VARCHAR(255),
+                is_super_fan TINYINT DEFAULT 0,
+                gift_id INT DEFAULT 0,
+                gift_name VARCHAR(255) NOT NULL,
+                gift_icon_url TEXT,
+                diamond_count INT NOT NULL,
+                repeat_count INT NOT NULL DEFAULT 1,
+                combo_count INT DEFAULT 1,
+                group_id VARCHAR(128) DEFAULT '',
+                room_fan_tickets BIGINT DEFAULT 0,
+                total_coins BIGINT NOT NULL,
+                usd_net DOUBLE NOT NULL,
+                eur_net DOUBLE NOT NULL,
+                usd_gross DOUBLE NOT NULL,
+                eur_gross DOUBLE NOT NULL,
+                source VARCHAR(64) DEFAULT 'tiktoklive',
+                created_at VARCHAR(64) NOT NULL,
+                CONSTRAINT fk_gifts_streamer FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
+                CONSTRAINT fk_gifts_session FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telegram_users (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                telegram_id BIGINT UNIQUE,
+                username VARCHAR(191),
+                first_name VARCHAR(255) DEFAULT '',
+                role VARCHAR(32) DEFAULT 'user',
+                is_allowed TINYINT DEFAULT 0,
+                note VARCHAR(512) DEFAULT '',
+                created_at VARCHAR(64) NOT NULL,
+                last_seen_at VARCHAR(64)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+
+        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
+        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
+        _ensure_index_mysql(conn, "stream_sessions", "idx_stream_sessions_streamer", "streamer_id, started_at")
+        _ensure_index_mysql(conn, "telegram_users", "idx_telegram_users_username", "username")
+
+
+def _init_sqlite_schema() -> None:
+    with get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                `key` TEXT PRIMARY KEY,
+                `value` TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS streamers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                display_name TEXT,
+                avatar_url TEXT,
+                room_id TEXT,
+                follower_count INTEGER DEFAULT 0,
+                is_live INTEGER DEFAULT 0,
+                is_tracking INTEGER DEFAULT 0,
+                auto_monitor INTEGER DEFAULT 0,
+                current_viewers INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS stream_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                streamer_id INTEGER NOT NULL,
+                room_id TEXT,
+                title TEXT DEFAULT '',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                peak_viewers INTEGER DEFAULT 0,
+                last_fan_tickets INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS gift_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                streamer_id INTEGER NOT NULL,
+                session_id INTEGER,
+                event_uid TEXT UNIQUE,
+                sender_user_id TEXT DEFAULT '',
+                sender_username TEXT NOT NULL,
+                sender_nickname TEXT,
+                is_super_fan INTEGER DEFAULT 0,
+                gift_id INTEGER DEFAULT 0,
+                gift_name TEXT NOT NULL,
+                gift_icon_url TEXT,
+                diamond_count INTEGER NOT NULL,
+                repeat_count INTEGER NOT NULL DEFAULT 1,
+                combo_count INTEGER DEFAULT 1,
+                group_id TEXT DEFAULT '',
+                room_fan_tickets INTEGER DEFAULT 0,
+                total_coins INTEGER NOT NULL,
+                usd_net REAL NOT NULL,
+                eur_net REAL NOT NULL,
+                usd_gross REAL NOT NULL,
+                eur_gross REAL NOT NULL,
+                source TEXT DEFAULT 'tiktoklive',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
+                FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS telegram_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE,
+                username TEXT COLLATE NOCASE,
+                first_name TEXT DEFAULT '',
+                role TEXT DEFAULT 'user',
+                is_allowed INTEGER DEFAULT 0,
+                note TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT
+            );
+            """
+        )
+
+        _ensure_column_sqlite(conn, "streamers", "auto_monitor", "INTEGER DEFAULT 0")
+        _ensure_column_sqlite(conn, "streamers", "current_viewers", "INTEGER DEFAULT 0")
+        _ensure_column_sqlite(conn, "streamers", "last_error", "TEXT DEFAULT ''")
+
+        _ensure_column_sqlite(conn, "gift_events", "session_id", "INTEGER")
+        _ensure_column_sqlite(conn, "gift_events", "event_uid", "TEXT")
+        _ensure_column_sqlite(conn, "gift_events", "sender_user_id", "TEXT DEFAULT ''")
+        _ensure_column_sqlite(conn, "gift_events", "is_super_fan", "INTEGER DEFAULT 0")
+        _ensure_column_sqlite(conn, "gift_events", "combo_count", "INTEGER DEFAULT 1")
+        _ensure_column_sqlite(conn, "gift_events", "group_id", "TEXT DEFAULT ''")
+        _ensure_column_sqlite(conn, "gift_events", "room_fan_tickets", "INTEGER DEFAULT 0")
+
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_date
+                ON gift_events(streamer_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_session
+                ON gift_events(session_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_events_uid
+                ON gift_events(event_uid) WHERE event_uid IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_stream_sessions_streamer
+                ON stream_sessions(streamer_id, started_at);
+            CREATE INDEX IF NOT EXISTS idx_telegram_users_username
+                ON telegram_users(username);
+            """
+        )
+
+
 def init_db() -> None:
     with _db_init_lock:
+        if config.is_mysql:
+            _init_mysql_schema()
+        else:
+            _init_sqlite_schema()
+
         with get_db() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS streamers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                    display_name TEXT,
-                    avatar_url TEXT,
-                    room_id TEXT,
-                    follower_count INTEGER DEFAULT 0,
-                    is_live INTEGER DEFAULT 0,
-                    is_tracking INTEGER DEFAULT 0,
-                    auto_monitor INTEGER DEFAULT 0,
-                    current_viewers INTEGER DEFAULT 0,
-                    last_error TEXT DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    last_seen_at TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS stream_sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    streamer_id INTEGER NOT NULL,
-                    room_id TEXT,
-                    title TEXT DEFAULT '',
-                    started_at TEXT NOT NULL,
-                    ended_at TEXT,
-                    peak_viewers INTEGER DEFAULT 0,
-                    last_fan_tickets INTEGER DEFAULT 0,
-                    status TEXT DEFAULT 'active',
-                    FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS gift_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    streamer_id INTEGER NOT NULL,
-                    session_id INTEGER,
-                    event_uid TEXT UNIQUE,
-                    sender_user_id TEXT DEFAULT '',
-                    sender_username TEXT NOT NULL,
-                    sender_nickname TEXT,
-                    is_super_fan INTEGER DEFAULT 0,
-                    gift_id INTEGER DEFAULT 0,
-                    gift_name TEXT NOT NULL,
-                    gift_icon_url TEXT,
-                    diamond_count INTEGER NOT NULL,
-                    repeat_count INTEGER NOT NULL DEFAULT 1,
-                    combo_count INTEGER DEFAULT 1,
-                    group_id TEXT DEFAULT '',
-                    room_fan_tickets INTEGER DEFAULT 0,
-                    total_coins INTEGER NOT NULL,
-                    usd_net REAL NOT NULL,
-                    eur_net REAL NOT NULL,
-                    usd_gross REAL NOT NULL,
-                    eur_gross REAL NOT NULL,
-                    source TEXT DEFAULT 'tiktoklive',
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
-                    FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS telegram_users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER UNIQUE,
-                    username TEXT COLLATE NOCASE,
-                    first_name TEXT DEFAULT '',
-                    role TEXT DEFAULT 'user',
-                    is_allowed INTEGER DEFAULT 0,
-                    note TEXT DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    last_seen_at TEXT
-                );
-                """
-            )
-
-            _ensure_column(conn, "streamers", "auto_monitor", "INTEGER DEFAULT 0")
-            _ensure_column(conn, "streamers", "current_viewers", "INTEGER DEFAULT 0")
-            _ensure_column(conn, "streamers", "last_error", "TEXT DEFAULT ''")
-
-            _ensure_column(conn, "gift_events", "session_id", "INTEGER")
-            _ensure_column(conn, "gift_events", "event_uid", "TEXT")
-            _ensure_column(conn, "gift_events", "sender_user_id", "TEXT DEFAULT ''")
-            _ensure_column(conn, "gift_events", "is_super_fan", "INTEGER DEFAULT 0")
-            _ensure_column(conn, "gift_events", "combo_count", "INTEGER DEFAULT 1")
-            _ensure_column(conn, "gift_events", "group_id", "TEXT DEFAULT ''")
-            _ensure_column(conn, "gift_events", "room_fan_tickets", "INTEGER DEFAULT 0")
-
-            conn.executescript(
-                """
-                CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_date
-                    ON gift_events(streamer_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_gift_events_session
-                    ON gift_events(session_id);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_events_uid
-                    ON gift_events(event_uid) WHERE event_uid IS NOT NULL;
-                CREATE INDEX IF NOT EXISTS idx_stream_sessions_streamer
-                    ON stream_sessions(streamer_id, started_at);
-                CREATE INDEX IF NOT EXISTS idx_telegram_users_username
-                    ON telegram_users(username);
-                """
-            )
-
             for k, v in DEFAULT_SETTINGS.items():
                 conn.execute(
-                    "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v)
+                    "INSERT OR IGNORE INTO settings (`key`, `value`) VALUES (?, ?)", (k, v)
                 )
 
             # Initiale Admins/Whitelist-User aus der .env synchronisieren
@@ -204,7 +462,7 @@ def init_db() -> None:
 
 def get_settings() -> Dict[str, Any]:
     with get_db() as conn:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        rows = conn.execute("SELECT `key`, `value` FROM settings").fetchall()
         data = {r["key"]: r["value"] for r in rows}
     mode = str(data.get("telegram_access_mode", config.telegram_access_mode or "whitelist")).lower()
     if mode not in ("whitelist", "public"):
@@ -230,7 +488,7 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     if val not in ("whitelist", "public"):
                         continue
                 conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    "INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
                     (key, val),
                 )
     return get_settings()
@@ -272,12 +530,6 @@ def upsert_telegram_user_permission(
     telegram_id_override: Optional[int] = None,
     username_override: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Fügt einen Telegram-Nutzer (oder eine Gruppe) per Telegram-ID (z.B. 123456789)
-    oder [@]username hinzu bzw. aktualisiert dessen Berechtigung:
-    - is_allowed: 1 = Freigeschaltet, 0 = Wartend/Entzogen, -1 = Gesperrt (Blocked)
-    - role: 'admin' oder 'user'
-    """
     raw = str(identifier).strip()
     if not raw:
         raise ValueError("Bitte eine Telegram User-ID oder einen [@]username angeben.")
@@ -376,15 +628,6 @@ def check_telegram_user_access(
     chat_id: Optional[int] = None,
     chat_title: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Prüft, ob ein Telegram-Nutzer (sowohl im Privatchat als auch in Gruppen/Supergruppen)
-    mit dem Bot kommunizieren darf.
-    - Unterstützt Whitelisting per `telegram_id` ODER `[@]username` (case-insensitive).
-    - Verknüpft vorab per `[@]username` freigeschaltete Einträge automatisch mit der
-      echten `telegram_id`, sobald die Person im Privatchat oder in einer Gruppe schreibt.
-    - Protokolliert unbekannte Nutzer als offene Anfrage (`is_allowed = 0`), inkl.
-      Gruppenname, falls der Aufruf aus einer Gruppe kam.
-    """
     clean_uname = (username or "").strip().lstrip("@").lower()
     clean_fname = (first_name or "").strip()
     now = datetime.now().isoformat(timespec="seconds")
@@ -412,7 +655,6 @@ def check_telegram_user_access(
                 (clean_uname,),
             ).fetchone()
 
-        # Falls sowohl ein Eintrag per ID als auch ein separater Vorab-Eintrag per @username existiert -> zusammenführen!
         if row_by_id and row_by_uname and row_by_id["id"] != row_by_uname["id"]:
             merged_allowed = max(int(row_by_id["is_allowed"]), int(row_by_uname["is_allowed"]))
             if int(row_by_id["is_allowed"]) < 0 or int(row_by_uname["is_allowed"]) < 0:
@@ -487,7 +729,6 @@ def check_telegram_user_access(
             conn.execute("SELECT * FROM telegram_users WHERE id = ?", (row_id,)).fetchone()
         )
 
-        # Optional: Prüfen, ob die Gruppen-Chat-ID selbst explizit auf der Whitelist steht (z.B. /allow -100123456)
         group_whitelisted = False
         if is_group and chat_id is not None:
             grp_row = conn.execute(
@@ -500,16 +741,13 @@ def check_telegram_user_access(
     is_allowed_flag = int(user_row.get("is_allowed", 0))
     role_val = user_row.get("role", "user")
 
-    # Explizit gesperrte Nutzer (-1) haben in keinem Modus Zugriff
     if is_allowed_flag < 0:
         allowed = False
         is_admin = False
     elif mode == "public":
-        # Im Public-Modus dürfen alle nicht-gesperrten Nutzer Lese-Befehle nutzen
         allowed = True
         is_admin = bool(is_allowed_flag == 1 and role_val == "admin")
     else:
-        # Im Whitelist-Modus (Standard): Nutzer ist per @username / ID freigeschaltet ODER die Gruppe selbst wurde explizit freigeschaltet
         allowed = bool(is_allowed_flag == 1 or group_whitelisted)
         is_admin = bool(is_allowed_flag == 1 and role_val == "admin")
 
@@ -532,7 +770,7 @@ def get_streamer_by_id_or_username(identifier: str | int) -> Optional[Dict[str, 
                 return dict(row)
         clean = str(identifier).strip().lstrip("@").lower()
         row = conn.execute(
-            "SELECT * FROM streamers WHERE username = ?", (clean,)
+            "SELECT * FROM streamers WHERE LOWER(username) = LOWER(?)", (clean,)
         ).fetchone()
         return dict(row) if row else None
 
@@ -561,7 +799,7 @@ def upsert_streamer(
     now = datetime.now().isoformat(timespec="seconds")
     with get_db() as conn:
         existing = conn.execute(
-            "SELECT * FROM streamers WHERE username = ?", (clean_username,)
+            "SELECT * FROM streamers WHERE LOWER(username) = LOWER(?)", (clean_username,)
         ).fetchone()
 
         if existing:
@@ -639,7 +877,7 @@ def update_streamer_runtime_state(
     now = datetime.now().isoformat(timespec="seconds")
     with get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM streamers WHERE username = ?", (clean_username,)
+            "SELECT * FROM streamers WHERE LOWER(username) = LOWER(?)", (clean_username,)
         ).fetchone()
         if not row:
             return
@@ -1048,7 +1286,7 @@ def get_streamer_detail(streamer_id: int, period: str = "all") -> Optional[Dict[
         gift_breakdown = conn.execute(
             """
             SELECT
-                gift_id,
+                MAX(gift_id) AS gift_id,
                 gift_name,
                 diamond_count,
                 SUM(repeat_count) AS total_quantity,
@@ -1168,10 +1406,6 @@ def build_streamer_bot_report(
     is_tracking_active: bool = False,
     worker_state: str = "stopped",
 ) -> Dict[str, Any]:
-    """
-    Erzeugt einen vollständigen Auswertungsblock für einen einzelnen Streamer
-    (Zeitraum z.B. 24h + All-Time-Werte + Top-Gifts + Top-Gifter + Telegram-Text).
-    """
     cfg = get_settings()
     cutoff = (datetime.now() - timedelta(hours=max(1, hours))).isoformat(timespec="seconds")
     sid = int(streamer_row["id"])

@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import List, Optional, Set
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,11 +32,22 @@ class AppConfig:
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "5000"))
 
-    # Datenbank
+    # Datenbank-Engine ("sqlite" oder "mysql")
+    db_engine: str = os.getenv("DB_ENGINE", "sqlite").strip().lower()
+    database_url: str = os.getenv("DATABASE_URL", "").strip()
+
+    # Lokale SQLite-Datenbank (Standard, wenn DB_ENGINE=sqlite)
     db_path: str = os.getenv(
         "TIKTOK_DB_PATH",
         os.path.join(BASE_DIR, "tiktok_earnings.db"),
     )
+
+    # Externer MySQL / MariaDB Server (aktiv, sobald DB_ENGINE=mysql oder DATABASE_URL=mysql://...)
+    mysql_host: str = os.getenv("MYSQL_HOST", "127.0.0.1").strip()
+    mysql_port: int = int(os.getenv("MYSQL_PORT", "3306"))
+    mysql_user: str = os.getenv("MYSQL_USER", "root").strip()
+    mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
+    mysql_database: str = os.getenv("MYSQL_DATABASE", "toktracker").strip()
 
     # API-Sicherheit für externe Zugriffe / Telegram-Bot
     api_key: str = os.getenv("TIKTOK_API_KEY", "").strip()
@@ -59,6 +71,26 @@ class AppConfig:
     # Kommagetrennte Telegram User-IDs oder [@]usernames aus der .env (Initial-Admins / erlaubte Nutzer)
     telegram_allowed_users_raw: str = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
 
+    def __post_init__(self) -> None:
+        # Falls DATABASE_URL (z.B. mysql://user:pass@host:3306/dbname) angegeben wurde, Parameter daraus übernehmen
+        if self.database_url.lower().startswith(("mysql://", "mysql+pymysql://", "mariadb://")):
+            parsed = urlparse(self.database_url)
+            self.db_engine = "mysql"
+            if parsed.hostname:
+                self.mysql_host = parsed.hostname
+            if parsed.port:
+                self.mysql_port = int(parsed.port)
+            if parsed.username:
+                self.mysql_user = parsed.username
+            if parsed.password is not None:
+                self.mysql_password = parsed.password
+            if parsed.path and parsed.path.strip("/"):
+                self.mysql_database = parsed.path.strip("/")
+
+    @property
+    def is_mysql(self) -> bool:
+        return self.db_engine in ("mysql", "mariadb")
+
     @property
     def has_tiktok_session(self) -> bool:
         return bool(self.tiktok_session_id)
@@ -78,8 +110,6 @@ class AppConfig:
             clean = item.lstrip("@").strip()
             if clean.lstrip("-").isdigit():
                 ids.add(int(clean))
-        # Falls TELEGRAM_CHAT_ID eine persönliche User-ID (> 0) ist, ebenfalls als Admin-ID aufnehmen.
-        # (Negative IDs sind Gruppen-/Supergruppen-IDs für den 24h-Report, sodass in Gruppen weiterhin die User-Whitelist gilt.)
         if self.telegram_chat_id and self.telegram_chat_id.lstrip("-").isdigit():
             cid = int(self.telegram_chat_id)
             if cid > 0:
@@ -99,6 +129,12 @@ class AppConfig:
         """Gibt eine sichere, maskierte Übersicht für das Dashboard/Diagnose-JSON zurück (ohne Klartext-Secrets)."""
         return {
             "env_file_loaded": os.path.exists(ENV_PATH),
+            "db_engine": "mysql" if self.is_mysql else "sqlite",
+            "db_target": (
+                f"{self.mysql_user}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+                if self.is_mysql
+                else os.path.basename(self.db_path)
+            ),
             "has_tiktok_session": self.has_tiktok_session,
             "tiktok_session_masked": _mask_secret(self.tiktok_session_id),
             "tiktok_target_idc": self.tiktok_target_idc if self.has_tiktok_session else "",
