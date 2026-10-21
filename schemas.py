@@ -114,3 +114,9 @@ class DailyBotReportResponse(BaseModel):
     streamers: List[StreamerReportCard]
     telegram_markdown: str
     telegram_html: str
+
+
+class SqliteImportRequest(BaseModel):
+    file_path: Optional[str] = None
+    tables: Optional[List[str]] = None
+    mode: str = "merge"  # "merge" oder "clean"

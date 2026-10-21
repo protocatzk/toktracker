@@ -28,6 +28,8 @@ from database import (
     get_streamer_detail,
     get_telegram_access_mode,
     init_db,
+    inspect_sqlite_database,
+    import_from_sqlite_database,
     list_telegram_users,
     record_gift_event,
     seed_demo_data,
@@ -39,6 +41,7 @@ from schemas import (
     DailyBotReportResponse,
     GiftCreateRequest,
     SettingsUpdateRequest,
+    SqliteImportRequest,
     StreamerCreateRequest,
     StreamerReportCard,
     TelegramUserPermissionRequest,
@@ -1102,6 +1105,71 @@ async def api_clear_demo():
     init_db()
     removed = clear_demo_data()
     return {"ok": True, "removed": removed}
+
+
+# =====================================================================
+# SQLITE DATENBANK IMPORTER (ADMIN PANEL API)
+# =====================================================================
+
+@app.get(
+    "/api/admin/sqlite/inspect",
+    tags=["System & Workers"],
+    summary="Untersucht eine SQLite-Datei vor dem Import (Standard: tiktok_earnings.db)",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_sqlite_inspect(file_path: Optional[str] = Query(None)):
+    target_path = file_path.strip() if file_path and file_path.strip() else config.db_path
+    if not os.path.exists(target_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"SQLite-Datei '{target_path}' wurde auf dem Server nicht gefunden."
+        )
+    try:
+        inspection = inspect_sqlite_database(target_path)
+        # Zusätzliche Info über aktuelle Ziel-Datenbank
+        inspection["target_db"] = {
+            "engine": config.db_engine,
+            "target": (
+                f"{config.mysql_user}@{config.mysql_host}:{config.mysql_port}/{config.mysql_database}"
+                if config.is_mysql
+                else os.path.basename(config.db_path)
+            ),
+        }
+        return {"ok": True, "data": inspection}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Fehler bei der Analyse: {exc}")
+
+
+@app.post(
+    "/api/admin/sqlite/import",
+    tags=["System & Workers"],
+    summary="Führt den Datenimport aus der SQLite-Datei in die aktive Datenbank aus",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_sqlite_import(payload: Optional[SqliteImportRequest] = None):
+    init_db()
+    req = payload or SqliteImportRequest()
+    target_path = (req.file_path or "").strip() or config.db_path
+    if not os.path.exists(target_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"SQLite-Datei '{target_path}' wurde auf dem Server nicht gefunden."
+        )
+
+    try:
+        result = import_from_sqlite_database(
+            sqlite_file_path=target_path,
+            import_tables=req.tables,
+            mode=req.mode,
+        )
+        # Nach dem Import auto-start für neu importierte Streamer triggern
+        try:
+            monitor_manager.autostart_from_db(force=True)
+        except Exception:
+            pass
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Importieren: {exc}")
 
 
 if __name__ == "__main__":

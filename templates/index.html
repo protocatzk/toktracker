@@ -822,6 +822,78 @@
             </div>
         </div>
 
+        <!-- SQLite Datenbank Importer (Admin Tool) -->
+        <div class="box" style="margin-top: 20px;">
+            <div class="box-header">
+                <div>
+                    <h2>💾 SQLite Datenbank Importer &amp; Datenübertragung</h2>
+                    <div class="section-hint">Liest alle Streamer, Duelle, Geschenke, Sessions und Einstellungen aus der lokalen SQLite-Datei (<code>tiktok_earnings.db</code>) aus und importiert sie über die interne Schnittstelle in die aktive Zieldatenbank.</div>
+                </div>
+                <div class="inline-form">
+                    <button type="button" id="btnInspectSqlite" class="sm">Datenbank analysieren</button>
+                    <button type="button" id="btnRunSqliteImport" class="sm primary">Import starten</button>
+                </div>
+            </div>
+
+            <div style="padding: 14px 16px;">
+                <div class="form-grid" style="grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+                    <div class="field-group">
+                        <label for="inputSqlitePath"><strong>SQLite-Dateipfad:</strong></label>
+                        <input type="text" id="inputSqlitePath" value="tiktok_earnings.db" placeholder="tiktok_earnings.db oder absoluter Pfad" />
+                    </div>
+                    <div class="field-group">
+                        <label for="selectImportMode"><strong>Import-Modus:</strong></label>
+                        <select id="selectImportMode">
+                            <option value="merge" selected>Zusammenführen (Merge / Replace)</option>
+                            <option value="clean">Ziel vorher leeren (Clean Import)</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label><strong>Aktive Zieldatenbank:</strong></label>
+                        <div class="mono muted" style="padding-top: 8px;" id="importTargetInfo">{{ env_summary.db_engine | upper }}: {{ env_summary.db_target }}</div>
+                    </div>
+                </div>
+
+                <!-- Tabellen-Auswahl Checkboxen -->
+                <div style="margin-bottom: 14px;">
+                    <label class="mono muted" style="display:block; margin-bottom: 6px;"><strong>Zu importierende Tabellen wählen:</strong></label>
+                    <div style="display: flex; gap: 14px; flex-wrap: wrap;">
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" class="cb-import-table" value="streamers" checked> Streamer
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" class="cb-import-table" value="tiktok_battles" checked> TikTok Battles (1v1, 2v2, 3er, 4er)
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" class="cb-import-table" value="gift_events" checked> Gift-Events (Geschenke)
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" class="cb-import-table" value="stream_sessions" checked> Stream-Sessions
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" class="cb-import-table" value="telegram_users" checked> Telegram-Nutzer
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" class="cb-import-table" value="settings" checked> Einstellungen
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Analyse- & Status-Ausgabe -->
+                <div id="sqliteInspectBox" style="display: none; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <strong style="color: var(--color-brand, #38bdf8);">📊 Analyse der SQLite-Quelle</strong>
+                        <span id="sqliteInspectMeta" class="mono muted">0 MB</span>
+                    </div>
+                    <div id="sqliteInspectSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px;"></div>
+                    <div id="sqliteInspectStreamers" class="mono muted" style="font-size: 11px;"></div>
+                </div>
+
+                <!-- Import-Ergebnis Logbox -->
+                <div id="sqliteImportResultBox" style="display: none; padding: 10px 12px; border-radius: 8px; font-size: 13px;"></div>
+            </div>
+        </div>
+
         <div class="box">
             <div class="box-header">
                 <div>
@@ -850,6 +922,6 @@
     </div>
 </footer>
 
-<script src="/static/dashboard.js?v=2.7.0"></script>
+<script src="/static/dashboard.js?v=2.8.0"></script>
 </body>
 </html>

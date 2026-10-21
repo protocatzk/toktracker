@@ -2728,4 +2728,147 @@ document.addEventListener("DOMContentLoaded", () => {
             closeBattleGraphicModal();
         }
     });
+
+    // =========================================================================
+    // SQLite Datenbank Importer Event Listeners
+    // =========================================================================
+    const btnInspect = document.getElementById("btnInspectSqlite");
+    const btnRunImport = document.getElementById("btnRunSqliteImport");
+    const inspectBox = document.getElementById("sqliteInspectBox");
+    const inspectSummary = document.getElementById("sqliteInspectSummary");
+    const inspectMeta = document.getElementById("sqliteInspectMeta");
+    const inspectStreamers = document.getElementById("sqliteInspectStreamers");
+    const resultBox = document.getElementById("sqliteImportResultBox");
+
+    async function inspectSqliteDatabase() {
+        const filePath = document.getElementById("inputSqlitePath")?.value?.trim() || "tiktok_earnings.db";
+        if (btnInspect) btnInspect.disabled = true;
+        if (resultBox) resultBox.style.display = "none";
+        
+        try {
+            const res = await fetch(`/api/admin/sqlite/inspect?file_path=${encodeURIComponent(filePath)}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+            const info = data.data || {};
+            if (inspectBox) inspectBox.style.display = "block";
+            if (inspectMeta) inspectMeta.textContent = `${info.file_size_mb || 0} MB · ${info.total_records || 0} Datensätze gesamt`;
+
+            if (inspectSummary) {
+                const counts = info.table_counts || {};
+                inspectSummary.innerHTML = `
+                    <div style="background:var(--bg-card); padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle);">
+                        <div class="muted mono" style="font-size:10px;">STREAMER</div>
+                        <strong style="color:#38bdf8; font-size:15px;">${counts.streamers || 0}</strong>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle);">
+                        <div class="muted mono" style="font-size:10px;">TIKTOK BATTLES</div>
+                        <strong style="color:#f59e0b; font-size:15px;">${counts.tiktok_battles || 0}</strong>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle);">
+                        <div class="muted mono" style="font-size:10px;">GIFT-EVENTS</div>
+                        <strong style="color:#10b981; font-size:15px;">${counts.gift_events || 0}</strong>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle);">
+                        <div class="muted mono" style="font-size:10px;">STREAM-SESSIONS</div>
+                        <strong style="color:#a855f7; font-size:15px;">${counts.stream_sessions || 0}</strong>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle);">
+                        <div class="muted mono" style="font-size:10px;">TELEGRAM USERS</div>
+                        <strong style="font-size:15px;">${counts.telegram_users || 0}</strong>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px 8px; border-radius:6px; border:1px solid var(--border-subtle);">
+                        <div class="muted mono" style="font-size:10px;">SETTINGS</div>
+                        <strong style="font-size:15px;">${counts.settings || 0}</strong>
+                    </div>
+                `;
+            }
+
+            if (inspectStreamers) {
+                const samples = info.streamer_samples || [];
+                inspectStreamers.innerHTML = `<strong>Enthaltene Streamer:</strong> ${samples.length > 0 ? samples.map(s => `@${escapeHtml(s)}`).join(", ") : "Keine"}`;
+            }
+        } catch (err) {
+            alert(`Analyse fehlgeschlagen: ${err.message}`);
+        } finally {
+            if (btnInspect) btnInspect.disabled = false;
+        }
+    }
+
+    async function runSqliteImport() {
+        const filePath = document.getElementById("inputSqlitePath")?.value?.trim() || "tiktok_earnings.db";
+        const mode = document.getElementById("selectImportMode")?.value || "merge";
+
+        // Ausgewählte Tabellen
+        const checkedBoxes = Array.from(document.querySelectorAll(".cb-import-table:checked"));
+        const selectedTables = checkedBoxes.map(cb => cb.value);
+
+        if (selectedTables.length === 0) {
+            alert("Bitte wähle mindestens eine Tabelle für den Import aus.");
+            return;
+        }
+
+        const modeWarning = mode === "clean" 
+            ? "ACHTUNG: Im Modus 'Ziel vorher leeren' werden die ausgewählten Tabellen vor dem Import vollständig geleert!\n\nMöchtest du wirklich fortfahren?"
+            : `Daten aus '${filePath}' jetzt in die aktive Datenbank importieren/zusammenführen?`;
+
+        if (!confirm(modeWarning)) {
+            return;
+        }
+
+        if (btnRunImport) {
+            btnRunImport.disabled = true;
+            btnRunImport.textContent = "Importiert...";
+        }
+
+        try {
+            const res = await fetch("/api/admin/sqlite/import", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    file_path: filePath,
+                    tables: selectedTables,
+                    mode: mode,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+            const r = data.result || {};
+            if (resultBox) {
+                resultBox.style.display = "block";
+                resultBox.style.background = r.ok ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)";
+                resultBox.style.border = `1px solid ${r.ok ? "#10b981" : "#ef4444"}`;
+                resultBox.style.color = r.ok ? "#34d399" : "#ff7b72";
+
+                const counts = r.imported_counts || {};
+                const statsText = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(" | ");
+                
+                resultBox.innerHTML = `
+                    <div style="font-weight:700; margin-bottom:4px;">
+                        ${r.ok ? "✅ Import erfolgreich abgeschlossen!" : "⚠️ Import mit Hinweisen/Fehlern beendet."}
+                    </div>
+                    <div class="mono" style="font-size:12px;">
+                        Übertragene Datensätze (${r.total_imported}): ${statsText}
+                    </div>
+                    ${r.errors && r.errors.length > 0 ? `<div style="margin-top:6px; font-size:11px; color:#ff7b72;">Fehler: ${escapeHtml(r.errors.join(", "))}</div>` : ""}
+                `;
+            }
+
+            // Dashboard neu laden
+            loadOverview();
+            loadBattles();
+            loadBattleStats();
+        } catch (err) {
+            alert(`Import-Fehler: ${err.message}`);
+        } finally {
+            if (btnRunImport) {
+                btnRunImport.disabled = false;
+                btnRunImport.textContent = "Import starten";
+            }
+        }
+    }
+
+    btnInspect?.addEventListener("click", inspectSqliteDatabase);
+    btnRunImport?.addEventListener("click", runSqliteImport);
 });
