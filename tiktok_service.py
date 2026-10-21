@@ -49,6 +49,39 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
+
+def _prewarm_tiktok_proto_schemas() -> None:
+    """
+    Workaround für TikTokLive v7.0.1 + Pydantic 2.10+ / Python 3.13:
+    Einige verschachtelte Dataclasses in `TikTokLiveProto.v3.webcast.model`
+    (z.B. `Hashtag`, `FansClubData`, `LiveEventInfo`, `SchemeInfo`) verwenden
+    Typ-Annotationen wie `"data.HashtagNamespace"`.
+    Wenn zuerst eine äußere Nachricht wie `WebcastLinkLayerMessage` (die ein
+    Klassenattribut `data: bytes = b""` besitzt) geparst wird, übergibt Pydantic
+    beim verzögerten Rebuild der verschachtelten Klassen den Namensraum der
+    äußeren Klasse, wodurch `data` als `b""` statt als Modul aufgelöst wird:
+      `AttributeError: 'bytes' object has no attribute 'HashtagNamespace'`
+    Durch das einmalige Vorab-Initialisieren dieser Dataclasses auf Top-Level
+    werden deren Pydantic-Validatoren im sauberen Modul-Namensraum gebaut.
+    """
+    if not TIKTOKLIVE_AVAILABLE:
+        return
+    try:
+        from TikTokLiveProto.v3.webcast import model as proto_model
+
+        for cls_name in ("FansClubData", "Hashtag", "LiveEventInfo", "SchemeInfo"):
+            cls_obj = getattr(proto_model, cls_name, None)
+            if cls_obj is not None:
+                try:
+                    cls_obj()
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.debug("TikTokLiveProto Schema-Prewarm Hinweis: %s", exc)
+
+
+_prewarm_tiktok_proto_schemas()
+
 # Falls ein EulerStream Sign-API-Key in .env / Umgebungsvariablen hinterlegt ist, global setzen
 if TIKTOKLIVE_AVAILABLE and WebDefaults is not None and config.has_sign_api_key:
     WebDefaults.tiktok_sign_api_key = config.tiktok_sign_api_key
@@ -350,12 +383,21 @@ class StreamerWorker:
         """
         Erstellt eine TikTokLiveClient-Instanz und injiziert Session-Cookies
         (`sessionid` + `tt-target-idc`) sowie optionale Proxies aus der .env / Umgebung.
+        Unterdrückt außerdem bekannte Protobuf-Schema-Fehler für nicht genutzte
+        TikTok-Nachrichten (wie WebcastLinkLayerMessage / HashtagNamespace).
         """
         web_proxy = httpx.Proxy(config.tiktok_web_proxy) if config.tiktok_web_proxy else None
         client = TikTokLiveClient(
             unique_id=f"@{self.username}",
             web_proxy=web_proxy,
         )
+        # Verhindert laute Stacktraces bei kaputten/unbekannten TikTok-Protobuf-Payloads
+        client.ignore_broken_payload = True
+        if hasattr(client, "parse_error_ignorelist") and isinstance(client.parse_error_ignorelist, list):
+            for pat in ("HashtagNamespace", "WebcastLinkLayerMessage"):
+                if pat not in client.parse_error_ignorelist:
+                    client.parse_error_ignorelist.append(pat)
+
         if config.has_tiktok_session:
             client.web.set_session(
                 session_id=config.tiktok_session_id,
