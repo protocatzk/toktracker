@@ -78,7 +78,9 @@ function switchTab(tabId) {
         panel.classList.toggle("active", panel.id === tabId);
     });
     if (tabId === "tab-analytics") {
-        loadAnalytics();
+        setTimeout(() => {
+            loadAnalytics();
+        }, 50);
     }
 }
 
@@ -501,7 +503,33 @@ function openStreamerAnalytics(streamerId) {
         sel.value = String(streamerId);
     }
     switchTab("tab-analytics");
-    loadAnalytics();
+}
+
+function setChartEmptyState(canvasId, msg = "Keine Daten im gewählten Zeitraum vorhanden") {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
+    let emptyEl = parent.querySelector(".chart-empty-msg");
+    if (!emptyEl) {
+        emptyEl = document.createElement("div");
+        emptyEl.className = "chart-empty-msg";
+        parent.appendChild(emptyEl);
+    }
+    emptyEl.textContent = msg;
+    emptyEl.style.display = "flex";
+    canvas.style.display = "none";
+}
+
+function clearChartEmptyState(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (parent) {
+        const emptyEl = parent.querySelector(".chart-empty-msg");
+        if (emptyEl) emptyEl.style.display = "none";
+    }
+    canvas.style.display = "block";
 }
 
 function toggleTimelineMetric() {
@@ -531,8 +559,14 @@ function renderTimelineChart(data) {
         chartTimelineInstance = null;
     }
 
-    const colors = getChartThemeColors();
     const timeline = data.timeline || [];
+    if (timeline.length === 0) {
+        setChartEmptyState("chartTimeline", "Keine Einnahmen-Events im gewählten Zeitraum vorhanden.");
+        return;
+    }
+    clearChartEmptyState("chartTimeline");
+
+    const colors = getChartThemeColors();
     const labels = timeline.map(t => t.label);
 
     const titleEl = document.getElementById("timelineChartTitle");
@@ -540,6 +574,7 @@ function renderTimelineChart(data) {
     const isSingleStreamer = Boolean(data.selected_streamer);
     const streamerName = isSingleStreamer ? (data.selected_streamer.display_name || data.selected_streamer.username) : "Alle Streamer";
 
+    let chartType = "bar";
     let datasets = [];
     let scales = {
         x: {
@@ -555,7 +590,8 @@ function renderTimelineChart(data) {
     };
 
     if (analyticsTimelineMode === "multi" && !isSingleStreamer && data.multi_streamer_datasets && data.multi_streamer_datasets.length > 0) {
-        if (titleEl) titleEl.textContent = `Top-Streamer Einnahmen-Vergleich (${labels.length} Zeitintervalle)`;
+        chartType = "line";
+        if (titleEl) titleEl.textContent = `Top-Streamer Einnahmen-Vergleich (${labels.length} Intervalle)`;
         if (subEl) subEl.textContent = `Chronologischer Coin-Verlauf der aktivsten Streamer`;
         datasets = data.multi_streamer_datasets.map((s, idx) => {
             const color = colors.palette[idx % colors.palette.length];
@@ -572,6 +608,7 @@ function renderTimelineChart(data) {
             };
         });
     } else if (analyticsTimelineMode === "coins") {
+        chartType = "bar";
         if (titleEl) titleEl.textContent = `Coin-Verlauf · ${streamerName}`;
         if (subEl) subEl.textContent = `Chronologische Entwicklung der erhaltenen Coins im Zeitfenster`;
         datasets = [{
@@ -584,6 +621,7 @@ function renderTimelineChart(data) {
             borderRadius: 2,
         }];
     } else if (analyticsTimelineMode === "eur") {
+        chartType = "line";
         if (titleEl) titleEl.textContent = `Netto Creator-Auszahlung (EUR) · ${streamerName}`;
         if (subEl) subEl.textContent = `Chronologische Entwicklung der Netto-Erlöse in Euro`;
         scales.y.title.text = "Netto EUR (€)";
@@ -601,6 +639,7 @@ function renderTimelineChart(data) {
         }];
     } else {
         // Mode "both" (default)
+        chartType = "bar";
         if (titleEl) titleEl.textContent = `Einnahmen- & Coin-Verlauf · ${streamerName}`;
         if (subEl) subEl.textContent = `Balken: Coins (links) | Linie: Netto Creator-Auszahlung in Euro (rechts)`;
         scales.y1 = {
@@ -640,6 +679,7 @@ function renderTimelineChart(data) {
     }
 
     chartTimelineInstance = new Chart(canvas, {
+        type: chartType,
         data: { labels, datasets },
         options: {
             responsive: true,
@@ -682,6 +722,12 @@ function renderCompareChart(data) {
         if (subEl) subEl.textContent = "Vergleich der überwachten Streamer nach generierten Coins";
 
         const topStreamers = (data.streamers_ranking || []).slice(0, 10);
+        if (topStreamers.length === 0) {
+            setChartEmptyState("chartCompare", "Keine Streamer-Daten vorhanden.");
+            return;
+        }
+        clearChartEmptyState("chartCompare");
+
         const labels = topStreamers.map(s => `@${s.username}`);
         const coinsData = topStreamers.map(s => s.total_coins);
         const eurData = topStreamers.map(s => s.eur_net);
@@ -731,11 +777,18 @@ function renderCompareChart(data) {
         if (subEl) subEl.textContent = "Peak-Zuschauer und generierte Coins der aufgezeichneten Streams";
 
         const sess = (data.sessions || []).slice(0, 10).reverse();
+        if (sess.length === 0) {
+            setChartEmptyState("chartCompare", "Keine aufgezeichneten Sessions für diesen Streamer.");
+            return;
+        }
+        clearChartEmptyState("chartCompare");
+
         const labels = sess.map(s => `#${s.id} (${(s.started_at || "").slice(5, 10)})`);
         const coinsData = sess.map(s => s.session_coins);
         const viewersData = sess.map(s => s.peak_viewers);
 
         chartCompareInstance = new Chart(canvas, {
+            type: "bar",
             data: {
                 labels,
                 datasets: [
@@ -802,13 +855,15 @@ function renderTimeOfDayChart(data) {
         chartTimeOfDayInstance = null;
     }
 
-    const colors = getChartThemeColors();
     const tod = data.time_of_day || [];
+    clearChartEmptyState("chartTimeOfDay");
+
+    const colors = getChartThemeColors();
     const labels = tod.map(t => t.label);
     const coinsData = tod.map(t => t.coins);
     const eventsData = tod.map(t => t.events_count);
 
-    const maxCoins = Math.max(...coinsData, 1);
+    const maxCoins = Math.max(...coinsData, 0);
     const bgColors = coinsData.map(c => {
         if (c === maxCoins && c > 0) return colors.accentGold;
         return colors.accentPurple + "bb";
@@ -869,13 +924,14 @@ function renderGiftDistChart(data) {
         chartGiftDistInstance = null;
     }
 
-    const colors = getChartThemeColors();
     const gifts = data.top_gifts || [];
-
     if (gifts.length === 0) {
+        setChartEmptyState("chartGiftDist", "Keine Geschenke im gewählten Zeitraum aufgezeichnet.");
         return;
     }
+    clearChartEmptyState("chartGiftDist");
 
+    const colors = getChartThemeColors();
     const top6 = gifts.slice(0, 6);
     const otherCoins = gifts.slice(6).reduce((acc, g) => acc + g.total_coins, 0);
 
@@ -937,13 +993,14 @@ function renderTopGiftersChart(data) {
         chartTopGiftersInstance = null;
     }
 
-    const colors = getChartThemeColors();
     const gifters = (data.top_gifters || []).slice(0, 10);
-
     if (gifters.length === 0) {
+        setChartEmptyState("chartTopGifters", "Keine Spenderdaten im gewählten Zeitraum vorhanden.");
         return;
     }
+    clearChartEmptyState("chartTopGifters");
 
+    const colors = getChartThemeColors();
     const labels = gifters.map(g => `@${g.sender_username}`);
     const coinsData = gifters.map(g => g.total_coins);
     const eurData = gifters.map(g => g.eur_net);
@@ -1142,16 +1199,17 @@ async function loadAnalytics(isBackground = false) {
             banner.style.display = "none";
         }
 
-        renderTimelineChart(data);
-        renderCompareChart(data);
-        renderTimeOfDayChart(data);
-        renderGiftDistChart(data);
-        renderTopGiftersChart(data);
-        renderAnalyticsTables(data);
+        try { renderTimelineChart(data); } catch (e) { console.error("Fehler renderTimelineChart:", e); }
+        try { renderCompareChart(data); } catch (e) { console.error("Fehler renderCompareChart:", e); }
+        try { renderTimeOfDayChart(data); } catch (e) { console.error("Fehler renderTimeOfDayChart:", e); }
+        try { renderGiftDistChart(data); } catch (e) { console.error("Fehler renderGiftDistChart:", e); }
+        try { renderTopGiftersChart(data); } catch (e) { console.error("Fehler renderTopGiftersChart:", e); }
+        try { renderAnalyticsTables(data); } catch (e) { console.error("Fehler renderAnalyticsTables:", e); }
     } catch (e) {
         console.error("Fehler beim Laden der Analytics:", e);
     }
 }
+
 
 document.addEventListener("DOMContentLoaded", () => {
     const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
