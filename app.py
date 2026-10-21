@@ -1,10 +1,8 @@
 import csv
-import html
 import io
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -37,6 +35,7 @@ from schemas import (
     StreamerReportCard,
     TrackActionRequest,
 )
+from telegram_service import generate_full_report_data, telegram_bot_service
 from tiktok_service import TIKTOKLIVE_AVAILABLE, fetch_tiktok_user_info, monitor_manager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -63,9 +62,10 @@ TIKTOK_GIFT_CATALOG = [
 async def lifespan(app_instance: FastAPI):
     """
     FastAPI Lifespan:
-    - Initialisiert beim Start die SQLite-Datenbank
-    - Startet automatisch alle Streamer-Worker, bei denen auto_monitor=1 gesetzt ist
-    - Stoppt beim Herunterfahren alle Worker sauber (inkl. Flush offener Gift-Streaks)
+    1. Initialisiert die SQLite-Datenbank
+    2. Startet alle TikTokLive-Worker für Streamer mit auto_monitor=1
+    3. Startet optional den Telegram-Bot-Service (fehlertolerant isoliert: falls der Bot
+       nicht starten kann, laufen FastAPI und das Web-Interface garantiert trotzdem weiter)
     """
     init_db()
     with get_db() as conn:
@@ -76,8 +76,12 @@ async def lifespan(app_instance: FastAPI):
     for s in get_auto_monitor_streamers():
         monitor_manager.start_tracking(s["id"], s["username"], auto_reconnect=True)
 
+    # Entkoppelter Start des Telegram-Bots (fängt intern alle Fehler ab)
+    await telegram_bot_service.start()
+
     yield
 
+    await telegram_bot_service.stop()
     monitor_manager.stop_all()
 
 
@@ -85,9 +89,9 @@ app = FastAPI(
     title="TikTok Streamer Earnings & Bot API",
     description=(
         "Backend-Service zur Echtzeit-Erfassung von TikTokLive-Geschenken (Coins/Diamonds) "
-        "mit fertigen 24h-Report- und Einzelabfrage-Endpoints für Telegram-Bots."
+        "mit fertigen 24h-Report- und Einzelabfrage-Endpoints sowie integriertem Telegram-Bot."
     ),
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -99,10 +103,6 @@ def verify_api_key(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
 ) -> None:
-    """
-    Prüft den optionalen API-Key (aus .env TIKTOK_API_KEY oder SQLite-Settings).
-    Wenn kein Key konfiguriert ist (leer), sind alle lokalen Zugriffe ohne Header erlaubt.
-    """
     configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
     if not configured_key:
         return
@@ -138,6 +138,7 @@ async def index(request: Request):
             "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
             "gift_catalog": TIKTOK_GIFT_CATALOG,
             "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
         },
     )
 
@@ -158,84 +159,25 @@ async def api_v1_daily_report(
     only_active: bool = Query(False, description="Wenn True, nur Streamer mit Einnahmen > 0 im Zeitraum"),
 ):
     init_db()
-    cfg = get_settings()
-    now = datetime.now()
-    cutoff = (now - timedelta(hours=hours)).isoformat(timespec="seconds")
+    report_data = generate_full_report_data(hours=hours, only_active=only_active)
+    return DailyBotReportResponse(**report_data)
 
-    with get_db() as conn:
-        rows = conn.execute("SELECT * FROM streamers ORDER BY username ASC").fetchall()
 
-    cards: List[StreamerReportCard] = []
-    for r in rows:
-        card = _enrich_streamer_card(dict(r), hours=hours)
-        if only_active and card.period_coins == 0 and not card.is_live:
-            continue
-        cards.append(card)
-
-    cards.sort(key=lambda c: (c.period_coins, c.alltime_coins), reverse=True)
-
-    total_period_coins = sum(c.period_coins for c in cards)
-    total_period_usd_net = round(sum(c.period_usd_net for c in cards), 2)
-    total_period_eur_net = round(sum(c.period_eur_net for c in cards), 2)
-    total_period_usd_gross = round(sum(c.period_usd_gross for c in cards), 2)
-    total_period_eur_gross = round(sum(c.period_eur_gross for c in cards), 2)
-    total_gifts_sent = sum(c.period_gifts_sent for c in cards)
-    live_now = sum(1 for c in cards if c.is_live)
-
-    md_lines = [
-        f"📋 *TikTok Streamer Einnahmen-Report ({hours}h)*",
-        f"🕒 Stand: `{now.strftime('%d.%m.%Y %H:%M')}`",
-        f"💰 *Gesamt Netto ({hours}h):* `{total_period_eur_net:,.2f} €` (`${total_period_usd_net:,.2f}`)",
-        f"🪙 *Gesamt Coins ({hours}h):* `{total_period_coins:,}` ({total_gifts_sent:,} Gifts)",
-        f"📡 *Streamer:* {len(cards)} überwacht ({live_now} aktuell LIVE)",
-        "────────────────────────",
-    ]
-    html_lines = [
-        f"<b>📋 TikTok Streamer Einnahmen-Report ({hours}h)</b>",
-        f"🕒 Stand: <code>{now.strftime('%d.%m.%Y %H:%M')}</code>",
-        f"💰 <b>Gesamt Netto ({hours}h):</b> <code>{total_period_eur_net:,.2f} €</code> (<code>${total_period_usd_net:,.2f}</code>)",
-        f"🪙 <b>Gesamt Coins ({hours}h):</b> <code>{total_period_coins:,}</code> ({total_gifts_sent:,} Gifts)",
-        f"📡 <b>Streamer:</b> {len(cards)} überwacht ({live_now} aktuell LIVE)",
-        "────────────────────────",
-    ]
-
-    for idx, c in enumerate(cards, start=1):
-        status_dot = "🟢" if c.is_live else "⚪"
-        top_g = f"{c.top_gifts[0].gift_name} ({c.top_gifts[0].total_coins:,})" if c.top_gifts else "-"
-        top_u = f"@{c.top_gifters[0].sender_username} ({c.top_gifters[0].total_coins:,})" if c.top_gifters else "-"
-
-        md_lines.append(
-            f"*{idx}. {c.display_name}* (@{c.username}) {status_dot}\n"
-            f"   • {hours}h Netto: *{c.period_eur_net:,.2f} €* (`${c.period_usd_net:,.2f}`) | `{c.period_coins:,}` Coins\n"
-            f"   • Top Gift: {top_g} | Top Gifter: {top_u}\n"
-            f"   • All-Time: {c.alltime_eur_net:,.2f} € ({c.alltime_coins:,} Coins)"
-        )
-        html_lines.append(
-            f"<b>{idx}. {html.escape(c.display_name)}</b> (@{html.escape(c.username)}) {status_dot}\n"
-            f"   • {hours}h Netto: <b>{c.period_eur_net:,.2f} €</b> (<code>${c.period_usd_net:,.2f}</code>) | <code>{c.period_coins:,}</code> Coins\n"
-            f"   • Top Gift: {html.escape(top_g)} | Top Gifter: {html.escape(top_u)}\n"
-            f"   • All-Time: {c.alltime_eur_net:,.2f} € ({c.alltime_coins:,} Coins)"
-        )
-
-    return DailyBotReportResponse(
-        generated_at=now.isoformat(timespec="seconds"),
-        period_hours=hours,
-        cutoff_timestamp=cutoff,
-        currency_primary=cfg["currency_primary"],
-        totals={
-            "streamers_count": len(cards),
-            "live_count": live_now,
-            "period_coins": total_period_coins,
-            "period_gifts_sent": total_gifts_sent,
-            "period_usd_net": total_period_usd_net,
-            "period_eur_net": total_period_eur_net,
-            "period_usd_gross": total_period_usd_gross,
-            "period_eur_gross": total_period_eur_gross,
-        },
-        streamers=cards,
-        telegram_markdown="\n\n".join(md_lines),
-        telegram_html="\n\n".join(html_lines),
-    )
+@app.post(
+    "/api/v1/telegram/send-report",
+    tags=["Telegram Bot API"],
+    summary="Sendet den 24h-Bericht sofort über den integrierten Telegram-Bot",
+    dependencies=[Depends(verify_api_key)],
+)
+async def api_v1_telegram_send_report(
+    hours: int = Query(24, ge=1, le=720),
+    chat_id: Optional[str] = Query(None, description="Optionale Ziel-Chat-ID (sonst TELEGRAM_CHAT_ID aus .env)"),
+):
+    init_db()
+    res = await telegram_bot_service.send_report_now(chat_id=chat_id, hours=hours)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Senden fehlgeschlagen"))
+    return res
 
 
 @app.get(
@@ -273,7 +215,9 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
         s["is_tracking_active"] = monitor_manager.is_tracking(uname)
         s["monitor_status"] = monitor_manager.get_status(uname)
         s["worker_diagnostics"] = monitor_manager.get_worker_diagnostics(uname)
-    data["system"] = monitor_manager.get_all_diagnostics()
+    sys_diag = monitor_manager.get_all_diagnostics()
+    sys_diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
+    data["system"] = sys_diag
     data["gift_catalog"] = TIKTOK_GIFT_CATALOG
     return data
 
@@ -281,7 +225,9 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
 @app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(verify_api_key)])
 @app.get("/api/v1/system/status", tags=["System & Workers"], dependencies=[Depends(verify_api_key)])
 async def api_system_status():
-    return monitor_manager.get_all_diagnostics()
+    diag = monitor_manager.get_all_diagnostics()
+    diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
+    return diag
 
 
 @app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])

@@ -26,7 +26,15 @@ async function loadOverview() {
         if (data.system) {
             document.getElementById("sysWorkerInfo").textContent =
                 `Worker: ${data.system.workers_running} aktiv (${data.system.workers_connected} verbunden)`;
-            renderWorkerLogs(data.system.workers || []);
+
+            const tg = data.system.telegram_bot;
+            if (tg) {
+                const tgLabel = tg.bot_username
+                    ? `${tg.state.toUpperCase()} (${tg.bot_username})`
+                    : tg.state.toUpperCase();
+                document.getElementById("sysTelegramInfo").textContent = tgLabel;
+            }
+            renderServiceLogs(data.system.workers || [], tg ? tg.logs || [] : []);
         }
 
         if (data.settings) {
@@ -137,16 +145,19 @@ function renderGiftLog(gifts) {
         .join("");
 }
 
-function renderWorkerLogs(workers) {
+function renderServiceLogs(workers, tgLogs) {
     const box = document.getElementById("workerLogBox");
     const lines = [];
     workers.forEach((w) => {
         (w.logs || []).forEach((l) => {
-            lines.push(`${l.timestamp} [@${w.username}] [${l.level}] ${l.message}`);
+            lines.push(`${l.timestamp} [TikTok:@${w.username}] [${l.level}] ${l.message}`);
         });
     });
+    (tgLogs || []).forEach((l) => {
+        lines.push(`${l.timestamp} [TelegramBot] [${l.level}] ${l.message}`);
+    });
     lines.sort().reverse();
-    box.innerHTML = lines.length > 0 ? lines.slice(0, 30).join("<br/>") : "Keine Worker-Logs vorhanden.";
+    box.innerHTML = lines.length > 0 ? lines.slice(0, 35).join("<br/>") : "Keine Service-Logs vorhanden.";
 }
 
 function populateSimulatorSelect(streamers) {
@@ -248,6 +259,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("btnRefresh").addEventListener("click", loadOverview);
+
+    document.getElementById("btnSendTelegramReport").addEventListener("click", async () => {
+        const res = await fetch("/api/v1/telegram/send-report?hours=24", { method: "POST" });
+        const data = await res.json();
+        if (res.ok) {
+            alert(`24h-Bericht erfolgreich an Telegram (Chat ${data.chat_id}) gesendet!`);
+        } else {
+            alert(`Telegram-Versand Hinweis:\n${data.detail || "Bot nicht aktiv"}`);
+        }
+        loadOverview();
+    });
 
     document.getElementById("btnCloseDetail").addEventListener("click", () => {
         document.getElementById("streamerDetailBox").style.display = "none";

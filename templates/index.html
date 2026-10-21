@@ -13,8 +13,8 @@
             <h1>TikTok Streamer Einnahmen – FastAPI Backend &amp; Bot API</h1>
             <div class="mono">
                 TikTokLive: <strong>{{ "Aktiv" if tiktoklive_available else "Nicht verfügbar" }}</strong>
-                | Session-Cookie: <strong>{{ "Gesetzt (" ~ env_summary.tiktok_target_idc ~ ")" if env_summary.has_tiktok_session else "Anonym (nicht gesetzt)" }}</strong>
-                | Sign-Key: <strong>{{ "Gesetzt" if env_summary.has_sign_api_key else "Standard" }}</strong>
+                | Session-Cookie: <strong>{{ "Gesetzt (" ~ env_summary.tiktok_target_idc ~ ")" if env_summary.has_tiktok_session else "Anonym" }}</strong>
+                | Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong>
                 | <span id="sysWorkerInfo">Worker: 0 aktiv</span>
             </div>
         </div>
@@ -28,6 +28,7 @@
                 <option value="30d">Letzte 30 Tage</option>
             </select>
             <button type="button" id="btnRefresh">Aktualisieren</button>
+            <button type="button" id="btnSendTelegramReport" title="Sendet den 24h-Bericht sofort über den Bot">24h-Report an Telegram senden</button>
             <a class="btn-link" href="/docs" target="_blank"><strong>Swagger API Docs (/docs)</strong></a>
             <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h Bot-Report JSON</a>
             <a class="btn-link" href="/api/export/gifts.csv">CSV Export</a>
@@ -183,7 +184,7 @@
         </div>
 
         <div class="box">
-            <h2>Backend-Parameter &amp; Worker-Logs</h2>
+            <h2>Backend-Parameter &amp; Service-Logs (Worker + Telegram)</h2>
             <form id="formSettings" class="inline-form" style="margin-bottom:12px;">
                 <label>USD/Coin Netto:
                     <input type="number" step="0.0001" id="setUsdPerDiamond" style="width:70px;" required />
@@ -199,9 +200,9 @@
                 </label>
                 <button type="submit">Speichern</button>
             </form>
-            <strong>Worker-Ereignisprotokoll:</strong>
+            <strong>Service-Ereignisprotokoll:</strong>
             <div class="log-box mono" id="workerLogBox" style="margin-top:6px;">
-                Keine aktiven Worker-Logs.
+                Keine aktiven Service-Logs.
             </div>
         </div>
     </div>
