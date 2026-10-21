@@ -1,20 +1,130 @@
+:root,
+[data-theme="dark"] {
+    --bg-body: #0d1117;
+    --bg-surface: #161b22;
+    --bg-subtle: #1c2128;
+    --bg-row-even: #13181f;
+    --bg-row-hover: #21262d;
+    --bg-input: #0d1117;
+    --border-color: #30363d;
+    --border-subtle: #21262d;
+    --border-input: #3d444d;
+    --border-focus: #58a6ff;
+    --text-main: #e6edf3;
+    --text-strong: #f0f6fc;
+    --text-muted: #8b949e;
+    --link-color: #58a6ff;
+
+    --btn-bg: #21262d;
+    --btn-bg-hover: #30363d;
+    --btn-border: #3d444d;
+    --btn-text: #c9d1d9;
+
+    --btn-primary-bg: #f0f6fc;
+    --btn-primary-bg-hover: #ffffff;
+    --btn-primary-border: #f0f6fc;
+    --btn-primary-text: #0d1117;
+
+    --btn-danger-bg: rgba(248, 81, 73, 0.12);
+    --btn-danger-bg-hover: rgba(248, 81, 73, 0.24);
+    --btn-danger-border: rgba(248, 81, 73, 0.45);
+    --btn-danger-text: #ff7b72;
+
+    --tag-live-bg: rgba(46, 160, 67, 0.18);
+    --tag-live-border: #2ea043;
+    --tag-live-text: #3fb950;
+
+    --tag-poll-bg: rgba(187, 128, 9, 0.18);
+    --tag-poll-border: #d29922;
+    --tag-poll-text: #e3b341;
+
+    --tag-danger-bg: rgba(248, 81, 73, 0.18);
+    --tag-danger-border: #f85149;
+    --tag-danger-text: #ff7b72;
+
+    color-scheme: dark;
+}
+
+[data-theme="light"] {
+    --bg-body: #f4f5f7;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f6f8fa;
+    --bg-row-even: #fbfcfd;
+    --bg-row-hover: #f3f4f6;
+    --bg-input: #ffffff;
+    --border-color: #d0d7de;
+    --border-subtle: #eaeef2;
+    --border-input: #afb8c1;
+    --border-focus: #111827;
+    --text-main: #1f2328;
+    --text-strong: #111827;
+    --text-muted: #57606a;
+    --link-color: #0969da;
+
+    --btn-bg: #f6f8fa;
+    --btn-bg-hover: #eaeef2;
+    --btn-border: #afb8c1;
+    --btn-text: #24292f;
+
+    --btn-primary-bg: #1f2328;
+    --btn-primary-bg-hover: #32383f;
+    --btn-primary-border: #1f2328;
+    --btn-primary-text: #ffffff;
+
+    --btn-danger-bg: #fff5f5;
+    --btn-danger-bg-hover: #f8d7da;
+    --btn-danger-border: #f1aeb5;
+    --btn-danger-text: #a40e26;
+
+    --tag-live-bg: #dafbe1;
+    --tag-live-border: #1a7f37;
+    --tag-live-text: #116329;
+
+    --tag-poll-bg: #fff8c5;
+    --tag-poll-border: #9a6700;
+    --tag-poll-text: #7d4e00;
+
+    --tag-danger-bg: #ffebe9;
+    --tag-danger-border: #cf222e;
+    --tag-danger-text: #a40e26;
+
+    color-scheme: light;
+}
+
 * {
     box-sizing: border-box;
 }
 
 body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: #f4f5f7;
-    color: #1f2328;
+    background: var(--bg-body);
+    color: var(--text-main);
     margin: 0;
     padding: 0;
     font-size: 13.5px;
     line-height: 1.45;
 }
 
+a {
+    color: var(--link-color);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+code {
+    font-family: Consolas, Monaco, monospace;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-color);
+    padding: 1px 5px;
+    font-size: 12px;
+}
+
 .app-header {
-    background: #ffffff;
-    border-bottom: 1px solid #d0d7de;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
     padding: 12px 24px;
 }
 
@@ -40,13 +150,13 @@ body {
     font-weight: 800;
     letter-spacing: -0.3px;
     margin: 0;
-    color: #111827;
+    color: var(--text-strong);
     font-family: Consolas, Monaco, monospace;
 }
 
 .brand-subtitle {
     font-size: 12px;
-    color: #57606a;
+    color: var(--text-muted);
 }
 
 .status-strip {
@@ -63,18 +173,19 @@ body {
     padding: 3px 8px;
     font-size: 11.5px;
     font-family: Consolas, Monaco, monospace;
-    border: 1px solid #d0d7de;
-    background: #f6f8fa;
-    color: #24292f;
+    border: 1px solid var(--border-color);
+    background: var(--bg-subtle);
+    color: var(--text-main);
 }
 
 .pill strong {
     font-weight: 700;
+    color: var(--text-strong);
 }
 
 .nav-bar {
-    background: #ffffff;
-    border-bottom: 1px solid #d0d7de;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
     padding: 0 24px;
 }
 
@@ -99,20 +210,22 @@ body {
     border: none;
     border-bottom: 2px solid transparent;
     background: transparent;
-    color: #57606a;
+    color: var(--text-muted);
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
+    height: auto;
 }
 
 .tab-btn:hover {
-    color: #1f2328;
-    background: #f6f8fa;
+    color: var(--text-main);
+    background: var(--bg-subtle);
+    border-color: transparent;
 }
 
 .tab-btn.active {
-    color: #111827;
-    border-bottom-color: #111827;
+    color: var(--text-strong);
+    border-bottom-color: var(--text-strong);
 }
 
 .tab-badge {
@@ -121,9 +234,9 @@ body {
     padding: 1px 5px;
     font-size: 11px;
     font-family: Consolas, Monaco, monospace;
-    background: #eaeef2;
-    border: 1px solid #d0d7de;
-    color: #24292f;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
 }
 
 .toolbar-controls {
@@ -161,8 +274,8 @@ body {
 }
 
 .summary-box {
-    background: #ffffff;
-    border: 1px solid #d0d7de;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
     padding: 12px 14px;
 }
 
@@ -170,7 +283,7 @@ body {
     font-size: 11.5px;
     text-transform: uppercase;
     letter-spacing: 0.3px;
-    color: #57606a;
+    color: var(--text-muted);
     font-weight: 600;
 }
 
@@ -179,12 +292,12 @@ body {
     font-weight: 700;
     margin-top: 4px;
     font-family: Consolas, Monaco, monospace;
-    color: #111827;
+    color: var(--text-strong);
 }
 
 .summary-box .sub {
     font-size: 11.5px;
-    color: #6e7781;
+    color: var(--text-muted);
     margin-top: 2px;
     font-family: Consolas, Monaco, monospace;
 }
@@ -199,8 +312,8 @@ body {
 }
 
 .box {
-    background: #ffffff;
-    border: 1px solid #d0d7de;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
     padding: 14px 16px;
     margin-bottom: 16px;
 }
@@ -213,19 +326,19 @@ body {
     gap: 10px;
     padding-bottom: 10px;
     margin-bottom: 12px;
-    border-bottom: 1px solid #eaeef2;
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 h2 {
     font-size: 14.5px;
     font-weight: 700;
     margin: 0;
-    color: #1f2328;
+    color: var(--text-strong);
 }
 
 .section-hint {
     font-size: 12px;
-    color: #57606a;
+    color: var(--text-muted);
     margin-top: 2px;
 }
 
@@ -253,25 +366,30 @@ h2 {
 .field-group label {
     font-size: 11.5px;
     font-weight: 600;
-    color: #57606a;
+    color: var(--text-muted);
 }
 
 input[type="text"],
 input[type="number"],
 select {
     padding: 6px 9px;
-    border: 1px solid #afb8c1;
-    background: #ffffff;
-    color: #1f2328;
+    border: 1px solid var(--border-input);
+    background: var(--bg-input);
+    color: var(--text-main);
     font-size: 13px;
     height: 31px;
+}
+
+input[type="text"]::placeholder,
+input[type="number"]::placeholder {
+    color: var(--text-muted);
 }
 
 input[type="text"]:focus,
 input[type="number"]:focus,
 select:focus {
     outline: none;
-    border-color: #111827;
+    border-color: var(--border-focus);
 }
 
 .checkbox-label {
@@ -279,7 +397,7 @@ select:focus {
     align-items: center;
     gap: 5px;
     font-size: 12.5px;
-    color: #24292f;
+    color: var(--text-main);
     cursor: pointer;
     user-select: none;
 }
@@ -291,9 +409,9 @@ button,
     justify-content: center;
     padding: 5px 10px;
     height: 31px;
-    border: 1px solid #afb8c1;
-    background: #f6f8fa;
-    color: #24292f;
+    border: 1px solid var(--btn-border);
+    background: var(--btn-bg);
+    color: var(--btn-text);
     font-size: 12.5px;
     font-weight: 500;
     cursor: pointer;
@@ -303,8 +421,9 @@ button,
 
 button:hover,
 .btn-link:hover {
-    background: #eaeef2;
-    border-color: #8c959f;
+    background: var(--btn-bg-hover);
+    border-color: var(--text-muted);
+    text-decoration: none;
 }
 
 button.sm,
@@ -315,24 +434,25 @@ button.sm,
 }
 
 button.primary {
-    background: #1f2328;
-    color: #ffffff;
-    border-color: #1f2328;
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+    border-color: var(--btn-primary-border);
+    font-weight: 600;
 }
 
 button.primary:hover {
-    background: #32383f;
+    background: var(--btn-primary-bg-hover);
 }
 
 button.danger {
-    color: #a40e26;
-    border-color: #f1aeb5;
-    background: #fff5f5;
+    color: var(--btn-danger-text);
+    border-color: var(--btn-danger-border);
+    background: var(--btn-danger-bg);
 }
 
 button.danger:hover {
-    background: #f8d7da;
-    border-color: #dc3545;
+    background: var(--btn-danger-bg-hover);
+    border-color: var(--tag-danger-border);
 }
 
 .action-group {
@@ -354,26 +474,26 @@ table {
 
 th,
 td {
-    border: 1px solid #d8dee4;
+    border: 1px solid var(--border-color);
     padding: 7px 10px;
     text-align: left;
     vertical-align: middle;
 }
 
 th {
-    background: #f6f8fa;
+    background: var(--bg-subtle);
     font-weight: 600;
     font-size: 12px;
-    color: #24292f;
+    color: var(--text-strong);
     white-space: nowrap;
 }
 
 tbody tr:nth-child(even) {
-    background: #fbfcfd;
+    background: var(--bg-row-even);
 }
 
 tbody tr:hover {
-    background: #f3f4f6;
+    background: var(--bg-row-hover);
 }
 
 .num-col {
@@ -387,7 +507,11 @@ tbody tr:hover {
 }
 
 .muted {
-    color: #6e7781;
+    color: var(--text-muted);
+}
+
+.err-text {
+    color: var(--tag-danger-text);
 }
 
 /* Status-Badges */
@@ -397,27 +521,27 @@ tbody tr:hover {
     font-size: 11px;
     font-weight: 700;
     font-family: Consolas, Monaco, monospace;
-    border: 1px solid #afb8c1;
-    background: #f6f8fa;
-    color: #57606a;
+    border: 1px solid var(--border-input);
+    background: var(--bg-subtle);
+    color: var(--text-muted);
 }
 
 .status-tag.live {
-    background: #dafbe1;
-    border-color: #1a7f37;
-    color: #116329;
+    background: var(--tag-live-bg);
+    border-color: var(--tag-live-border);
+    color: var(--tag-live-text);
 }
 
 .status-tag.polling {
-    background: #fff8c5;
-    border-color: #9a6700;
-    color: #7d4e00;
+    background: var(--tag-poll-bg);
+    border-color: var(--tag-poll-border);
+    color: var(--tag-poll-text);
 }
 
 .status-tag.danger {
-    background: #ffebe9;
-    border-color: #cf222e;
-    color: #a40e26;
+    background: var(--tag-danger-bg);
+    border-color: var(--tag-danger-border);
+    color: var(--tag-danger-text);
 }
 
 /* Grid Layouts */
@@ -436,8 +560,9 @@ tbody tr:hover {
 .log-box {
     max-height: 360px;
     overflow-y: auto;
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--border-color);
     padding: 10px;
-    background: #f6f8fa;
+    background: var(--bg-input);
+    color: var(--text-main);
     line-height: 1.55;
 }

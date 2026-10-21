@@ -16,6 +16,18 @@ function fmtNum(v) {
     return new Intl.NumberFormat("de-DE").format(v || 0);
 }
 
+function applyTheme(theme) {
+    const normalized = theme === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", normalized);
+    try {
+        localStorage.setItem("toktracker_theme", normalized);
+    } catch (e) {}
+    const btn = document.getElementById("btnThemeToggle");
+    if (btn) {
+        btn.textContent = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
+    }
+}
+
 function switchTab(tabId) {
     document.querySelectorAll(".tab-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);
@@ -139,7 +151,7 @@ function renderStreamerTable() {
                     <td>
                         <span class="status-tag ${tagClass}">${state.toUpperCase()}</span>
                         <div class="mono muted" style="margin-top:3px;">${s.monitor_status || ""}</div>
-                        ${s.last_error ? `<div class="mono" style="color:#a40e26;">${s.last_error}</div>` : ""}
+                        ${s.last_error ? `<div class="mono err-text">${s.last_error}</div>` : ""}
                     </td>
                     <td class="num-col">
                         <strong>${fmtNum(s.current_viewers || 0)}</strong>
@@ -406,6 +418,18 @@ async function deleteStreamer(streamerId, username) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    applyTheme(currentTheme);
+
+    const themeBtn = document.getElementById("btnThemeToggle");
+    if (themeBtn) {
+        themeBtn.addEventListener("click", () => {
+            const nextTheme =
+                document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+            applyTheme(nextTheme);
+        });
+    }
+
     document.querySelectorAll(".tab-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
             switchTab(btn.getAttribute("data-tab"));

@@ -1,9 +1,17 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-theme="dark">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>toktracker – Streamer Earnings &amp; Bot Console</title>
+    <script>
+        (function () {
+            try {
+                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
+                document.documentElement.setAttribute("data-theme", savedTheme);
+            } catch (e) {}
+        })();
+    </script>
     <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -55,6 +63,7 @@
             <button type="button" id="btnRefresh">Aktualisieren</button>
             <a class="btn-link" href="/api/export/gifts.csv">CSV Export</a>
             <a class="btn-link" href="/docs" target="_blank">API Docs</a>
+            <button type="button" id="btnThemeToggle" class="mono" title="Zwischen Dark Mode und Light Mode wechseln">Theme: DARK</button>
         </div>
     </div>
 </nav>
