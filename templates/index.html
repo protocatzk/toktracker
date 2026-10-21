@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TikTok Streamer Einnahmen (Backend Console)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+<div class="container">
+    <div class="top-bar">
+        <div>
+            <h1>TikTok Streamer Einnahmen – Backend Übersicht</h1>
+            <div class="mono">
+                TikTokLive: <strong>{{ "Aktiv" if tiktoklive_available else "Nicht verfügbar" }}</strong>
+                | <span id="sysWorkerInfo">Worker: 0 aktiv</span>
+            </div>
+        </div>
+        <div class="inline-form">
+            <label for="periodSelect">Zeitraum:</label>
+            <select id="periodSelect">
+                <option value="all">Gesamt</option>
+                <option value="today">Heute</option>
+                <option value="7d">Letzte 7 Tage</option>
+                <option value="30d">Letzte 30 Tage</option>
+            </select>
+            <button type="button" id="btnRefresh">Aktualisieren</button>
+            <a class="btn-link" href="/api/export/gifts.csv">CSV Export</a>
+            <a class="btn-link" href="/api/system/status" target="_blank">JSON Diagnose</a>
+        </div>
+    </div>
+
+    <!-- Kompakte Kennzahlen -->
+    <div class="summary-bar">
+        <div class="summary-box">
+            <div class="label">Netto Creator-Auszahlung (EUR / USD)</div>
+            <div class="val" id="sumNet">0,00 € / $0.00</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Gesamt Coins / Diamonds</div>
+            <div class="val" id="sumCoins">0</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Brutto Zuschauer-Kaufwert</div>
+            <div class="val" id="sumGross">0,00 € / $0.00</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Erfasste Geschenke (Events)</div>
+            <div class="val" id="sumGifts">0</div>
+        </div>
+    </div>
+
+    <!-- Formulare: Streamer hinzufügen & Test-Gift / Kurse -->
+    <div class="row-forms">
+        <div class="box">
+            <h2>1. Streamer hinzufügen &amp; TikTokLive-Worker starten</h2>
+            <form id="formAddStreamer" class="inline-form">
+                <input type="text" id="inputUsername" placeholder="@username" required />
+                <label>
+                    <input type="checkbox" id="checkAutoTrack" checked />
+                    Worker direkt starten
+                </label>
+                <label title="Prüft automatisch weiter, falls Streamer aktuell offline ist">
+                    <input type="checkbox" id="checkAutoReconnect" checked />
+                    Auto-Poll / Reconnect
+                </label>
+                <button type="submit" class="primary">Hinzufügen</button>
+            </form>
+        </div>
+
+        <div class="box">
+            <h2>2. Manuelles Gift / Test-Event buchen</h2>
+            <form id="formSimulateGift" class="inline-form">
+                <select id="simStreamerSelect" required>
+                    <option value="">Streamer...</option>
+                </select>
+                <select id="simGiftSelect">
+                    {% for g in gift_catalog %}
+                    <option value="{{ g.name }}" data-diamonds="{{ g.diamonds }}">
+                        {{ g.name }} ({{ g.diamonds }} Coins)
+                    </option>
+                    {% endfor %}
+                </select>
+                <input type="number" id="simRepeatCount" value="1" min="1" max="9999" style="width:65px;" title="Anzahl" />
+                <input type="text" id="simSender" placeholder="Sender @user" style="width:110px;" />
+                <button type="submit">Buchen</button>
+                <button type="button" id="btnSeedDemo">Demo+</button>
+                <button type="button" id="btnClearDemo" class="danger">Demo löschen</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Haupttabelle: Streamer Einnahmen -->
+    <div class="box">
+        <h2>Streamer Einnahmen &amp; Worker-Status</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Streamer</th>
+                    <th>Live / Worker-Status</th>
+                    <th>Zuschauer</th>
+                    <th>Coins / Diamonds</th>
+                    <th>Netto (EUR)</th>
+                    <th>Netto (USD)</th>
+                    <th>Brutto (EUR)</th>
+                    <th>Top Gift / Top Gifter</th>
+                    <th>Steuerung</th>
+                </tr>
+            </thead>
+            <tbody id="streamerTableBody">
+                <tr><td colspan="10">Lade Daten...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Detail-Ansicht für ausgewählten Streamer (wird bei Klick eingeblendet) -->
+    <div class="box" id="streamerDetailBox" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 id="detailTitle" style="margin:0;">Streamer Detail-Auswertung</h2>
+            <button type="button" id="btnCloseDetail">Schließen</button>
+        </div>
+        <div class="grid-2">
+            <div>
+                <strong>Geschenke-Aufschlüsselung</strong>
+                <table style="margin-top:6px;">
+                    <thead>
+                        <tr>
+                            <th>Gift</th>
+                            <th>Anzahl</th>
+                            <th>Coins</th>
+                            <th>Netto EUR</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailGiftsBody"></tbody>
+                </table>
+            </div>
+            <div>
+                <strong>Top Spender (Gifter) &amp; Stream-Sessions</strong>
+                <table style="margin-top:6px;">
+                    <thead>
+                        <tr>
+                            <th>Sender</th>
+                            <th>Gifts</th>
+                            <th>Coins</th>
+                            <th>Netto EUR</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailGiftersBody"></tbody>
+                </table>
+                <div style="margin-top:10px;">
+                    <strong>Letzte Stream-Sessions:</strong>
+                    <div id="detailSessionsList" class="mono" style="margin-top:4px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Untere Tabellen: Live Gift-Log & Kurse/Einstellungen -->
+    <div class="grid-2">
+        <div class="box">
+            <h2>Letzte Gift-Events (Datenbank-Log)</h2>
+            <div class="log-box">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Zeit</th>
+                            <th>Streamer</th>
+                            <th>Sender</th>
+                            <th>Gift</th>
+                            <th>Coins</th>
+                            <th>Netto EUR</th>
+                            <th>Quelle</th>
+                        </tr>
+                    </thead>
+                    <tbody id="giftLogBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="box">
+            <h2>Backend-Parameter &amp; Worker-Logs</h2>
+            <form id="formSettings" class="inline-form" style="margin-bottom:12px;">
+                <label>USD/Coin Netto:
+                    <input type="number" step="0.0001" id="setUsdPerDiamond" style="width:75px;" required />
+                </label>
+                <label>USD/Coin Brutto:
+                    <input type="number" step="0.0001" id="setGrossUsdPerCoin" style="width:75px;" required />
+                </label>
+                <label>USD→EUR:
+                    <input type="number" step="0.001" id="setUsdToEur" style="width:65px;" required />
+                </label>
+                <label>Poll (s):
+                    <input type="number" id="setPollInterval" style="width:55px;" required />
+                </label>
+                <button type="submit">Speichern</button>
+            </form>
+            <strong>Worker-Ereignisprotokoll:</strong>
+            <div class="log-box mono" id="workerLogBox" style="margin-top:6px;">
+                Keine aktiven Worker-Logs.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
