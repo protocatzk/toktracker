@@ -14,6 +14,7 @@
         })();
     </script>
     <link rel="stylesheet" href="/static/style.css" />
+    <script src="/static/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -49,6 +50,9 @@
         <div class="tab-list" role="tablist">
             <button type="button" class="tab-btn active" data-tab="tab-streamers">
                 Streamer &amp; Einnahmen <span class="tab-badge" id="badgeStreamers">0</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="tab-analytics" id="tabBtnAnalytics">
+                Graphen &amp; Analytics <span class="tab-badge" id="badgeAnalytics">Live</span>
             </button>
             <button type="button" class="tab-btn" data-tab="tab-gifts">
                 Gift-Protokoll &amp; Buchung <span class="tab-badge" id="badgeGifts">0</span>
@@ -208,6 +212,241 @@
                         <div id="detailSessionsList" class="log-box mono" style="margin-top:6px; max-height:140px;"></div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB: GRAPHEN & DETAILLIERTE ANALYTICS                      -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-analytics">
+        <!-- Filter- & Scope-Leiste -->
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Streamer-Graphen &amp; Detaillierte Auswertungen</h2>
+                    <div class="section-hint">Interaktive Verlaufskurven, Whale-Konzentration, Peak Hours und Performance-Metriken.</div>
+                </div>
+                <div class="inline-form">
+                    <label for="selectAnalyticsStreamer" class="mono muted">Streamer:</label>
+                    <select id="selectAnalyticsStreamer" style="min-width:240px;">
+                        <option value="all">Alle überwachten Streamer (Vergleich &amp; Gesamt)</option>
+                    </select>
+                    <label for="selectAnalyticsPeriod" class="mono muted">Zeitraum:</label>
+                    <select id="selectAnalyticsPeriod">
+                        <option value="all">Gesamt (All-Time)</option>
+                        <option value="24h" selected>Letzte 24 Stunden</option>
+                        <option value="today">Heute</option>
+                        <option value="7d">Letzte 7 Tage</option>
+                        <option value="30d">Letzte 30 Tage</option>
+                    </select>
+                    <button type="button" id="btnRefreshAnalytics" class="primary">Aktualisieren</button>
+                </div>
+            </div>
+            <div id="anStreamerMetaBanner" class="mono muted" style="display:none; font-size:12px; margin-top:2px;">
+                <span id="anStreamerMeta"></span>
+            </div>
+        </div>
+
+        <!-- Scope-spezifische KPI Summary Cards -->
+        <div class="summary-bar" style="margin-bottom:12px;">
+            <div class="summary-box">
+                <div class="label">Netto Creator-Erlös</div>
+                <div class="val" id="anNetEur">0,00 €</div>
+                <div class="sub" id="anNetUsd">$0.00 USD (Brutto: <span id="anGrossEur">0,00 €</span>)</div>
+            </div>
+            <div class="summary-box">
+                <div class="label">Coins / Diamonds</div>
+                <div class="val" id="anCoins">0</div>
+                <div class="sub" id="anAvgCoinsPerGift">Ø 0 Coins pro Gift</div>
+            </div>
+            <div class="summary-box">
+                <div class="label">Geschenke &amp; Events</div>
+                <div class="val" id="anGiftsCount">0 Gifts</div>
+                <div class="sub" id="anGiftEventsCount">0 Transaktionen</div>
+            </div>
+            <div class="summary-box">
+                <div class="label">Supporter (Gifter)</div>
+                <div class="val" id="anUniqueGifters">0 Spender</div>
+                <div class="sub" id="anAvgPerGifter">Ø 0,00 € pro Spender</div>
+            </div>
+        </div>
+
+        <!-- Mini KPI Bar: Whale-Konzentration & Stream-Sessions -->
+        <div class="summary-bar" style="margin-bottom:16px;">
+            <div class="summary-box">
+                <div class="label">Top-1 Whale Anteil</div>
+                <div class="val" id="anWhaleTop1">0.0%</div>
+                <div class="sub">Umsatzanteil des #1 Spenders</div>
+            </div>
+            <div class="summary-box">
+                <div class="label">Top-3 Whale Anteil</div>
+                <div class="val" id="anWhaleTop3">0.0%</div>
+                <div class="sub">Umsatzanteil der Top 3 Spender</div>
+            </div>
+            <div class="summary-box">
+                <div class="label">Top-5 Whale Anteil</div>
+                <div class="val" id="anWhaleTop5">0.0%</div>
+                <div class="sub">Umsatzanteil der Top 5 Spender</div>
+            </div>
+            <div class="summary-box">
+                <div class="label">Stream-Sessions &amp; Laufzeit</div>
+                <div class="val" id="anSessionsCount">0 Sessions</div>
+                <div class="sub" id="anStreamDuration">0 Std. Gesamt-Laufzeit</div>
+            </div>
+        </div>
+
+        <!-- 1. Haupt-Graph: Chronologischer Verlauf -->
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2 id="timelineChartTitle">Einnahmen- &amp; Coin-Verlauf im Zeitfenster</h2>
+                    <div class="section-hint" id="timelineChartSubtitle">Chronologische Entwicklung der Einnahmen und Geschenke über die Zeit.</div>
+                </div>
+                <div class="action-group">
+                    <button type="button" class="sm" id="btnTimelineToggleMetric">Metrik: Coins &amp; EUR</button>
+                </div>
+            </div>
+            <div class="chart-container" style="position:relative; height:300px; width:100%;">
+                <canvas id="chartTimeline"></canvas>
+            </div>
+        </div>
+
+        <!-- 2. Grid-2: Streamer-Ranking/Vergleich & Peak Hours (Tageszeit) -->
+        <div class="grid-2">
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2 id="compareChartTitle">Streamer-Umsatz-Ranking</h2>
+                        <div class="section-hint" id="compareChartSubtitle">Verteilung der generierten Coins unter den überwachten Streamern.</div>
+                    </div>
+                </div>
+                <div class="chart-container" style="position:relative; height:280px; width:100%;">
+                    <canvas id="chartCompare"></canvas>
+                </div>
+            </div>
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Umsatz nach Tageszeit (Peak Hours)</h2>
+                        <div class="section-hint">Stundenverteilung (00:00 - 23:00 Uhr): Wann wird am meisten gespendet?</div>
+                    </div>
+                </div>
+                <div class="chart-container" style="position:relative; height:280px; width:100%;">
+                    <canvas id="chartTimeOfDay"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Grid-2: Top Geschenke & Top Spender Charts -->
+        <div class="grid-2">
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Top Geschenke (Coin-Volumen &amp; Verteilung)</h2>
+                        <div class="section-hint">Die Geschenke mit dem höchsten generierten Umsatzvolumen.</div>
+                    </div>
+                </div>
+                <div class="chart-container" style="position:relative; height:280px; width:100%;">
+                    <canvas id="chartGiftDist"></canvas>
+                </div>
+            </div>
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Top Spender &amp; Whales (Leaderboard)</h2>
+                        <div class="section-hint">Größte Supporter nach absolutem Spendenwert im gewählten Zeitraum.</div>
+                    </div>
+                </div>
+                <div class="chart-container" style="position:relative; height:280px; width:100%;">
+                    <canvas id="chartTopGifters"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Grid-2: Detaillierte Auswertungs-Tabellen -->
+        <div class="grid-2">
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Top Supporter &amp; Whale-Auswertung</h2>
+                        <span class="mono muted" id="anGiftersTableMeta">0 Spender</span>
+                    </div>
+                </div>
+                <div class="table-wrap" style="max-height:360px; overflow-y:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:40px;">Rang</th>
+                                <th>Spender</th>
+                                <th class="num-col">Gifts</th>
+                                <th class="num-col">Coins</th>
+                                <th class="num-col">Netto EUR</th>
+                                <th class="num-col">Anteil</th>
+                            </tr>
+                        </thead>
+                        <tbody id="anGiftersTableBody">
+                            <tr><td colspan="6" class="muted">Keine Daten geladen.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Beliebteste Geschenke Detailanalyse</h2>
+                        <span class="mono muted" id="anGiftsTableMeta">0 Geschenke</span>
+                    </div>
+                </div>
+                <div class="table-wrap" style="max-height:360px; overflow-y:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Geschenk</th>
+                                <th class="num-col">Wert</th>
+                                <th class="num-col">Anzahl</th>
+                                <th class="num-col">Coins</th>
+                                <th class="num-col">Netto EUR</th>
+                                <th class="num-col">Anteil</th>
+                            </tr>
+                        </thead>
+                        <tbody id="anGiftsTableBody">
+                            <tr><td colspan="6" class="muted">Keine Daten geladen.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Aufgezeichnete Live-Sessions & Hourly Performance Run-Rate -->
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Aufgezeichnete Live-Sessions &amp; Hourly Run-Rate</h2>
+                    <div class="section-hint">Übersicht aller Live-Streams mit ermittelter Dauer, Peak-Zuschauern und Coins pro Stunde.</div>
+                </div>
+                <span class="mono muted" id="anSessionsTableMeta">0 Sessions</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:50px;">ID</th>
+                            <th>Streamer</th>
+                            <th>Startzeitpunkt</th>
+                            <th class="num-col">Dauer</th>
+                            <th class="num-col">Peak Viewers</th>
+                            <th>Status</th>
+                            <th class="num-col">Coins</th>
+                            <th class="num-col">Netto EUR</th>
+                            <th class="num-col">Coins / Stunde</th>
+                        </tr>
+                    </thead>
+                    <tbody id="anSessionsTableBody">
+                        <tr><td colspan="9" class="muted">Keine Sessions vorhanden.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </section>

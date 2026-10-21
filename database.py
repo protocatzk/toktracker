@@ -1408,6 +1408,398 @@ def get_streamer_detail(streamer_id: int, period: str = "all") -> Optional[Dict[
         }
 
 
+def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -> Dict[str, Any]:
+    """
+    Liefert detaillierte Analytics und aggregierte Kennzahlen für Charts:
+    - Gesamt-KPIs (Netto/Brutto, Coins, Gifts, Unique Gifters, Averages)
+    - Whale-Konzentrationsmetriken (Top 1, Top 3, Top 5 Spenderanteil)
+    - Chronologischer Einnahmen-Verlauf (stündlich bei 24h/today, täglich bei 7d/30d/all)
+    - Multi-Streamer-Timeline-Vergleich für Top-Streamer (wenn kein Einzelstreamer gewählt)
+    - Tageszeit-Aktivitätsmuster (00:00 - 23:00 Uhr)
+    - Top Geschenke Verteilung (Doughnut/Pie & Tabelle)
+    - Top Spender & Supporter Ranking (Bar-Chart & Tabelle)
+    - Streamer-Vergleich (Ranking & Einnahmenverteilung)
+    - Stream-Sessions Historie mit berechneter Dauer und Hourly Run-Rate (Coins/h)
+    """
+    cutoff = _get_period_cutoff(period)
+    cfg = get_settings()
+
+    with get_db() as conn:
+        # 1. Streamer-Details, falls ein spezifischer Streamer gewählt wurde
+        selected_streamer = None
+        if streamer_id:
+            s_row = conn.execute(
+                "SELECT * FROM streamers WHERE id = ?", (streamer_id,)
+            ).fetchone()
+            if s_row:
+                selected_streamer = dict(s_row)
+            else:
+                streamer_id = None
+
+        # 2. Aggregierte Gesamt-Metriken im gewählten Zeitraum & Scope
+        agg_row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(total_coins), 0) AS total_coins,
+                COALESCE(SUM(repeat_count), 0) AS total_gifts_sent,
+                COUNT(id) AS gift_events_count,
+                COUNT(DISTINCT sender_username) AS unique_gifters
+            FROM gift_events
+            WHERE (? IS NULL OR streamer_id = ?)
+              AND (? IS NULL OR created_at >= ?)
+            """,
+            (streamer_id, streamer_id, cutoff, cutoff),
+        ).fetchone()
+
+        total_coins = int(agg_row["total_coins"] or 0)
+        total_gifts = int(agg_row["total_gifts_sent"] or 0)
+        gift_events_cnt = int(agg_row["gift_events_count"] or 0)
+        unique_gifters = int(agg_row["unique_gifters"] or 0)
+
+        usd_net = round(total_coins * cfg["usd_per_diamond"], 2)
+        eur_net = round(usd_net * cfg["usd_to_eur_rate"], 2)
+        usd_gross = round(total_coins * cfg["gross_usd_per_coin"], 2)
+        eur_gross = round(usd_gross * cfg["usd_to_eur_rate"], 2)
+
+        avg_coins_per_gift = round(total_coins / total_gifts, 1) if total_gifts > 0 else 0.0
+        avg_coins_per_gifter = round(total_coins / unique_gifters, 1) if unique_gifters > 0 else 0.0
+        avg_eur_per_gifter = round(eur_net / unique_gifters, 2) if unique_gifters > 0 else 0.0
+
+        # 3. Top Spender & Supporter-Ranking sowie Whale-Konzentration
+        top_gifters_rows = conn.execute(
+            """
+            SELECT
+                sender_username,
+                MAX(sender_nickname) AS sender_nickname,
+                MAX(is_super_fan) AS is_super_fan,
+                SUM(total_coins) AS total_coins,
+                SUM(repeat_count) AS gifts_sent,
+                COUNT(id) AS transactions
+            FROM gift_events
+            WHERE (? IS NULL OR streamer_id = ?)
+              AND (? IS NULL OR created_at >= ?)
+            GROUP BY sender_username
+            ORDER BY total_coins DESC
+            LIMIT 25
+            """,
+            (streamer_id, streamer_id, cutoff, cutoff),
+        ).fetchall()
+
+        top_gifters = []
+        top1_coins = 0
+        top3_coins = 0
+        top5_coins = 0
+        for idx, tg in enumerate(top_gifters_rows):
+            c = int(tg["total_coins"] or 0)
+            u_net = round(c * cfg["usd_per_diamond"], 2)
+            e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+            pct = round((c / total_coins * 100), 1) if total_coins > 0 else 0.0
+            if idx == 0:
+                top1_coins += c
+            if idx < 3:
+                top3_coins += c
+            if idx < 5:
+                top5_coins += c
+            top_gifters.append({
+                "rank": idx + 1,
+                "sender_username": tg["sender_username"],
+                "sender_nickname": tg["sender_nickname"] or tg["sender_username"],
+                "is_super_fan": bool(tg["is_super_fan"]),
+                "total_coins": c,
+                "usd_net": u_net,
+                "eur_net": e_net,
+                "gifts_sent": int(tg["gifts_sent"] or 0),
+                "transactions": int(tg["transactions"] or 0),
+                "pct_of_total": pct,
+            })
+
+        whale_share_top1 = round((top1_coins / total_coins * 100), 1) if total_coins > 0 else 0.0
+        whale_share_top3 = round((top3_coins / total_coins * 100), 1) if total_coins > 0 else 0.0
+        whale_share_top5 = round((top5_coins / total_coins * 100), 1) if total_coins > 0 else 0.0
+
+        # 4. Top Geschenke-Aufschlüsselung
+        top_gifts_rows = conn.execute(
+            """
+            SELECT
+                MAX(gift_id) AS gift_id,
+                gift_name,
+                diamond_count,
+                SUM(repeat_count) AS total_quantity,
+                SUM(total_coins) AS total_coins,
+                COUNT(id) AS events_count
+            FROM gift_events
+            WHERE (? IS NULL OR streamer_id = ?)
+              AND (? IS NULL OR created_at >= ?)
+            GROUP BY gift_name, diamond_count
+            ORDER BY total_coins DESC
+            LIMIT 20
+            """,
+            (streamer_id, streamer_id, cutoff, cutoff),
+        ).fetchall()
+
+        top_gifts = []
+        for g in top_gifts_rows:
+            c = int(g["total_coins"] or 0)
+            u_net = round(c * cfg["usd_per_diamond"], 2)
+            e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+            pct = round((c / total_coins * 100), 1) if total_coins > 0 else 0.0
+            top_gifts.append({
+                "gift_id": g["gift_id"],
+                "gift_name": g["gift_name"],
+                "diamond_count": int(g["diamond_count"] or 0),
+                "total_quantity": int(g["total_quantity"] or 0),
+                "total_coins": c,
+                "usd_net": u_net,
+                "eur_net": e_net,
+                "events_count": int(g["events_count"] or 0),
+                "pct_of_total": pct,
+            })
+
+        # 5. Tageszeit-Aktivitätsmuster (00:00 - 23:00 Uhr)
+        tod_rows = conn.execute(
+            """
+            SELECT
+                CAST(SUBSTR(created_at, 12, 2) AS INTEGER) AS hour_of_day,
+                SUM(total_coins) AS coins,
+                COUNT(id) AS events_count
+            FROM gift_events
+            WHERE (? IS NULL OR streamer_id = ?)
+              AND (? IS NULL OR created_at >= ?)
+            GROUP BY CAST(SUBSTR(created_at, 12, 2) AS INTEGER)
+            ORDER BY hour_of_day ASC
+            """,
+            (streamer_id, streamer_id, cutoff, cutoff),
+        ).fetchall()
+
+        tod_map = {int(r["hour_of_day"]): (int(r["coins"] or 0), int(r["events_count"] or 0)) for r in tod_rows}
+        time_of_day = []
+        for h in range(24):
+            c, ev = tod_map.get(h, (0, 0))
+            u_net = round(c * cfg["usd_per_diamond"], 2)
+            e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+            time_of_day.append({
+                "hour": h,
+                "label": f"{h:02d}:00",
+                "coins": c,
+                "eur_net": e_net,
+                "events_count": ev,
+            })
+
+        # 6. Chronologischer Einnahmen-Verlauf (Timeline)
+        is_hourly = period in ("24h", "today")
+        substr_len = 13 if is_hourly else 10
+
+        timeline_rows = conn.execute(
+            f"""
+            SELECT
+                SUBSTR(created_at, 1, {substr_len}) AS bucket,
+                COALESCE(SUM(total_coins), 0) AS coins,
+                COUNT(id) AS events_count,
+                COUNT(DISTINCT sender_username) AS unique_gifters
+            FROM gift_events
+            WHERE (? IS NULL OR streamer_id = ?)
+              AND (? IS NULL OR created_at >= ?)
+            GROUP BY SUBSTR(created_at, 1, {substr_len})
+            ORDER BY bucket ASC
+            """,
+            (streamer_id, streamer_id, cutoff, cutoff),
+        ).fetchall()
+
+        timeline = []
+        for tr in timeline_rows:
+            b = tr["bucket"]
+            c = int(tr["coins"] or 0)
+            u_net = round(c * cfg["usd_per_diamond"], 2)
+            e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+            if is_hourly:
+                parts = b.replace("T", " ").split(" ")
+                time_part = f"{parts[1]}:00" if len(parts) > 1 else b
+                label = time_part if period == "today" else f"{parts[0][5:]} {time_part}"
+            else:
+                label = f"{b[8:10]}.{b[5:7]}." if len(b) >= 10 else b
+
+            timeline.append({
+                "bucket": b,
+                "label": label,
+                "coins": c,
+                "eur_net": e_net,
+                "events_count": int(tr["events_count"] or 0),
+                "unique_gifters": int(tr["unique_gifters"] or 0),
+            })
+
+        # 7. Streamer Ranking & Vergleich
+        streamer_ranking_rows = conn.execute(
+            """
+            SELECT
+                s.id,
+                s.username,
+                s.display_name,
+                s.avatar_url,
+                s.follower_count,
+                s.current_viewers,
+                s.is_live,
+                s.is_tracking,
+                COALESCE(SUM(g.total_coins), 0) AS total_coins,
+                COUNT(g.id) AS gift_events_count,
+                COALESCE(SUM(g.repeat_count), 0) AS total_gifts_sent,
+                COUNT(DISTINCT g.sender_username) AS unique_gifters
+            FROM streamers s
+            LEFT JOIN gift_events g
+                ON g.streamer_id = s.id AND (? IS NULL OR g.created_at >= ?)
+            GROUP BY s.id
+            ORDER BY total_coins DESC, s.username ASC
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+
+        streamers_ranking = []
+        top_streamer_ids = []
+        for sr in streamer_ranking_rows:
+            c = int(sr["total_coins"] or 0)
+            u_net = round(c * cfg["usd_per_diamond"], 2)
+            e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+            pct = round((c / total_coins * 100), 1) if (total_coins > 0 and not streamer_id) else (100.0 if c > 0 else 0.0)
+            streamers_ranking.append({
+                "id": sr["id"],
+                "username": sr["username"],
+                "display_name": sr["display_name"] or sr["username"],
+                "avatar_url": sr["avatar_url"] or "",
+                "follower_count": int(sr["follower_count"] or 0),
+                "current_viewers": int(sr["current_viewers"] or 0),
+                "is_live": bool(sr["is_live"]),
+                "is_tracking": bool(sr["is_tracking"]),
+                "total_coins": c,
+                "eur_net": e_net,
+                "usd_net": u_net,
+                "gift_events_count": int(sr["gift_events_count"] or 0),
+                "total_gifts_sent": int(sr["total_gifts_sent"] or 0),
+                "unique_gifters": int(sr["unique_gifters"] or 0),
+                "pct_of_total": pct,
+            })
+            if c > 0 and len(top_streamer_ids) < 5:
+                top_streamer_ids.append(sr["id"])
+
+        # 8. Multi-Streamer-Timeline-Vergleich für die Top 5 Streamer (wenn Gesamtansicht)
+        multi_streamer_datasets = []
+        if not streamer_id and top_streamer_ids and timeline:
+            buckets = [t["bucket"] for t in timeline]
+            for sid in top_streamer_ids:
+                s_meta = next((s for s in streamers_ranking if s["id"] == sid), None)
+                if not s_meta:
+                    continue
+                s_rows = conn.execute(
+                    f"""
+                    SELECT
+                        SUBSTR(created_at, 1, {substr_len}) AS bucket,
+                        COALESCE(SUM(total_coins), 0) AS coins
+                    FROM gift_events
+                    WHERE streamer_id = ? AND (? IS NULL OR created_at >= ?)
+                    GROUP BY SUBSTR(created_at, 1, {substr_len})
+                    """,
+                    (sid, cutoff, cutoff),
+                ).fetchall()
+                s_map = {r["bucket"]: int(r["coins"] or 0) for r in s_rows}
+                series_data = [s_map.get(b, 0) for b in buckets]
+                multi_streamer_datasets.append({
+                    "streamer_id": sid,
+                    "username": s_meta["username"],
+                    "display_name": s_meta["display_name"],
+                    "data": series_data,
+                })
+
+        # 9. Aufgezeichnete Sessions & Hourly Run-Rates
+        sessions_rows = conn.execute(
+            """
+            SELECT
+                ss.*,
+                s.username AS streamer_username,
+                s.display_name AS streamer_display_name,
+                COALESCE(SUM(g.total_coins), 0) AS session_coins,
+                COUNT(g.id) AS session_gifts
+            FROM stream_sessions ss
+            JOIN streamers s ON s.id = ss.streamer_id
+            LEFT JOIN gift_events g ON g.session_id = ss.id
+            WHERE (? IS NULL OR ss.streamer_id = ?)
+              AND (? IS NULL OR ss.started_at >= ?)
+            GROUP BY ss.id
+            ORDER BY ss.started_at DESC, ss.id DESC
+            LIMIT 25
+            """,
+            (streamer_id, streamer_id, cutoff, cutoff),
+        ).fetchall()
+
+        now_dt = datetime.now()
+        sessions = []
+        total_session_minutes = 0
+        for sr in sessions_rows:
+            c = int(sr["session_coins"] or 0)
+            u_net = round(c * cfg["usd_per_diamond"], 2)
+            e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+
+            start_str = sr["started_at"]
+            end_str = sr["ended_at"]
+            duration_mins = 0
+            try:
+                s_dt = datetime.fromisoformat(start_str)
+                e_dt = datetime.fromisoformat(end_str) if end_str else now_dt
+                duration_mins = max(1, int(round((e_dt - s_dt).total_seconds() / 60)))
+            except Exception:
+                duration_mins = 0
+
+            total_session_minutes += duration_mins
+            coins_per_hour = round(c / (duration_mins / 60)) if duration_mins > 0 else c
+
+            sessions.append({
+                "id": sr["id"],
+                "streamer_id": sr["streamer_id"],
+                "streamer_username": sr["streamer_username"],
+                "streamer_display_name": sr["streamer_display_name"] or sr["streamer_username"],
+                "room_id": sr["room_id"],
+                "title": sr["title"],
+                "started_at": sr["started_at"],
+                "ended_at": sr["ended_at"],
+                "duration_minutes": duration_mins,
+                "peak_viewers": int(sr["peak_viewers"] or 0),
+                "status": sr["status"],
+                "session_coins": c,
+                "eur_net": e_net,
+                "usd_net": u_net,
+                "session_gifts": int(sr["session_gifts"] or 0),
+                "coins_per_hour": coins_per_hour,
+            })
+
+    return {
+        "period": period,
+        "selected_streamer_id": streamer_id,
+        "selected_streamer": selected_streamer,
+        "totals": {
+            "total_coins": total_coins,
+            "eur_net": eur_net,
+            "usd_net": usd_net,
+            "eur_gross": eur_gross,
+            "usd_gross": usd_gross,
+            "total_gifts_sent": total_gifts,
+            "gift_events_count": gift_events_cnt,
+            "unique_gifters": unique_gifters,
+            "avg_coins_per_gift": avg_coins_per_gift,
+            "avg_coins_per_gifter": avg_coins_per_gifter,
+            "avg_eur_per_gifter": avg_eur_per_gifter,
+            "whale_share_top1_pct": whale_share_top1,
+            "whale_share_top3_pct": whale_share_top3,
+            "whale_share_top5_pct": whale_share_top5,
+            "sessions_count": len(sessions),
+            "total_stream_minutes": total_session_minutes,
+        },
+        "timeline": timeline,
+        "multi_streamer_datasets": multi_streamer_datasets,
+        "time_of_day": time_of_day,
+        "top_gifts": top_gifts,
+        "top_gifters": top_gifters,
+        "streamers_ranking": streamers_ranking,
+        "sessions": sessions,
+    }
+
+
 def build_streamer_bot_report(
     streamer_row: Dict[str, Any],
     hours: int = 24,

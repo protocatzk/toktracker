@@ -17,6 +17,7 @@ from database import (
     clear_demo_data,
     delete_streamer,
     delete_telegram_user,
+    get_analytics_data,
     get_dashboard_overview,
     get_db,
     get_settings,
@@ -554,6 +555,17 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
     data["system"] = sys_diag
     data["gift_catalog"] = TIKTOK_GIFT_CATALOG
     return data
+
+
+@app.get("/api/analytics", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/analytics", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_analytics(
+    streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID für Einzelanalyse (sonst alle Streamer)"),
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+):
+    init_db()
+    monitor_manager.autostart_from_db()
+    return get_analytics_data(streamer_id=streamer_id, period=period)
 
 
 @app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
