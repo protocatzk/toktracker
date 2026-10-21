@@ -16,7 +16,6 @@ from database import (
     clear_demo_data,
     delete_streamer,
     delete_telegram_user,
-    get_auto_monitor_streamers,
     get_dashboard_overview,
     get_db,
     get_settings,
@@ -67,8 +66,9 @@ TIKTOK_GIFT_CATALOG = [
 async def lifespan(app_instance: FastAPI):
     """
     FastAPI Lifespan:
-    1. Initialisiert die SQLite-Datenbank
-    2. Startet alle TikTokLive-Worker für Streamer mit auto_monitor=1
+    1. Initialisiert die Datenbank (SQLite oder MySQL)
+    2. Startet automatisch alle TikTokLive-Worker für Streamer, die in der DB mit
+       auto_monitor=1 oder is_tracking=1 markiert sind
     3. Startet optional den Telegram-Bot-Service (fehlertolerant isoliert: falls der Bot
        nicht starten kann, laufen FastAPI und das Web-Interface garantiert trotzdem weiter)
     """
@@ -78,8 +78,7 @@ async def lifespan(app_instance: FastAPI):
         if count == 0:
             seed_demo_data()
 
-    for s in get_auto_monitor_streamers():
-        monitor_manager.start_tracking(s["id"], s["username"], auto_reconnect=True)
+    monitor_manager.autostart_from_db()
 
     await telegram_bot_service.start()
 
@@ -138,6 +137,7 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index(request: Request):
     init_db()
+    monitor_manager.autostart_from_db()
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -283,6 +283,7 @@ async def api_v1_streamer_single_report(
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
     init_db()
+    monitor_manager.autostart_from_db()
     data = get_dashboard_overview(period=period)
     for s in data["streamers"]:
         uname = s["username"]

@@ -33,6 +33,7 @@ except ImportError:
 from config import config
 from database import (
     end_stream_session,
+    get_auto_monitor_streamers,
     get_settings,
     record_gift_event,
     start_stream_session,
@@ -259,6 +260,7 @@ class StreamerWorker:
             authenticated_session=config.has_tiktok_session,
         )
         self._stop_event = threading.Event()
+        self._preserve_db_state = False
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -313,6 +315,7 @@ class StreamerWorker:
                 self.diag.auto_reconnect = auto_reconnect
             if self.is_alive():
                 return
+            self._preserve_db_state = False
             self._stop_event.clear()
             self._thread = threading.Thread(
                 target=self._thread_main,
@@ -321,9 +324,16 @@ class StreamerWorker:
             )
             self._thread.start()
 
-    def stop(self) -> None:
-        self._stop_event.set()
+    def stop(self, preserve_db_state: bool = False) -> None:
+        """
+        Stoppt den Worker.
+        - `preserve_db_state=False` (Manueller Stop durch Nutzer): Deaktiviert `is_tracking` und `auto_monitor` in der DB.
+        - `preserve_db_state=True` (Server-Shutdown / Restart): Lässt `auto_monitor` und `is_tracking` in der DB unverändert,
+          damit der Streamer beim nächsten Programmstart automatisch wieder aufgezeichnet wird.
+        """
         with self._lock:
+            self._preserve_db_state = preserve_db_state
+            self._stop_event.set()
             self.diag.state = "stopped"
             client = self._client
             loop = self._loop
@@ -339,14 +349,22 @@ class StreamerWorker:
             end_stream_session(self.streamer_id, self.diag.session_id)
             self.diag.session_id = None
 
-        update_streamer_runtime_state(
-            self.username,
-            is_live=False,
-            is_tracking=False,
-            auto_monitor=False,
-            current_viewers=0,
-        )
-        self._log("INFO", "Worker gestoppt.")
+        if preserve_db_state:
+            update_streamer_runtime_state(
+                self.username,
+                is_live=False,
+                current_viewers=0,
+            )
+            self._log("INFO", "Worker für Server-Stopp angehalten (Auto-Start bleibt in DB aktiv).")
+        else:
+            update_streamer_runtime_state(
+                self.username,
+                is_live=False,
+                is_tracking=False,
+                auto_monitor=False,
+                current_viewers=0,
+            )
+            self._log("INFO", "Worker manuell gestoppt (Auto-Start deaktiviert).")
 
     def _thread_main(self) -> None:
         loop = asyncio.new_event_loop()
@@ -363,12 +381,19 @@ class StreamerWorker:
             if self.diag.session_id:
                 end_stream_session(self.streamer_id, self.diag.session_id)
                 self.diag.session_id = None
-            update_streamer_runtime_state(
-                self.username,
-                is_live=False,
-                is_tracking=False,
-                current_viewers=0,
-            )
+            if self._preserve_db_state:
+                update_streamer_runtime_state(
+                    self.username,
+                    is_live=False,
+                    current_viewers=0,
+                )
+            else:
+                update_streamer_runtime_state(
+                    self.username,
+                    is_live=False,
+                    is_tracking=False if not self.diag.auto_reconnect else None,
+                    current_viewers=0,
+                )
             with self._lock:
                 self._client = None
                 self._loop = None
@@ -908,6 +933,7 @@ class StreamerMonitorManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._workers: Dict[str, StreamerWorker] = {}
+        self._autostart_done = False
 
     def is_tracking(self, username: str) -> bool:
         clean = username.strip().lstrip("@").lower()
@@ -944,6 +970,36 @@ class StreamerMonitorManager:
             "workers": snapshots,
         }
 
+    def autostart_from_db(self, force: bool = False) -> List[str]:
+        """
+        Startet beim Programmstart automatisch alle Streamer, die in der Datenbank
+        mit `auto_monitor = 1` oder `is_tracking = 1` markiert sind.
+        """
+        with self._lock:
+            if self._autostart_done and not force:
+                return []
+            self._autostart_done = True
+
+        marked_streamers = get_auto_monitor_streamers()
+        if not marked_streamers:
+            logger.info("Auto-Start: Keine markierten Streamer in der Datenbank gefunden.")
+            return []
+
+        started_usernames: List[str] = []
+        for s in marked_streamers:
+            uname = str(s["username"]).strip().lstrip("@").lower()
+            if not self.is_tracking(uname):
+                self.start_tracking(int(s["id"]), uname, auto_reconnect=True)
+                started_usernames.append(uname)
+
+        if started_usernames:
+            logger.info(
+                "Auto-Start: Aufzeichnung für %d markierte Streamer aus der DB gestartet: %s",
+                len(started_usernames),
+                ", ".join(f"@{u}" for u in started_usernames),
+            )
+        return started_usernames
+
     def start_tracking(
         self, streamer_id: int, username: str, auto_reconnect: bool = True
     ) -> Dict[str, Any]:
@@ -953,6 +1009,13 @@ class StreamerMonitorManager:
                 "ok": False,
                 "message": "TikTokLive-Bibliothek ist nicht installiert.",
             }
+
+        # Sofort in der Datenbank als aktiv / Auto-Monitor markieren
+        update_streamer_runtime_state(
+            clean,
+            is_tracking=True,
+            auto_monitor=bool(auto_reconnect),
+        )
 
         with self._lock:
             worker = self._workers.get(clean)
@@ -982,7 +1045,15 @@ class StreamerMonitorManager:
             worker = self._workers.get(clean)
 
         if worker:
-            worker.stop()
+            worker.stop(preserve_db_state=False)
+        else:
+            update_streamer_runtime_state(
+                clean,
+                is_live=False,
+                is_tracking=False,
+                auto_monitor=False,
+                current_viewers=0,
+            )
 
         return {
             "ok": True,
@@ -990,10 +1061,15 @@ class StreamerMonitorManager:
         }
 
     def stop_all(self) -> None:
+        """
+        Wird beim Beenden / Neustarten des Servers aufgerufen.
+        Beendet alle laufenden Worker-Verbindungen sauber, behält aber die
+        Markierung (`auto_monitor = 1` / `is_tracking = 1`) in der Datenbank bei!
+        """
         with self._lock:
             workers = list(self._workers.values())
         for w in workers:
-            w.stop()
+            w.stop(preserve_db_state=True)
 
 
 monitor_manager = StreamerMonitorManager()

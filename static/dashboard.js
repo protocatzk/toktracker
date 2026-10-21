@@ -132,6 +132,11 @@ function renderStreamerTable() {
             if (state === "connected" || s.is_live) tagClass = "live";
             else if (state === "polling_offline" || state === "connecting" || state === "backoff") tagClass = "polling";
 
+            const isAutoMarked = Boolean(s.auto_monitor || s.is_tracking);
+            const autoBadge = isAutoMarked
+                ? `<span class="status-tag live" title="In Datenbank für automatische Aufzeichnung beim Programmstart markiert">AUTO-START</span>`
+                : `<span class="status-tag" title="Kein Auto-Start beim Programmstart">MANUELL</span>`;
+
             const topGift = s.top_gift
                 ? `${s.top_gift.gift_name} (${fmtNum(s.top_gift.coins)})`
                 : "-";
@@ -149,7 +154,10 @@ function renderStreamerTable() {
                         <div class="mono muted">@${s.username}${s.room_id ? ` · Room ${s.room_id}` : ""}</div>
                     </td>
                     <td>
-                        <span class="status-tag ${tagClass}">${state.toUpperCase()}</span>
+                        <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+                            <span class="status-tag ${tagClass}">${state.toUpperCase()}</span>
+                            ${autoBadge}
+                        </div>
                         <div class="mono muted" style="margin-top:3px;">${s.monitor_status || ""}</div>
                         ${s.last_error ? `<div class="mono err-text">${s.last_error}</div>` : ""}
                     </td>

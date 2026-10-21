@@ -776,9 +776,17 @@ def get_streamer_by_id_or_username(identifier: str | int) -> Optional[Dict[str, 
 
 
 def get_auto_monitor_streamers() -> List[Dict[str, Any]]:
+    """
+    Liefert alle Streamer zurück, die in der Datenbank für die automatische Aufzeichnung
+    markiert sind (`auto_monitor = 1` oder `is_tracking = 1`).
+    Synchronisiert dabei `auto_monitor = 1`, damit der Status konsistent bleibt.
+    """
     with get_db() as conn:
+        conn.execute(
+            "UPDATE streamers SET auto_monitor = 1 WHERE is_tracking = 1 AND auto_monitor = 0"
+        )
         rows = conn.execute(
-            "SELECT * FROM streamers WHERE auto_monitor = 1"
+            "SELECT * FROM streamers WHERE auto_monitor = 1 OR is_tracking = 1 ORDER BY id ASC"
         ).fetchall()
         return [dict(r) for r in rows]
 
