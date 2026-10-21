@@ -215,7 +215,9 @@ def _init_mysql_schema() -> None:
         # Falls der MySQL-User keine CREATE DATABASE Rechte hat und die DB bereits existiert, normal fortfahren
         pass
 
-    with get_db() as conn:
+    raw_conn = _open_mysql_connection(include_db=True)
+    conn = MySQLConnectionWrapper(raw_conn)
+    try:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS settings (
@@ -368,6 +370,9 @@ def _init_mysql_schema() -> None:
         _ensure_column_mysql(conn, "tiktok_battles", "opponent3_avatar_url", "TEXT")
         _ensure_column_mysql(conn, "tiktok_battles", "opponent3_score", "BIGINT DEFAULT 0")
         _ensure_column_mysql(conn, "tiktok_battles", "streamer_rank", "INT DEFAULT 0")
+        conn.commit()
+    finally:
+        raw_conn.close()
 
 
 def _init_sqlite_schema() -> None:
