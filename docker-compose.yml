@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # 1. TokTracker Web Dashboard & Worker Service
+  # ============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: toktracker_app
+    restart: unless-stopped
+    expose:
+      - "5000"
+    env_file:
+      - .env
+    environment:
+      - APP_HOST=0.0.0.0
+      - APP_PORT=5000
+      - DB_ENGINE=mysql
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+      # Automatische Konfiguration für Nginx Reverse Proxy & Let's Encrypt
+      - VIRTUAL_HOST=${DOMAIN_NAME}
+      - VIRTUAL_PORT=5000
+      - LETSENCRYPT_HOST=${DOMAIN_NAME}
+      - LETSENCRYPT_EMAIL=${SSL_EMAIL}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - toktracker_net
+
+  # ============================================================================
+  # 2. MariaDB Datenbank (Produktion)
+  # ============================================================================
+  db:
+    image: mariadb:11
+    container_name: toktracker_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_change_me_in_production}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-toktracker}
+      MYSQL_USER: ${MYSQL_USER:-toktracker_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-user_change_me_in_production}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - toktracker_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 3. Nginx Reverse Proxy (Öffentlich erreichbar über Port 80 & 443)
+  # ============================================================================
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:alpine
+    container_name: toktracker_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certs:/etc/nginx/certs:ro
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - toktracker_net
+    depends_on:
+      - app
+
+  # ============================================================================
+  # 4. Let's Encrypt SSL Companion (Automatisches Zertifikat & Auto-Renewal)
+  # ============================================================================
+  acme-companion:
+    image: nginxproxy/acme-companion:latest
+    container_name: toktracker_ssl
+    restart: unless-stopped
+    volumes_from:
+      - nginx-proxy
+    volumes:
+      - certs:/etc/nginx/certs:rw
+      - acme:/etc/acme.sh
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DEFAULT_EMAIL=${SSL_EMAIL}
+      - NGINX_PROXY_CONTAINER=toktracker_nginx
+    networks:
+      - toktracker_net
+    depends_on:
+      - nginx-proxy
+
+networks:
+  toktracker_net:
+    driver: bridge
+
+volumes:
+  mariadb_data:
+    driver: local
+  certs:
+    driver: local
+  vhost:
+    driver: local
+  html:
+    driver: local
+  acme:
+    driver: local
