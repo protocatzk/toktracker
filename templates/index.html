@@ -3,210 +3,414 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TikTok Streamer Einnahmen (FastAPI Backend Console)</title>
+    <title>toktracker – Streamer Earnings &amp; Bot Console</title>
     <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-<div class="container">
-    <div class="top-bar">
-        <div>
-            <h1>TikTok Streamer Einnahmen – FastAPI Backend &amp; Bot API</h1>
-            <div class="mono">
-                TikTokLive: <strong>{{ "Aktiv" if tiktoklive_available else "Nicht verfügbar" }}</strong>
-                | Session-Cookie: <strong>{{ "Gesetzt (" ~ env_summary.tiktok_target_idc ~ ")" if env_summary.has_tiktok_session else "Anonym" }}</strong>
-                | Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong>
-                | <span id="sysWorkerInfo">Worker: 0 aktiv</span>
-            </div>
+
+<!-- Kopfbereich: Branding & Systemstatus-Pills -->
+<header class="app-header">
+    <div class="header-inner">
+        <div class="brand-block">
+            <h1 class="brand-title">toktracker</h1>
+            <span class="brand-subtitle">TikTok Live Earnings &amp; Telegram Bot Backend</span>
         </div>
-        <div class="inline-form">
-            <label for="periodSelect">Zeitraum:</label>
+        <div class="status-strip">
+            <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
+            <span class="pill">Session: <strong>{{ env_summary.tiktok_target_idc | upper if env_summary.has_tiktok_session else "ANONYM" }}</strong></span>
+            <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
+            <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
+            <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
+        </div>
+    </div>
+</header>
+
+<!-- Navigationsleiste & Globale Zeitraum-Steuerung -->
+<nav class="nav-bar">
+    <div class="nav-inner">
+        <div class="tab-list" role="tablist">
+            <button type="button" class="tab-btn active" data-tab="tab-streamers">
+                Streamer &amp; Einnahmen <span class="tab-badge" id="badgeStreamers">0</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="tab-gifts">
+                Gift-Protokoll &amp; Buchung <span class="tab-badge" id="badgeGifts">0</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="tab-telegram">
+                Telegram-Bot &amp; Whitelist <span class="tab-badge" id="badgeTgUsers">0</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="tab-system">
+                System, Kurse &amp; Logs
+            </button>
+        </div>
+
+        <div class="toolbar-controls">
+            <label for="periodSelect" class="mono muted">Zeitraum:</label>
             <select id="periodSelect">
-                <option value="all">Gesamt</option>
-                <option value="24h">Letzte 24h (Bot-Fenster)</option>
+                <option value="all">Gesamt (All-Time)</option>
+                <option value="24h">Letzte 24 Stunden</option>
                 <option value="today">Heute</option>
                 <option value="7d">Letzte 7 Tage</option>
                 <option value="30d">Letzte 30 Tage</option>
             </select>
             <button type="button" id="btnRefresh">Aktualisieren</button>
-            <button type="button" id="btnSendTelegramReport" title="Sendet den 24h-Bericht sofort über den Bot">24h-Report an Telegram senden</button>
-            <a class="btn-link" href="/docs" target="_blank"><strong>Swagger API Docs (/docs)</strong></a>
-            <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h Bot-Report JSON</a>
             <a class="btn-link" href="/api/export/gifts.csv">CSV Export</a>
+            <a class="btn-link" href="/docs" target="_blank">API Docs</a>
         </div>
     </div>
+</nav>
 
-    <!-- Kompakte Kennzahlen -->
+<main class="container">
+    <!-- Globale KPI-Übersicht -->
     <div class="summary-bar">
         <div class="summary-box">
-            <div class="label">Netto Creator-Auszahlung (EUR / USD)</div>
-            <div class="val" id="sumNet">0,00 € / $0.00</div>
+            <div class="label">Netto Creator-Auszahlung</div>
+            <div class="val" id="sumNetEur">0,00 €</div>
+            <div class="sub" id="sumNetUsd">$0.00 USD</div>
         </div>
         <div class="summary-box">
             <div class="label">Gesamt Coins / Diamonds</div>
             <div class="val" id="sumCoins">0</div>
+            <div class="sub" id="sumStreamersSub">0 Streamer (0 LIVE)</div>
         </div>
         <div class="summary-box">
             <div class="label">Brutto Zuschauer-Kaufwert</div>
-            <div class="val" id="sumGross">0,00 € / $0.00</div>
+            <div class="val" id="sumGrossEur">0,00 €</div>
+            <div class="sub" id="sumGrossUsd">$0.00 USD</div>
         </div>
         <div class="summary-box">
-            <div class="label">Erfasste Geschenke (Events)</div>
-            <div class="val" id="sumGifts">0</div>
+            <div class="label">Erfasste Geschenke</div>
+            <div class="val" id="sumGiftsSent">0</div>
+            <div class="sub" id="sumGiftEvents">0 Transaktionen</div>
         </div>
     </div>
 
-    <!-- Formulare: Streamer hinzufügen & Test-Gift / Kurse -->
-    <div class="row-forms">
+    <!-- ========================================================= -->
+    <!-- TAB 1: STREAMER & EINNAHMEN                               -->
+    <!-- ========================================================= -->
+    <section class="tab-panel active" id="tab-streamers">
+        <!-- Streamer anlegen & Filter -->
         <div class="box">
-            <h2>1. Streamer hinzufügen &amp; TikTokLive-Worker starten</h2>
+            <div class="box-header">
+                <div>
+                    <h2>Streamer überwachen</h2>
+                    <div class="section-hint">Fügt ein TikTok-Profil hinzu und startet optional den Hintergrund-Worker.</div>
+                </div>
+                <div class="inline-form">
+                    <input type="text" id="inputStreamerFilter" placeholder="Tabelle filtern..." style="width:190px;" />
+                </div>
+            </div>
             <form id="formAddStreamer" class="inline-form">
-                <input type="text" id="inputUsername" placeholder="@username (z.B. montanablack)" required />
-                <label>
+                <input type="text" id="inputUsername" placeholder="TikTok Benutzername" style="width:230px;" required />
+                <input type="text" id="inputDisplayName" placeholder="Anzeigename (optional)" style="width:190px;" />
+                <label class="checkbox-label">
                     <input type="checkbox" id="checkAutoTrack" checked />
                     Worker direkt starten
                 </label>
-                <label title="Prüft automatisch weiter, falls Streamer aktuell offline ist">
+                <label class="checkbox-label" title="Prüft automatisch weiter, falls der Streamer aktuell offline ist">
                     <input type="checkbox" id="checkAutoReconnect" checked />
                     Auto-Poll / Reconnect
                 </label>
-                <button type="submit" class="primary">Hinzufügen</button>
+                <button type="submit" class="primary">Streamer hinzufügen</button>
             </form>
         </div>
 
+        <!-- Haupttabelle Streamer -->
         <div class="box">
-            <h2>2. Manuelles Gift / Test-Event buchen</h2>
+            <div class="box-header">
+                <h2>Überwachte Streamer &amp; Einnahmen</h2>
+                <span class="mono muted" id="streamerTableMeta">0 Einträge</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:48px;">ID</th>
+                            <th>Streamer</th>
+                            <th>Worker / Live-Status</th>
+                            <th class="num-col">Zuschauer</th>
+                            <th class="num-col">Coins</th>
+                            <th class="num-col">Netto (EUR)</th>
+                            <th class="num-col">Netto (USD)</th>
+                            <th class="num-col">Brutto (EUR)</th>
+                            <th>Top Gift / Top Spender</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="streamerTableBody">
+                        <tr><td colspan="10">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Detail-Ansicht für ausgewählten Streamer -->
+        <div class="box" id="streamerDetailBox" style="display:none;">
+            <div class="box-header">
+                <div>
+                    <h2 id="detailTitle">Streamer Detail-Auswertung</h2>
+                    <div class="section-hint mono" id="detailSubtitle"></div>
+                </div>
+                <button type="button" id="btnCloseDetail">Auswertung schließen</button>
+            </div>
+            <div class="grid-2">
+                <div>
+                    <strong class="mono">Geschenke-Aufschlüsselung</strong>
+                    <div class="table-wrap" style="margin-top:6px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Gift</th>
+                                    <th class="num-col">Anzahl</th>
+                                    <th class="num-col">Coins</th>
+                                    <th class="num-col">Netto EUR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailGiftsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <strong class="mono">Top Spender (Gifter)</strong>
+                    <div class="table-wrap" style="margin-top:6px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Spender</th>
+                                    <th class="num-col">Gifts</th>
+                                    <th class="num-col">Coins</th>
+                                    <th class="num-col">Netto EUR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailGiftersBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <strong class="mono">Aufgezeichnete Stream-Sessions:</strong>
+                        <div id="detailSessionsList" class="log-box mono" style="margin-top:6px; max-height:140px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB 2: GIFT-PROTOKOLL & MANUELLE BUCHUNG                  -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-gifts">
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Manuelles Gift / Test-Transaktion buchen</h2>
+                    <div class="section-hint">Erzeugt einen Datenbank-Eintrag zur Prüfung von Umrechnungskursen und Bot-Berichten.</div>
+                </div>
+                <div class="action-group">
+                    <button type="button" id="btnSeedDemo">Demo-Daten laden</button>
+                    <button type="button" id="btnClearDemo" class="danger">Demo-Daten entfernen</button>
+                </div>
+            </div>
             <form id="formSimulateGift" class="inline-form">
-                <select id="simStreamerSelect" required>
-                    <option value="">Streamer...</option>
+                <select id="simStreamerSelect" required style="min-width:170px;">
+                    <option value="">Streamer wählen</option>
                 </select>
-                <select id="simGiftSelect">
+                <select id="simGiftSelect" style="min-width:190px;">
                     {% for g in gift_catalog %}
                     <option value="{{ g.name }}" data-diamonds="{{ g.diamonds }}">
                         {{ g.name }} ({{ g.diamonds }} Coins)
                     </option>
                     {% endfor %}
                 </select>
-                <input type="number" id="simRepeatCount" value="1" min="1" max="9999" style="width:65px;" title="Anzahl" />
-                <input type="text" id="simSender" placeholder="Sender @user" style="width:110px;" />
-                <button type="submit">Buchen</button>
-                <button type="button" id="btnSeedDemo">Demo+</button>
-                <button type="button" id="btnClearDemo" class="danger">Demo löschen</button>
+                <input type="number" id="simRepeatCount" value="1" min="1" max="9999" style="width:80px;" title="Anzahl" />
+                <input type="text" id="simSender" placeholder="Absender Benutzername" style="width:180px;" />
+                <button type="submit" class="primary">Transaktion buchen</button>
             </form>
         </div>
-    </div>
 
-    <!-- Haupttabelle: Streamer Einnahmen -->
-    <div class="box">
-        <h2>Streamer Einnahmen &amp; Worker-Status</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Streamer</th>
-                    <th>Live / Worker-Status</th>
-                    <th>Zuschauer</th>
-                    <th>Coins / Diamonds</th>
-                    <th>Netto (EUR)</th>
-                    <th>Netto (USD)</th>
-                    <th>Brutto (EUR)</th>
-                    <th>Top Gift / Top Gifter</th>
-                    <th>Steuerung &amp; Bot-Endpoint</th>
-                </tr>
-            </thead>
-            <tbody id="streamerTableBody">
-                <tr><td colspan="10">Lade Daten...</td></tr>
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Detail-Ansicht für ausgewählten Streamer -->
-    <div class="box" id="streamerDetailBox" style="display:none;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <h2 id="detailTitle" style="margin:0;">Streamer Detail-Auswertung</h2>
-            <button type="button" id="btnCloseDetail">Schließen</button>
-        </div>
-        <div class="grid-2">
-            <div>
-                <strong>Geschenke-Aufschlüsselung</strong>
-                <table style="margin-top:6px;">
-                    <thead>
-                        <tr>
-                            <th>Gift</th>
-                            <th>Anzahl</th>
-                            <th>Coins</th>
-                            <th>Netto EUR</th>
-                        </tr>
-                    </thead>
-                    <tbody id="detailGiftsBody"></tbody>
-                </table>
-            </div>
-            <div>
-                <strong>Top Spender (Gifter) &amp; Stream-Sessions</strong>
-                <table style="margin-top:6px;">
-                    <thead>
-                        <tr>
-                            <th>Sender</th>
-                            <th>Gifts</th>
-                            <th>Coins</th>
-                            <th>Netto EUR</th>
-                        </tr>
-                    </thead>
-                    <tbody id="detailGiftersBody"></tbody>
-                </table>
-                <div style="margin-top:10px;">
-                    <strong>Letzte Stream-Sessions:</strong>
-                    <div id="detailSessionsList" class="mono" style="margin-top:4px;"></div>
+        <div class="box">
+            <div class="box-header">
+                <h2>Letzte Gift-Transaktionen (Datenbank-Log)</h2>
+                <div class="inline-form">
+                    <input type="text" id="inputGiftFilter" placeholder="Transaktionen filtern..." style="width:200px;" />
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Untere Tabellen: Live Gift-Log & Kurse/Einstellungen -->
-    <div class="grid-2">
-        <div class="box">
-            <h2>Letzte Gift-Events (Datenbank-Log)</h2>
-            <div class="log-box">
+            <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th>Zeit</th>
+                            <th>Zeitpunkt</th>
                             <th>Streamer</th>
-                            <th>Sender</th>
-                            <th>Gift</th>
-                            <th>Coins</th>
-                            <th>Netto EUR</th>
+                            <th>Absender</th>
+                            <th>Geschenk</th>
+                            <th class="num-col">Coins</th>
+                            <th class="num-col">Netto (EUR)</th>
+                            <th class="num-col">Netto (USD)</th>
                             <th>Quelle</th>
                         </tr>
                     </thead>
-                    <tbody id="giftLogBody"></tbody>
+                    <tbody id="giftLogBody">
+                        <tr><td colspan="8">Keine Transaktionen geladen.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB 3: TELEGRAM-BOT & ZUGRIFFSKONTROLLE (WHITELIST)       -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-telegram">
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Telegram-Bot Steuerung &amp; Zugriffsmodus</h2>
+                    <div class="section-hint">
+                        Im Modus <strong>WHITELIST</strong> können nur freigeschaltete Nutzer (im Privatchat und in Gruppen) Befehle ausführen.
+                        Im Modus <strong>PUBLIC</strong> sind Abfrage-Befehle für alle Telegram-Nutzer offen, während Verwaltungsbefehle auf Admins beschränkt bleiben.
+                    </div>
+                </div>
+                <div class="inline-form">
+                    <button type="button" id="btnSendTelegramReport" class="primary">24h-Bericht jetzt an Telegram senden</button>
+                    <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h-Report JSON</a>
+                </div>
+            </div>
+
+            <div class="inline-form" style="justify-content:space-between;">
+                <div class="inline-form">
+                    <label for="selectTelegramMode"><strong>Aktiver Bot-Zugriffsmodus:</strong></label>
+                    <select id="selectTelegramMode">
+                        <option value="whitelist">WHITELIST – Nur freigeschaltete Personen (@username / ID)</option>
+                        <option value="public">PUBLIC – Für alle Telegram-Nutzer geöffnet</option>
+                    </select>
+                </div>
+                <div class="mono muted">
+                    Bot-Befehle für Admins im Chat: <code>/allow</code>, <code>/revoke</code>, <code>/users</code>, <code>/mode</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Berechtigte Personen &amp; Offene Zugriffsanfragen</h2>
+                    <div class="section-hint">Personen können per Telegram User-ID oder @username freigeschaltet werden (gilt für Privatchats und Gruppen).</div>
+                </div>
+            </div>
+
+            <form id="formAddTelegramUser" class="inline-form" style="margin-bottom:14px;">
+                <input type="text" id="inputTgIdentifier" placeholder="Telegram-ID oder @username" style="width:240px;" required />
+                <input type="text" id="inputTgName" placeholder="Name oder Notiz" style="width:190px;" />
+                <select id="selectTgRole">
+                    <option value="user">Rolle: Nutzer (Abfragen)</option>
+                    <option value="admin">Rolle: Admin (Vollzugriff)</option>
+                </select>
+                <button type="submit" class="primary">Freischalten</button>
+            </form>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Telegram User-ID</th>
+                            <th>@Username / Name</th>
+                            <th>Rolle</th>
+                            <th>Status</th>
+                            <th>Notiz / Herkunft</th>
+                            <th>Zuletzt aktiv</th>
+                            <th>Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="telegramUsersBody">
+                        <tr><td colspan="7">Keine Einträge vorhanden.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB 4: SYSTEM, KURSE & SERVICE-LOGS                       -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-system">
+        <div class="grid-2">
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Umrechnungskurse &amp; Worker-Parameter</h2>
+                        <div class="section-hint">Berechnungsgrundlage für alle Netto- und Brutto-Auszahlungswerte.</div>
+                    </div>
+                </div>
+                <form id="formSettings" class="form-grid">
+                    <div class="field-group">
+                        <label for="setUsdPerDiamond">Netto USD pro Coin/Diamond</label>
+                        <input type="number" step="0.0001" id="setUsdPerDiamond" required />
+                    </div>
+                    <div class="field-group">
+                        <label for="setGrossUsdPerCoin">Brutto USD pro Coin</label>
+                        <input type="number" step="0.0001" id="setGrossUsdPerCoin" required />
+                    </div>
+                    <div class="field-group">
+                        <label for="setUsdToEur">Wechselkurs USD → EUR</label>
+                        <input type="number" step="0.001" id="setUsdToEur" required />
+                    </div>
+                    <div class="field-group">
+                        <label for="setPollInterval">Offline-Poll-Intervall (Sek.)</label>
+                        <input type="number" id="setPollInterval" min="15" required />
+                    </div>
+                    <div class="field-group">
+                        <button type="submit" class="primary">Parameter speichern</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>REST-API Endpoints (toktracker v1)</h2>
+                        <div class="section-hint">Direkte JSON-Schnittstellen für externe Services &amp; Automationen.</div>
+                    </div>
+                </div>
+                <table>
+                    <tbody>
+                        <tr>
+                            <td class="mono">GET /api/v1/reports/daily?hours=24</td>
+                            <td>Vollständiger 24h-Gesamtbericht (JSON + Telegram HTML/Markdown)</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">GET /api/v1/streamers/{name}/report</td>
+                            <td>Einzelabfrage für einen Streamer per @username oder ID</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">GET /api/v1/telegram/users</td>
+                            <td>Liste aller Telegram-Nutzer, Rollen &amp; Zugriffsmodus</td>
+                        </tr>
+                        <tr>
+                            <td class="mono">GET /api/v1/system/status</td>
+                            <td>Echtzeit-Diagnose aller TikTokLive-Worker &amp; des Telegram-Bots</td>
+                        </tr>
+                    </tbody>
                 </table>
             </div>
         </div>
 
         <div class="box">
-            <h2>Backend-Parameter &amp; Service-Logs (Worker + Telegram)</h2>
-            <form id="formSettings" class="inline-form" style="margin-bottom:12px;">
-                <label>USD/Coin Netto:
-                    <input type="number" step="0.0001" id="setUsdPerDiamond" style="width:70px;" required />
-                </label>
-                <label>USD/Coin Brutto:
-                    <input type="number" step="0.0001" id="setGrossUsdPerCoin" style="width:70px;" required />
-                </label>
-                <label>USD→EUR:
-                    <input type="number" step="0.001" id="setUsdToEur" style="width:60px;" required />
-                </label>
-                <label>Poll (s):
-                    <input type="number" id="setPollInterval" style="width:55px;" required />
-                </label>
-                <button type="submit">Speichern</button>
-            </form>
-            <strong>Service-Ereignisprotokoll:</strong>
-            <div class="log-box mono" id="workerLogBox" style="margin-top:6px;">
-                Keine aktiven Service-Logs.
+            <div class="box-header">
+                <div>
+                    <h2>Service-Ereignisprotokoll (TikTokLive-Worker &amp; Telegram-Bot)</h2>
+                    <div class="section-hint">Zeigt Verbindungsstatus, Reconnects und Autorisierungs-Events in Echtzeit.</div>
+                </div>
+                <div class="inline-form">
+                    <select id="selectLogSource">
+                        <option value="all">Quelle: Alle Services</option>
+                        <option value="TikTok">Nur TikTokLive-Worker</option>
+                        <option value="TelegramBot">Nur Telegram-Bot</option>
+                    </select>
+                </div>
+            </div>
+            <div class="log-box mono" id="workerLogBox">
+                Keine Service-Logs vorhanden.
             </div>
         </div>
-    </div>
-</div>
+    </section>
+</main>
 
 <script src="/static/dashboard.js"></script>
 </body>

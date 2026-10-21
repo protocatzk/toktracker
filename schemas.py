@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 
 class StreamerCreateRequest(BaseModel):
-    username: str = Field(..., description="TikTok @username (mit oder ohne @)", examples=["montanablack"])
+    username: str = Field(..., description="TikTok @username (mit oder ohne @)")
     display_name: Optional[str] = Field(None, description="Optionaler Anzeigename")
     auto_track: bool = Field(True, description="Startet sofort den Hintergrund-Worker für diesen Streamer")
     auto_reconnect: bool = Field(True, description="Überwacht den Streamer dauerhaft (Auto-Polling wenn offline)")
@@ -22,16 +22,34 @@ class GiftCreateRequest(BaseModel):
     repeat_count: int = Field(1, ge=1, description="Anzahl (Combo/Streak)")
     sender_username: str = Field("live_viewer", description="@username des Spenders")
     sender_nickname: Optional[str] = Field(None, description="Anzeigename des Spenders")
-    source: str = Field("manual", description="Quelle des Eintrags (z.B. manual, webhook, tiktoklive)")
+    source: str = Field("manual", description="Quelle des Eintrags (manual, webhook, tiktoklive)")
 
 
 class SettingsUpdateRequest(BaseModel):
-    usd_per_diamond: Optional[float] = Field(None, gt=0, description="Netto-Auszahlung in USD pro Coin/Diamond (Standard: 0.005)")
-    gross_usd_per_coin: Optional[float] = Field(None, gt=0, description="Brutto-Zuschauerkaufpreis in USD pro Coin (Standard: 0.0106)")
-    usd_to_eur_rate: Optional[float] = Field(None, gt=0, description="Wechselkurs USD zu EUR (z.B. 0.92)")
+    usd_per_diamond: Optional[float] = Field(None, gt=0, description="Netto-Auszahlung in USD pro Coin/Diamond")
+    gross_usd_per_coin: Optional[float] = Field(None, gt=0, description="Brutto-Zuschauerkaufpreis in USD pro Coin")
+    usd_to_eur_rate: Optional[float] = Field(None, gt=0, description="Wechselkurs USD zu EUR")
     currency_primary: Optional[str] = Field(None, description="'EUR' oder 'USD'")
     poll_interval_seconds: Optional[int] = Field(None, ge=15, description="Polling-Intervall in Sekunden für Offline-Streamer")
     api_key: Optional[str] = Field(None, description="Optionaler API-Key für externe Bot-Zugriffe (leer = deaktiviert)")
+    telegram_access_mode: Optional[str] = Field(
+        None,
+        description="Telegram-Bot Zugriffsmodus: 'whitelist' (nur freigeschaltete Personen) oder 'public' (alle Nutzer)",
+    )
+
+
+class TelegramUserPermissionRequest(BaseModel):
+    identifier: str = Field(
+        ...,
+        description="Telegram User-ID oder @username",
+    )
+    role: str = Field("user", description="Rolle: 'user' (Lesezugriff) oder 'admin' (Vollzugriff)")
+    is_allowed: int = Field(
+        1,
+        description="1 = Freigeschaltet, 0 = Wartend/Entzogen, -1 = Gesperrt (auch im Public-Modus blockiert)",
+    )
+    first_name: Optional[str] = Field(None, description="Optionaler Name / Beschreibung")
+    note: Optional[str] = Field(None, description="Optionale Notiz")
 
 
 class GiftStatItem(BaseModel):

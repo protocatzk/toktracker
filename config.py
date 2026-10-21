@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional, Set
 from dotenv import load_dotenv
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +17,12 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 6:
         return "***"
     return f"{value[:3]}...{value[-3:]}"
+
+
+def _parse_csv_list(raw: str) -> List[str]:
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 @dataclass
@@ -45,9 +51,13 @@ class AppConfig:
     tiktok_web_proxy: Optional[str] = os.getenv("TIKTOK_WEB_PROXY", "").strip() or None
     tiktok_ws_proxy: Optional[str] = os.getenv("TIKTOK_WS_PROXY", "").strip() or None
 
-    # Telegram Bot Vorbereitung (optional für direkten Versand oder Bot-Prozess)
+    # Telegram Bot Konfiguration & Zugriffskontrolle
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    # Zugriffsmodus: "whitelist" (nur freigeschaltete Nutzer/Admins per @username oder ID) oder "public" (für alle Nutzer offen)
+    telegram_access_mode: str = os.getenv("TELEGRAM_ACCESS_MODE", "whitelist").strip().lower()
+    # Kommagetrennte Telegram User-IDs oder [@]usernames aus der .env (Initial-Admins / erlaubte Nutzer)
+    telegram_allowed_users_raw: str = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
 
     @property
     def has_tiktok_session(self) -> bool:
@@ -61,6 +71,30 @@ class AppConfig:
     def has_api_key(self) -> bool:
         return bool(self.api_key)
 
+    @property
+    def env_allowed_telegram_ids(self) -> Set[int]:
+        ids: Set[int] = set()
+        for item in _parse_csv_list(self.telegram_allowed_users_raw):
+            clean = item.lstrip("@").strip()
+            if clean.lstrip("-").isdigit():
+                ids.add(int(clean))
+        # Falls TELEGRAM_CHAT_ID eine persönliche User-ID (> 0) ist, ebenfalls als Admin-ID aufnehmen.
+        # (Negative IDs sind Gruppen-/Supergruppen-IDs für den 24h-Report, sodass in Gruppen weiterhin die User-Whitelist gilt.)
+        if self.telegram_chat_id and self.telegram_chat_id.lstrip("-").isdigit():
+            cid = int(self.telegram_chat_id)
+            if cid > 0:
+                ids.add(cid)
+        return ids
+
+    @property
+    def env_allowed_telegram_usernames(self) -> Set[str]:
+        names: Set[str] = set()
+        for item in _parse_csv_list(self.telegram_allowed_users_raw):
+            clean = item.lstrip("@").strip().lower()
+            if clean and not clean.lstrip("-").isdigit():
+                names.add(clean)
+        return names
+
     def public_summary(self) -> dict:
         """Gibt eine sichere, maskierte Übersicht für das Dashboard/Diagnose-JSON zurück (ohne Klartext-Secrets)."""
         return {
@@ -72,7 +106,8 @@ class AppConfig:
             "sign_api_key_masked": _mask_secret(self.tiktok_sign_api_key),
             "has_api_key_protection": self.has_api_key,
             "has_web_proxy": bool(self.tiktok_web_proxy),
-            "has_telegram_config": bool(self.telegram_bot_token and self.telegram_chat_id),
+            "has_telegram_config": bool(self.telegram_bot_token),
+            "telegram_access_mode": self.telegram_access_mode,
         }
 
 

@@ -1,4 +1,8 @@
 let currentPeriod = "all";
+let cachedStreamers = [];
+let cachedGifts = [];
+let cachedWorkers = [];
+let cachedTgLogs = [];
 
 function fmtEUR(v) {
     return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(v || 0);
@@ -12,20 +16,38 @@ function fmtNum(v) {
     return new Intl.NumberFormat("de-DE").format(v || 0);
 }
 
+function switchTab(tabId) {
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);
+    });
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === tabId);
+    });
+}
+
 async function loadOverview() {
     try {
         const res = await fetch(`/api/overview?period=${encodeURIComponent(currentPeriod)}`);
         const data = await res.json();
 
-        const t = data.totals;
-        document.getElementById("sumNet").textContent = `${fmtEUR(t.eur_net)} / ${fmtUSD(t.usd_net)}`;
+        const t = data.totals || {};
+        document.getElementById("sumNetEur").textContent = fmtEUR(t.eur_net);
+        document.getElementById("sumNetUsd").textContent = `${fmtUSD(t.usd_net)} USD`;
         document.getElementById("sumCoins").textContent = fmtNum(t.total_coins);
-        document.getElementById("sumGross").textContent = `${fmtEUR(t.eur_gross)} / ${fmtUSD(t.usd_gross)}`;
-        document.getElementById("sumGifts").textContent = `${fmtNum(t.total_gifts_sent)} (${fmtNum(t.gift_events_count)} Events)`;
+        document.getElementById("sumStreamersSub").textContent =
+            `${fmtNum(t.streamer_count)} Streamer (${fmtNum(t.live_count)} LIVE)`;
+        document.getElementById("sumGrossEur").textContent = fmtEUR(t.eur_gross);
+        document.getElementById("sumGrossUsd").textContent = `${fmtUSD(t.usd_gross)} USD`;
+        document.getElementById("sumGiftsSent").textContent = fmtNum(t.total_gifts_sent);
+        document.getElementById("sumGiftEvents").textContent = `${fmtNum(t.gift_events_count)} Transaktionen`;
+
+        document.getElementById("badgeStreamers").textContent = fmtNum(t.streamer_count || 0);
+        document.getElementById("badgeGifts").textContent = fmtNum(t.gift_events_count || 0);
+        document.getElementById("badgeTgUsers").textContent = fmtNum((data.telegram_users || []).length);
 
         if (data.system) {
             document.getElementById("sysWorkerInfo").textContent =
-                `Worker: ${data.system.workers_running} aktiv (${data.system.workers_connected} verbunden)`;
+                `${data.system.workers_running} aktiv (${data.system.workers_connected} verbunden)`;
 
             const tg = data.system.telegram_bot;
             if (tg) {
@@ -33,8 +55,13 @@ async function loadOverview() {
                     ? `${tg.state.toUpperCase()} (${tg.bot_username})`
                     : tg.state.toUpperCase();
                 document.getElementById("sysTelegramInfo").textContent = tgLabel;
+                if (tg.access_mode) {
+                    document.getElementById("sysTelegramMode").textContent = tg.access_mode.toUpperCase();
+                }
             }
-            renderServiceLogs(data.system.workers || [], tg ? tg.logs || [] : []);
+            cachedWorkers = data.system.workers || [];
+            cachedTgLogs = tg ? tg.logs || [] : [];
+            renderServiceLogs();
         }
 
         if (data.settings) {
@@ -45,24 +72,47 @@ async function loadOverview() {
                 document.getElementById("setUsdToEur").value = data.settings.usd_to_eur_rate;
                 document.getElementById("setPollInterval").value = data.settings.poll_interval_seconds;
             }
+            const modeSel = document.getElementById("selectTelegramMode");
+            if (modeSel && activeEl !== modeSel && data.settings.telegram_access_mode) {
+                modeSel.value = data.settings.telegram_access_mode;
+            }
         }
 
-        renderStreamerTable(data.streamers || []);
-        renderGiftLog(data.recent_gifts || []);
-        populateSimulatorSelect(data.streamers || []);
+        cachedStreamers = data.streamers || [];
+        cachedGifts = data.recent_gifts || [];
+
+        renderStreamerTable();
+        renderGiftLog();
+        renderTelegramUsers(
+            data.telegram_users || [],
+            data.settings ? data.settings.telegram_access_mode : "whitelist"
+        );
+        populateSimulatorSelect(cachedStreamers);
     } catch (e) {
         console.error("Fehler beim Laden:", e);
     }
 }
 
-function renderStreamerTable(streamers) {
+function renderStreamerTable() {
     const tbody = document.getElementById("streamerTableBody");
-    if (streamers.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10">Keine Streamer angelegt.</td></tr>`;
+    const filterVal = (document.getElementById("inputStreamerFilter")?.value || "").trim().toLowerCase();
+
+    const filtered = cachedStreamers.filter((s) => {
+        if (!filterVal) return true;
+        const u = (s.username || "").toLowerCase();
+        const d = (s.display_name || "").toLowerCase();
+        return u.includes(filterVal) || d.includes(filterVal);
+    });
+
+    document.getElementById("streamerTableMeta").textContent =
+        `${filtered.length} von ${cachedStreamers.length} Streamern`;
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="muted">Keine passenden Streamer vorhanden.</td></tr>`;
         return;
     }
 
-    tbody.innerHTML = streamers
+    tbody.innerHTML = filtered
         .map((s) => {
             const diag = s.worker_diagnostics;
             const state = diag ? diag.state : (s.is_live ? "live" : "stopped");
@@ -77,42 +127,43 @@ function renderStreamerTable(streamers) {
                 ? `@${s.top_gifter.sender_username} (${fmtNum(s.top_gifter.coins)})`
                 : "-";
 
-            const trackBtnText = s.is_tracking_active ? "Stop Worker" : "Start Worker";
+            const trackBtnText = s.is_tracking_active ? "Stop" : "Start";
 
             return `
                 <tr>
-                    <td class="mono">${s.id}</td>
+                    <td class="mono muted">#${s.id}</td>
                     <td>
-                        <strong><a href="#" onclick="showStreamerDetail(${s.id}); return false;">${s.display_name || s.username}</a></strong><br/>
-                        <span class="mono">@${s.username}</span>
-                        ${s.room_id ? `<br/><span class="mono">Room: ${s.room_id}</span>` : ""}
+                        <strong><a href="#" onclick="showStreamerDetail(${s.id}); return false;">${s.display_name || s.username}</a></strong>
+                        <div class="mono muted">@${s.username}${s.room_id ? ` · Room ${s.room_id}` : ""}</div>
                     </td>
                     <td>
                         <span class="status-tag ${tagClass}">${state.toUpperCase()}</span>
-                        <div class="mono" style="margin-top:3px;">${s.monitor_status || ""}</div>
-                        ${s.last_error ? `<div class="mono" style="color:#b02a37;">${s.last_error}</div>` : ""}
+                        <div class="mono muted" style="margin-top:3px;">${s.monitor_status || ""}</div>
+                        ${s.last_error ? `<div class="mono" style="color:#a40e26;">${s.last_error}</div>` : ""}
                     </td>
-                    <td class="mono">
-                        Aktuell: ${fmtNum(s.current_viewers || 0)}<br/>
-                        Follower: ${fmtNum(s.follower_count || 0)}
+                    <td class="num-col">
+                        <strong>${fmtNum(s.current_viewers || 0)}</strong>
+                        <div class="muted">${fmtNum(s.follower_count || 0)} Follower</div>
                     </td>
-                    <td class="mono">
-                        <strong>${fmtNum(s.total_coins)}</strong><br/>
-                        (${fmtNum(s.total_gifts_sent)} Gifts / ${s.unique_gifters} Gifter)
+                    <td class="num-col">
+                        <strong>${fmtNum(s.total_coins)}</strong>
+                        <div class="muted">${fmtNum(s.total_gifts_sent)} Gifts / ${s.unique_gifters} Gifter</div>
                     </td>
-                    <td class="mono"><strong>${fmtEUR(s.eur_net)}</strong></td>
-                    <td class="mono">${fmtUSD(s.usd_net)}</td>
-                    <td class="mono">${fmtEUR(s.eur_gross)}</td>
+                    <td class="num-col"><strong>${fmtEUR(s.eur_net)}</strong></td>
+                    <td class="num-col">${fmtUSD(s.usd_net)}</td>
+                    <td class="num-col">${fmtEUR(s.eur_gross)}</td>
                     <td class="mono">
-                        Gift: ${topGift}<br/>
-                        Gifter: ${topGifter}
+                        <div>Gift: ${topGift}</div>
+                        <div class="muted">Spender: ${topGifter}</div>
                     </td>
                     <td>
-                        <button type="button" onclick="toggleWorker(${s.id})">${trackBtnText}</button>
-                        <button type="button" onclick="showStreamerDetail(${s.id})">Details</button>
-                        <a class="btn-link mono" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank" title="JSON Einzelabfrage für Telegram Bot">Bot-JSON</a>
-                        <button type="button" onclick="refreshStreamer(${s.id})">Profil-Check</button>
-                        <button type="button" class="danger" onclick="deleteStreamer(${s.id}, '${s.username}')">X</button>
+                        <div class="action-group">
+                            <button type="button" class="sm" onclick="toggleWorker(${s.id})">${trackBtnText}</button>
+                            <button type="button" class="sm" onclick="showStreamerDetail(${s.id})">Details</button>
+                            <button type="button" class="sm" onclick="refreshStreamer(${s.id})" title="TikTok Profil aktualisieren">Sync</button>
+                            <a class="btn-link sm mono" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
+                            <button type="button" class="sm danger" onclick="deleteStreamer(${s.id}, '${s.username}')">X</button>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -120,51 +171,152 @@ function renderStreamerTable(streamers) {
         .join("");
 }
 
-function renderGiftLog(gifts) {
+function renderGiftLog() {
     const tbody = document.getElementById("giftLogBody");
-    if (gifts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7">Keine Geschenke im Zeitraum.</td></tr>`;
+    const filterVal = (document.getElementById("inputGiftFilter")?.value || "").trim().toLowerCase();
+
+    const filtered = cachedGifts.filter((g) => {
+        if (!filterVal) return true;
+        return (
+            (g.streamer_username || "").toLowerCase().includes(filterVal) ||
+            (g.sender_username || "").toLowerCase().includes(filterVal) ||
+            (g.sender_nickname || "").toLowerCase().includes(filterVal) ||
+            (g.gift_name || "").toLowerCase().includes(filterVal)
+        );
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="muted">Keine Geschenke im gewählten Zeitraum.</td></tr>`;
         return;
     }
 
-    tbody.innerHTML = gifts
+    tbody.innerHTML = filtered
         .map((g) => {
-            const ts = (g.created_at || "").replace("T", " ").slice(5, 19);
+            const ts = (g.created_at || "").replace("T", " ");
             return `
                 <tr>
-                    <td class="mono">${ts}</td>
-                    <td class="mono">@${g.streamer_username}</td>
-                    <td>${g.sender_nickname || g.sender_username} ${g.is_super_fan ? "[SF]" : ""}</td>
-                    <td>${g.repeat_count}x ${g.gift_name}</td>
-                    <td class="mono">${fmtNum(g.total_coins)}</td>
-                    <td class="mono">${fmtEUR(g.eur_net)}</td>
-                    <td class="mono">${g.source}</td>
+                    <td class="mono muted">${ts}</td>
+                    <td class="mono"><strong>@${g.streamer_username}</strong></td>
+                    <td>
+                        ${g.sender_nickname || g.sender_username}
+                        <span class="mono muted">(@${g.sender_username})</span>
+                        ${g.is_super_fan ? `<span class="status-tag polling">SUPERFAN</span>` : ""}
+                    </td>
+                    <td><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
+                    <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
+                    <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
+                    <td class="num-col">${fmtUSD(g.usd_net)}</td>
+                    <td class="mono muted">${g.source}</td>
                 </tr>
             `;
         })
         .join("");
 }
 
-function renderServiceLogs(workers, tgLogs) {
+function renderTelegramUsers(users, accessMode) {
+    const tbody = document.getElementById("telegramUsersBody");
+    if (!tbody) return;
+    if (users.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="muted">Noch keine Telegram-Nutzer hinterlegt. Trage oben eine Telegram-ID oder einen @username ein oder sende <code>/start</code> an den Bot.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = users
+        .map((u) => {
+            const allowed = parseInt(u.is_allowed || 0, 10);
+            let statusHtml = "";
+            if (allowed === 1) {
+                statusHtml = `<span class="status-tag live">FREIGESCHALTET</span>`;
+            } else if (allowed === 0) {
+                statusHtml =
+                    accessMode === "public"
+                        ? `<span class="status-tag polling">PUBLIC-GAST</span>`
+                        : `<span class="status-tag polling">ANFRAGE OFFEN</span>`;
+            } else {
+                statusHtml = `<span class="status-tag danger">GESPERRT</span>`;
+            }
+
+            const roleBadge = u.role === "admin" ? `<strong>ADMIN</strong>` : `Nutzer`;
+            const ident = u.telegram_id ? String(u.telegram_id) : `@${u.username}`;
+            const unameStr = u.username ? `@${u.username}` : "-";
+            const fnameStr = u.first_name ? ` (${u.first_name})` : "";
+            const lastSeen = (u.last_seen_at || "").replace("T", " ");
+
+            return `
+                <tr>
+                    <td class="mono">${u.telegram_id || `<span class="muted">wird bei Nachricht verknüpft</span>`}</td>
+                    <td><strong>${unameStr}</strong>${fnameStr}</td>
+                    <td class="mono">${roleBadge}</td>
+                    <td>${statusHtml}</td>
+                    <td class="mono muted">${u.note || "-"}</td>
+                    <td class="mono muted">${lastSeen}</td>
+                    <td>
+                        <div class="action-group">
+                            ${
+                                allowed !== 1
+                                    ? `<button type="button" class="sm primary" onclick="updateTgUser('${ident}', 1, '${u.role || "user"}')">Freischalten</button>`
+                                    : `<button type="button" class="sm" onclick="updateTgUser('${ident}', -1, 'user')">Sperren</button>`
+                            }
+                            ${
+                                u.role !== "admin"
+                                    ? `<button type="button" class="sm" onclick="updateTgUser('${ident}', 1, 'admin')">→ Admin</button>`
+                                    : `<button type="button" class="sm" onclick="updateTgUser('${ident}', 1, 'user')">→ Nutzer</button>`
+                            }
+                            <button type="button" class="sm danger" onclick="deleteTgUser(${u.id})">X</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        })
+        .join("");
+}
+
+async function updateTgUser(identifier, isAllowed, role) {
+    await fetch("/api/v1/telegram/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            identifier: String(identifier),
+            is_allowed: isAllowed,
+            role: role,
+        }),
+    });
+    loadOverview();
+}
+
+async function deleteTgUser(recordId) {
+    if (!confirm("Diesen Telegram-Eintrag wirklich entfernen?")) return;
+    await fetch(`/api/v1/telegram/users/${recordId}`, { method: "DELETE" });
+    loadOverview();
+}
+
+function renderServiceLogs() {
     const box = document.getElementById("workerLogBox");
+    const sourceFilter = document.getElementById("selectLogSource")?.value || "all";
     const lines = [];
-    workers.forEach((w) => {
-        (w.logs || []).forEach((l) => {
-            lines.push(`${l.timestamp} [TikTok:@${w.username}] [${l.level}] ${l.message}`);
+
+    if (sourceFilter === "all" || sourceFilter === "TikTok") {
+        cachedWorkers.forEach((w) => {
+            (w.logs || []).forEach((l) => {
+                lines.push(`${l.timestamp} [TikTok:@${w.username}] [${l.level}] ${l.message}`);
+            });
         });
-    });
-    (tgLogs || []).forEach((l) => {
-        lines.push(`${l.timestamp} [TelegramBot] [${l.level}] ${l.message}`);
-    });
+    }
+    if (sourceFilter === "all" || sourceFilter === "TelegramBot") {
+        cachedTgLogs.forEach((l) => {
+            lines.push(`${l.timestamp} [TelegramBot] [${l.level}] ${l.message}`);
+        });
+    }
+
     lines.sort().reverse();
-    box.innerHTML = lines.length > 0 ? lines.slice(0, 35).join("<br/>") : "Keine Service-Logs vorhanden.";
+    box.innerHTML = lines.length > 0 ? lines.slice(0, 45).join("<br/>") : "Keine Service-Logs für diese Auswahl vorhanden.";
 }
 
 function populateSimulatorSelect(streamers) {
     const sel = document.getElementById("simStreamerSelect");
     const prev = sel.value;
     sel.innerHTML =
-        `<option value="">Streamer...</option>` +
+        `<option value="">Streamer wählen</option>` +
         streamers.map((s) => `<option value="${s.id}">@${s.username}</option>`).join("");
     if (prev && streamers.some((s) => String(s.id) === String(prev))) {
         sel.value = prev;
@@ -180,20 +332,22 @@ async function showStreamerDetail(streamerId) {
     const s = data.streamer;
 
     document.getElementById("detailTitle").textContent =
-        `Detail-Auswertung: ${s.display_name || s.username} (@${s.username}) – Netto: ${fmtEUR(data.summary.eur_net)} (${fmtNum(data.summary.total_coins)} Coins)`;
+        `Auswertung: ${s.display_name || s.username} (@${s.username})`;
+    document.getElementById("detailSubtitle").textContent =
+        `Netto: ${fmtEUR(data.summary.eur_net)} (${fmtUSD(data.summary.usd_net)}) · Coins: ${fmtNum(data.summary.total_coins)} · Brutto: ${fmtEUR(data.summary.eur_gross)}`;
 
     const giftsBody = document.getElementById("detailGiftsBody");
     giftsBody.innerHTML =
         data.gift_breakdown.length === 0
-            ? `<tr><td colspan="4">Keine Geschenke.</td></tr>`
+            ? `<tr><td colspan="4" class="muted">Keine Geschenke aufgezeichnet.</td></tr>`
             : data.gift_breakdown
                   .map(
                       (g) => `
                 <tr>
-                    <td>${g.gift_name} (${g.diamond_count})</td>
-                    <td class="mono">${fmtNum(g.total_quantity)}x</td>
-                    <td class="mono">${fmtNum(g.total_coins)}</td>
-                    <td class="mono">${fmtEUR(g.eur_net)}</td>
+                    <td><strong>${g.gift_name}</strong> <span class="mono muted">(${g.diamond_count})</span></td>
+                    <td class="num-col">${fmtNum(g.total_quantity)}x</td>
+                    <td class="num-col">${fmtNum(g.total_coins)}</td>
+                    <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
                 </tr>`
                   )
                   .join("");
@@ -201,15 +355,15 @@ async function showStreamerDetail(streamerId) {
     const giftersBody = document.getElementById("detailGiftersBody");
     giftersBody.innerHTML =
         data.top_gifters.length === 0
-            ? `<tr><td colspan="4">Keine Gifter.</td></tr>`
+            ? `<tr><td colspan="4" class="muted">Keine Spender aufgezeichnet.</td></tr>`
             : data.top_gifters
                   .map(
                       (tg) => `
                 <tr>
-                    <td>@${tg.sender_username} ${tg.is_super_fan ? "[SuperFan]" : ""}</td>
-                    <td class="mono">${fmtNum(tg.gifts_sent)}</td>
-                    <td class="mono">${fmtNum(tg.total_coins)}</td>
-                    <td class="mono">${fmtEUR(tg.eur_net)}</td>
+                    <td><strong>@${tg.sender_username}</strong> ${tg.is_super_fan ? `<span class="status-tag polling">SF</span>` : ""}</td>
+                    <td class="num-col">${fmtNum(tg.gifts_sent)}</td>
+                    <td class="num-col">${fmtNum(tg.total_coins)}</td>
+                    <td class="num-col"><strong>${fmtEUR(tg.eur_net)}</strong></td>
                 </tr>`
                   )
                   .join("");
@@ -221,11 +375,13 @@ async function showStreamerDetail(streamerId) {
             : data.sessions
                   .map(
                       (ss) =>
-                          `#${ss.id} [${ss.status}] Start: ${ss.started_at} | Peak Viewers: ${ss.peak_viewers} | Coins: ${fmtNum(ss.session_coins)} (${fmtEUR(ss.eur_net)})`
+                          `#${ss.id} [${ss.status.toUpperCase()}] Start: ${ss.started_at} | Peak Viewers: ${fmtNum(ss.peak_viewers)} | Coins: ${fmtNum(ss.session_coins)} (${fmtEUR(ss.eur_net)})`
                   )
                   .join("<br/>");
 
-    document.getElementById("streamerDetailBox").style.display = "block";
+    const box = document.getElementById("streamerDetailBox");
+    box.style.display = "block";
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function toggleWorker(streamerId) {
@@ -250,6 +406,12 @@ async function deleteStreamer(streamerId, username) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            switchTab(btn.getAttribute("data-tab"));
+        });
+    });
+
     loadOverview();
     setInterval(loadOverview, 4000);
 
@@ -259,6 +421,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("btnRefresh").addEventListener("click", loadOverview);
+
+    document.getElementById("inputStreamerFilter").addEventListener("input", renderStreamerTable);
+    document.getElementById("inputGiftFilter").addEventListener("input", renderGiftLog);
+    document.getElementById("selectLogSource").addEventListener("change", renderServiceLogs);
 
     document.getElementById("btnSendTelegramReport").addEventListener("click", async () => {
         const res = await fetch("/api/v1/telegram/send-report?hours=24", { method: "POST" });
@@ -271,6 +437,40 @@ document.addEventListener("DOMContentLoaded", () => {
         loadOverview();
     });
 
+    document.getElementById("selectTelegramMode").addEventListener("change", async (e) => {
+        const newMode = e.target.value;
+        await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ telegram_access_mode: newMode }),
+        });
+        loadOverview();
+    });
+
+    document.getElementById("formAddTelegramUser").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const identInput = document.getElementById("inputTgIdentifier");
+        const nameInput = document.getElementById("inputTgName");
+        const roleSelect = document.getElementById("selectTgRole");
+
+        const res = await fetch("/api/v1/telegram/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                identifier: identInput.value,
+                first_name: nameInput.value || null,
+                role: roleSelect.value,
+                is_allowed: 1,
+                note: "Über Web-Konsole freigeschaltet",
+            }),
+        });
+        if (res.ok) {
+            identInput.value = "";
+            nameInput.value = "";
+            loadOverview();
+        }
+    });
+
     document.getElementById("btnCloseDetail").addEventListener("click", () => {
         document.getElementById("streamerDetailBox").style.display = "none";
     });
@@ -278,6 +478,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("formAddStreamer").addEventListener("submit", async (e) => {
         e.preventDefault();
         const input = document.getElementById("inputUsername");
+        const displayInput = document.getElementById("inputDisplayName");
         const autoTrack = document.getElementById("checkAutoTrack").checked;
         const autoReconnect = document.getElementById("checkAutoReconnect").checked;
         const res = await fetch("/api/streamers", {
@@ -285,12 +486,14 @@ document.addEventListener("DOMContentLoaded", () => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 username: input.value,
+                display_name: displayInput.value || null,
                 auto_track: autoTrack,
                 auto_reconnect: autoReconnect,
             }),
         });
         if (res.ok) {
             input.value = "";
+            displayInput.value = "";
             loadOverview();
         }
     });
@@ -302,7 +505,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const opt = giftSel.options[giftSel.selectedIndex];
         const diamonds = parseInt(opt.getAttribute("data-diamonds") || "1", 10);
         const repeatCount = parseInt(document.getElementById("simRepeatCount").value || "1", 10);
-        const sender = document.getElementById("simSender").value || "test_viewer";
+        const sender = document.getElementById("simSender").value || "live_viewer";
 
         await fetch("/api/gifts", {
             method: "POST",

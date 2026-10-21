@@ -15,17 +15,21 @@ from database import (
     build_streamer_bot_report,
     clear_demo_data,
     delete_streamer,
+    delete_telegram_user,
     get_auto_monitor_streamers,
     get_dashboard_overview,
     get_db,
     get_settings,
     get_streamer_by_id_or_username,
     get_streamer_detail,
+    get_telegram_access_mode,
     init_db,
+    list_telegram_users,
     record_gift_event,
     seed_demo_data,
     update_settings,
     upsert_streamer,
+    upsert_telegram_user_permission,
 )
 from schemas import (
     DailyBotReportResponse,
@@ -33,6 +37,7 @@ from schemas import (
     SettingsUpdateRequest,
     StreamerCreateRequest,
     StreamerReportCard,
+    TelegramUserPermissionRequest,
     TrackActionRequest,
 )
 from telegram_service import generate_full_report_data, telegram_bot_service
@@ -76,7 +81,6 @@ async def lifespan(app_instance: FastAPI):
     for s in get_auto_monitor_streamers():
         monitor_manager.start_tracking(s["id"], s["username"], auto_reconnect=True)
 
-    # Entkoppelter Start des Telegram-Bots (fängt intern alle Fehler ab)
     await telegram_bot_service.start()
 
     yield
@@ -86,16 +90,18 @@ async def lifespan(app_instance: FastAPI):
 
 
 app = FastAPI(
-    title="TikTok Streamer Earnings & Bot API",
+    title="toktracker – Streamer Earnings & Bot API",
     description=(
-        "Backend-Service zur Echtzeit-Erfassung von TikTokLive-Geschenken (Coins/Diamonds) "
+        "toktracker Backend-Service zur Echtzeit-Erfassung von TikTokLive-Geschenken (Coins/Diamonds) "
         "mit fertigen 24h-Report- und Einzelabfrage-Endpoints sowie integriertem Telegram-Bot."
     ),
-    version="2.1.0",
+    version="2.3.0",
     lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+if os.path.isdir(os.path.join(BASE_DIR, "pictures")):
+    app.mount("/pictures", StaticFiles(directory=os.path.join(BASE_DIR, "pictures")), name="pictures")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
@@ -126,11 +132,12 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 
 
 # =====================================================================
-# 1. RUDIMENTÄRES WEB-DASHBOARD (HTML)
+# 1. TOKTRACKER WEB-INTERFACE (HTML)
 # =====================================================================
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index(request: Request):
+    init_db()
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -144,7 +151,7 @@ async def index(request: Request):
 
 
 # =====================================================================
-# 2. TELEGRAM-BOT SPEZIAL-ENDPOINTS (v1) – 24h Report & Einzelabfragen
+# 2. TELEGRAM-BOT SPEZIAL-ENDPOINTS (v1) – 24h Report, Einzelabfragen & Zugriffskontrolle
 # =====================================================================
 
 @app.get(
@@ -178,6 +185,73 @@ async def api_v1_telegram_send_report(
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("error", "Senden fehlgeschlagen"))
     return res
+
+
+@app.get(
+    "/api/telegram/users",
+    tags=["Telegram Bot API"],
+    summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
+    dependencies=[Depends(verify_api_key)],
+)
+@app.get(
+    "/api/v1/telegram/users",
+    tags=["Telegram Bot API"],
+    summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
+    dependencies=[Depends(verify_api_key)],
+)
+async def api_get_telegram_users():
+    init_db()
+    return {
+        "access_mode": get_telegram_access_mode(),
+        "users": list_telegram_users(),
+    }
+
+
+@app.post(
+    "/api/telegram/users",
+    tags=["Telegram Bot API"],
+    summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
+    dependencies=[Depends(verify_api_key)],
+)
+@app.post(
+    "/api/v1/telegram/users",
+    tags=["Telegram Bot API"],
+    summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
+    dependencies=[Depends(verify_api_key)],
+)
+async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
+    init_db()
+    try:
+        user_row = upsert_telegram_user_permission(
+            identifier=payload.identifier,
+            is_allowed=payload.is_allowed,
+            role=payload.role,
+            first_name=payload.first_name,
+            note=payload.note,
+        )
+        return {"ok": True, "user": user_row, "access_mode": get_telegram_access_mode()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete(
+    "/api/telegram/users/{record_id}",
+    tags=["Telegram Bot API"],
+    summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
+    dependencies=[Depends(verify_api_key)],
+)
+@app.delete(
+    "/api/v1/telegram/users/{record_id}",
+    tags=["Telegram Bot API"],
+    summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
+    dependencies=[Depends(verify_api_key)],
+)
+async def api_delete_telegram_user(record_id: int):
+    init_db()
+    deleted = delete_telegram_user(record_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Telegram-Nutzer nicht gefunden.")
+    return {"ok": True, "deleted_id": record_id}
 
 
 @app.get(
@@ -437,7 +511,7 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
     return Response(
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=tiktok_gifts_export.csv"},
+        headers={"Content-Disposition": "attachment; filename=toktracker_gifts_export.csv"},
     )
 
 

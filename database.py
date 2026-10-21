@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
+from config import config
+
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tiktok_earnings.db")
 
 # Standard TikTok Umrechnungswerte:
@@ -17,6 +19,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "currency_primary": "EUR",         # Primäre Anzeige-Währung (EUR oder USD)
     "poll_interval_seconds": "45",     # Intervall für Auto-Live-Check wenn Streamer offline ist
     "api_key": "",                     # Optionaler API-Key für externe Bot-Abfragen
+    "telegram_access_mode": config.telegram_access_mode if config.telegram_access_mode in ("whitelist", "public") else "whitelist",
 }
 
 _db_init_lock = threading.Lock()
@@ -112,6 +115,18 @@ def init_db() -> None:
                     FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
                     FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS telegram_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER UNIQUE,
+                    username TEXT COLLATE NOCASE,
+                    first_name TEXT DEFAULT '',
+                    role TEXT DEFAULT 'user',
+                    is_allowed INTEGER DEFAULT 0,
+                    note TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT
+                );
                 """
             )
 
@@ -137,6 +152,8 @@ def init_db() -> None:
                     ON gift_events(event_uid) WHERE event_uid IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS idx_stream_sessions_streamer
                     ON stream_sessions(streamer_id, started_at);
+                CREATE INDEX IF NOT EXISTS idx_telegram_users_username
+                    ON telegram_users(username);
                 """
             )
 
@@ -145,11 +162,53 @@ def init_db() -> None:
                     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v)
                 )
 
+            # Initiale Admins/Whitelist-User aus der .env synchronisieren
+            now = datetime.now().isoformat(timespec="seconds")
+            for tg_id in config.env_allowed_telegram_ids:
+                existing = conn.execute(
+                    "SELECT id FROM telegram_users WHERE telegram_id = ?", (tg_id,)
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE telegram_users SET is_allowed = 1, role = 'admin' WHERE id = ?",
+                        (existing["id"],),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO telegram_users (telegram_id, username, first_name, role, is_allowed, note, created_at, last_seen_at)
+                        VALUES (?, '', 'ENV Admin', 'admin', 1, 'Aus .env geladen', ?, ?)
+                        """,
+                        (tg_id, now, now),
+                    )
+
+            for tg_uname in config.env_allowed_telegram_usernames:
+                existing = conn.execute(
+                    "SELECT id FROM telegram_users WHERE LOWER(username) = LOWER(?)",
+                    (tg_uname,),
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE telegram_users SET is_allowed = 1, role = 'admin' WHERE id = ?",
+                        (existing["id"],),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO telegram_users (telegram_id, username, first_name, role, is_allowed, note, created_at, last_seen_at)
+                        VALUES (NULL, ?, 'ENV Admin', 'admin', 1, 'Aus .env geladen', ?, ?)
+                        """,
+                        (tg_uname.lower(), now, now),
+                    )
+
 
 def get_settings() -> Dict[str, Any]:
     with get_db() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         data = {r["key"]: r["value"] for r in rows}
+    mode = str(data.get("telegram_access_mode", config.telegram_access_mode or "whitelist")).lower()
+    if mode not in ("whitelist", "public"):
+        mode = "whitelist"
     return {
         "usd_per_diamond": float(data.get("usd_per_diamond", 0.005)),
         "gross_usd_per_coin": float(data.get("gross_usd_per_coin", 0.0106)),
@@ -157,6 +216,7 @@ def get_settings() -> Dict[str, Any]:
         "currency_primary": data.get("currency_primary", "EUR"),
         "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
         "api_key": str(data.get("api_key", "")),
+        "telegram_access_mode": mode,
     }
 
 
@@ -164,11 +224,302 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
     with get_db() as conn:
         for key in DEFAULT_SETTINGS.keys():
             if key in new_settings and new_settings[key] is not None:
+                val = str(new_settings[key]).strip()
+                if key == "telegram_access_mode":
+                    val = val.lower()
+                    if val not in ("whitelist", "public"):
+                        continue
                 conn.execute(
                     "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                    (key, str(new_settings[key])),
+                    (key, val),
                 )
     return get_settings()
+
+
+# =====================================================================
+# TELEGRAM ZUGRIFFSKONTROLLE (WHITELIST / PUBLIC / ROLLEN / GRUPPEN)
+# =====================================================================
+
+def get_telegram_access_mode() -> str:
+    return get_settings().get("telegram_access_mode", "whitelist")
+
+
+def set_telegram_access_mode(mode: str) -> str:
+    clean_mode = mode.strip().lower()
+    if clean_mode not in ("whitelist", "public"):
+        raise ValueError("Modus muss 'whitelist' oder 'public' sein.")
+    update_settings({"telegram_access_mode": clean_mode})
+    return clean_mode
+
+
+def list_telegram_users() -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM telegram_users
+            ORDER BY is_allowed DESC, CASE WHEN role = 'admin' THEN 0 ELSE 1 END ASC, id DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_telegram_user_permission(
+    identifier: str | int,
+    is_allowed: int | bool = 1,
+    role: str = "user",
+    first_name: Optional[str] = None,
+    note: Optional[str] = None,
+    telegram_id_override: Optional[int] = None,
+    username_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fügt einen Telegram-Nutzer (oder eine Gruppe) per Telegram-ID (z.B. 123456789)
+    oder [@]username hinzu bzw. aktualisiert dessen Berechtigung:
+    - is_allowed: 1 = Freigeschaltet, 0 = Wartend/Entzogen, -1 = Gesperrt (Blocked)
+    - role: 'admin' oder 'user'
+    """
+    raw = str(identifier).strip()
+    if not raw:
+        raise ValueError("Bitte eine Telegram User-ID oder einen [@]username angeben.")
+
+    clean_role = role.strip().lower() if role else "user"
+    if clean_role not in ("admin", "user"):
+        clean_role = "user"
+
+    allowed_val = int(is_allowed)
+    if allowed_val not in (-1, 0, 1):
+        allowed_val = 1 if bool(is_allowed) else 0
+
+    now = datetime.now().isoformat(timespec="seconds")
+    clean_ident = raw.lstrip("@").strip()
+    is_numeric_id = clean_ident.lstrip("-").isdigit()
+
+    with get_db() as conn:
+        existing = None
+        tg_id: Optional[int] = telegram_id_override
+        uname: Optional[str] = (username_override or "").strip().lstrip("@").lower() or None
+
+        if is_numeric_id:
+            tg_id = int(clean_ident)
+            existing = conn.execute(
+                "SELECT * FROM telegram_users WHERE telegram_id = ? OR id = ?",
+                (tg_id, tg_id),
+            ).fetchone()
+            if not existing and uname:
+                existing = conn.execute(
+                    "SELECT * FROM telegram_users WHERE LOWER(username) = LOWER(?)",
+                    (uname,),
+                ).fetchone()
+        else:
+            uname = clean_ident.lower()
+            existing = conn.execute(
+                "SELECT * FROM telegram_users WHERE LOWER(username) = LOWER(?)",
+                (uname,),
+            ).fetchone()
+            if not existing and tg_id is not None:
+                existing = conn.execute(
+                    "SELECT * FROM telegram_users WHERE telegram_id = ?",
+                    (tg_id,),
+                ).fetchone()
+
+        if existing:
+            new_tg_id = tg_id if tg_id is not None else existing["telegram_id"]
+            new_uname = uname if uname else existing["username"]
+            new_fname = first_name if first_name is not None else existing["first_name"]
+            new_note = note if note is not None else existing["note"]
+            conn.execute(
+                """
+                UPDATE telegram_users
+                SET telegram_id = ?, username = ?, is_allowed = ?, role = ?, first_name = ?, note = ?, last_seen_at = ?
+                WHERE id = ?
+                """,
+                (new_tg_id, new_uname, allowed_val, clean_role, new_fname, new_note, now, existing["id"]),
+            )
+            row_id = existing["id"]
+        else:
+            cur = conn.execute(
+                """
+                INSERT INTO telegram_users (
+                    telegram_id, username, first_name, role, is_allowed, note, created_at, last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tg_id,
+                    uname or "",
+                    first_name or "",
+                    clean_role,
+                    allowed_val,
+                    note or "Manuell angelegt",
+                    now,
+                    now,
+                ),
+            )
+            row_id = cur.lastrowid
+
+        row = conn.execute(
+            "SELECT * FROM telegram_users WHERE id = ?", (row_id,)
+        ).fetchone()
+        return dict(row)
+
+
+def delete_telegram_user(record_id: int) -> bool:
+    with get_db() as conn:
+        cur = conn.execute("DELETE FROM telegram_users WHERE id = ?", (record_id,))
+        return cur.rowcount > 0
+
+
+def check_telegram_user_access(
+    telegram_id: int,
+    username: Optional[str] = None,
+    first_name: Optional[str] = None,
+    chat_id: Optional[int] = None,
+    chat_title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Prüft, ob ein Telegram-Nutzer (sowohl im Privatchat als auch in Gruppen/Supergruppen)
+    mit dem Bot kommunizieren darf.
+    - Unterstützt Whitelisting per `telegram_id` ODER `[@]username` (case-insensitive).
+    - Verknüpft vorab per `[@]username` freigeschaltete Einträge automatisch mit der
+      echten `telegram_id`, sobald die Person im Privatchat oder in einer Gruppe schreibt.
+    - Protokolliert unbekannte Nutzer als offene Anfrage (`is_allowed = 0`), inkl.
+      Gruppenname, falls der Aufruf aus einer Gruppe kam.
+    """
+    clean_uname = (username or "").strip().lstrip("@").lower()
+    clean_fname = (first_name or "").strip()
+    now = datetime.now().isoformat(timespec="seconds")
+    mode = get_telegram_access_mode()
+
+    in_env_admin = (
+        telegram_id in config.env_allowed_telegram_ids
+        or (clean_uname and clean_uname in config.env_allowed_telegram_usernames)
+    )
+
+    is_group = bool(chat_id is not None and chat_id != telegram_id)
+    source_note = (
+        f"Gruppe: {chat_title or chat_id}" if is_group else "Privatchat"
+    )
+
+    with get_db() as conn:
+        row_by_id = conn.execute(
+            "SELECT * FROM telegram_users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+
+        row_by_uname = None
+        if clean_uname:
+            row_by_uname = conn.execute(
+                "SELECT * FROM telegram_users WHERE LOWER(username) = LOWER(?)",
+                (clean_uname,),
+            ).fetchone()
+
+        # Falls sowohl ein Eintrag per ID als auch ein separater Vorab-Eintrag per @username existiert -> zusammenführen!
+        if row_by_id and row_by_uname and row_by_id["id"] != row_by_uname["id"]:
+            merged_allowed = max(int(row_by_id["is_allowed"]), int(row_by_uname["is_allowed"]))
+            if int(row_by_id["is_allowed"]) < 0 or int(row_by_uname["is_allowed"]) < 0:
+                if max(int(row_by_id["is_allowed"]), int(row_by_uname["is_allowed"])) < 1:
+                    merged_allowed = -1
+            merged_role = (
+                "admin"
+                if (row_by_id["role"] == "admin" or row_by_uname["role"] == "admin")
+                else "user"
+            )
+            conn.execute("DELETE FROM telegram_users WHERE id = ?", (row_by_uname["id"],))
+            conn.execute(
+                "UPDATE telegram_users SET is_allowed = ?, role = ? WHERE id = ?",
+                (merged_allowed, merged_role, row_by_id["id"]),
+            )
+            row = conn.execute(
+                "SELECT * FROM telegram_users WHERE id = ?", (row_by_id["id"],)
+            ).fetchone()
+        else:
+            row = row_by_id or row_by_uname
+
+        if row:
+            new_role = "admin" if in_env_admin else row["role"]
+            new_allowed = 1 if in_env_admin else int(row["is_allowed"])
+            conn.execute(
+                """
+                UPDATE telegram_users
+                SET telegram_id = ?,
+                    username = COALESCE(NULLIF(?, ''), username),
+                    first_name = COALESCE(NULLIF(?, ''), first_name),
+                    role = ?,
+                    is_allowed = ?,
+                    last_seen_at = ?
+                WHERE id = ?
+                """,
+                (
+                    telegram_id,
+                    clean_uname,
+                    clean_fname,
+                    new_role,
+                    new_allowed,
+                    now,
+                    row["id"],
+                ),
+            )
+            row_id = row["id"]
+        else:
+            initial_role = "admin" if in_env_admin else "user"
+            initial_allowed = 1 if in_env_admin else 0
+            note = "Aus .env autorisiert" if in_env_admin else f"Anfrage ({source_note})"
+            cur = conn.execute(
+                """
+                INSERT INTO telegram_users (
+                    telegram_id, username, first_name, role, is_allowed, note, created_at, last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    telegram_id,
+                    clean_uname,
+                    clean_fname,
+                    initial_role,
+                    initial_allowed,
+                    note,
+                    now,
+                    now,
+                ),
+            )
+            row_id = cur.lastrowid
+
+        user_row = dict(
+            conn.execute("SELECT * FROM telegram_users WHERE id = ?", (row_id,)).fetchone()
+        )
+
+        # Optional: Prüfen, ob die Gruppen-Chat-ID selbst explizit auf der Whitelist steht (z.B. /allow -100123456)
+        group_whitelisted = False
+        if is_group and chat_id is not None:
+            grp_row = conn.execute(
+                "SELECT is_allowed FROM telegram_users WHERE telegram_id = ?",
+                (int(chat_id),),
+            ).fetchone()
+            if grp_row and int(grp_row["is_allowed"]) == 1:
+                group_whitelisted = True
+
+    is_allowed_flag = int(user_row.get("is_allowed", 0))
+    role_val = user_row.get("role", "user")
+
+    # Explizit gesperrte Nutzer (-1) haben in keinem Modus Zugriff
+    if is_allowed_flag < 0:
+        allowed = False
+        is_admin = False
+    elif mode == "public":
+        # Im Public-Modus dürfen alle nicht-gesperrten Nutzer Lese-Befehle nutzen
+        allowed = True
+        is_admin = bool(is_allowed_flag == 1 and role_val == "admin")
+    else:
+        # Im Whitelist-Modus (Standard): Nutzer ist per @username / ID freigeschaltet ODER die Gruppe selbst wurde explizit freigeschaltet
+        allowed = bool(is_allowed_flag == 1 or group_whitelisted)
+        is_admin = bool(is_allowed_flag == 1 and role_val == "admin")
+
+    return {
+        "allowed": allowed,
+        "is_admin": is_admin,
+        "mode": mode,
+        "is_group": is_group,
+        "user": user_row,
+    }
 
 
 def get_streamer_by_id_or_username(identifier: str | int) -> Optional[Dict[str, Any]]:
@@ -677,6 +1028,7 @@ def get_dashboard_overview(period: str = "all") -> Dict[str, Any]:
         "totals": totals,
         "streamers": streamers,
         "recent_gifts": recent_gifts,
+        "telegram_users": list_telegram_users(),
     }
 
 
