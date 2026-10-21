@@ -22,6 +22,8 @@ try:
         GiftEvent,
         LiveEndEvent,
         RoomUserSeqEvent,
+        LinkMicBattleEvent,
+        LinkMicArmiesEvent,
     )
     TIKTOKLIVE_AVAILABLE = True
 except ImportError:
@@ -29,6 +31,8 @@ except ImportError:
     AgeRestrictedError = Exception  # type: ignore
     UserOfflineError = Exception  # type: ignore
     WebDefaults = None  # type: ignore
+    LinkMicBattleEvent = None  # type: ignore
+    LinkMicArmiesEvent = None  # type: ignore
 
 from config import config
 from database import (
@@ -39,6 +43,9 @@ from database import (
     start_stream_session,
     update_stream_session_metrics,
     update_streamer_runtime_state,
+    record_battle_start,
+    update_battle_scores,
+    record_battle_finish,
 )
 
 logger = logging.getLogger("tiktok_service")
@@ -267,6 +274,7 @@ class StreamerWorker:
         self._client: Optional[Any] = None
         self._gift_catalog_cache: Dict[int, Tuple[str, int, str]] = {}
         self._pending_streaks: Dict[str, PendingStreak] = {}
+        self._active_battle: Optional[Dict[str, Any]] = None
         self._recent_logs: Deque[Dict[str, str]] = deque(maxlen=50)
 
     def _log(self, level: str, message: str) -> None:
@@ -305,6 +313,7 @@ class StreamerWorker:
                 "reconnect_attempts": self.diag.reconnect_attempts,
                 "gifts_received_session": self.diag.gifts_received_session,
                 "coins_received_session": self.diag.coins_received_session,
+                "active_battle": dict(self._active_battle) if self._active_battle else None,
                 "pending_streaks_count": len(self._pending_streaks),
                 "logs": list(self._recent_logs)[:15],
             }
@@ -344,6 +353,7 @@ class StreamerWorker:
             except Exception as exc:
                 logger.debug("Disconnect-Signal Fehler für @%s: %s", self.username, exc)
 
+        self._finish_active_battle_if_any()
         self._flush_all_pending_streaks()
         if self.diag.session_id:
             end_stream_session(self.streamer_id, self.diag.session_id)
@@ -377,6 +387,7 @@ class StreamerWorker:
         except Exception as exc:
             self._log("ERROR", f"Unerwarteter Worker-Abbruch: {exc}")
         finally:
+            self._finish_active_battle_if_any()
             self._flush_all_pending_streaks()
             if self.diag.session_id:
                 end_stream_session(self.streamer_id, self.diag.session_id)
@@ -643,6 +654,7 @@ class StreamerWorker:
 
         @client.on(LiveEndEvent)
         async def on_live_end(event: LiveEndEvent) -> None:
+            self._finish_active_battle_if_any()
             self._flush_all_pending_streaks()
             with self._lock:
                 sess_id = self.diag.session_id
@@ -657,6 +669,7 @@ class StreamerWorker:
 
         @client.on(DisconnectEvent)
         async def on_disconnect(event: DisconnectEvent) -> None:
+            self._finish_active_battle_if_any()
             self._flush_all_pending_streaks()
             with self._lock:
                 self.diag.current_viewers = 0
@@ -671,6 +684,812 @@ class StreamerWorker:
                 self._process_gift_event(event)
             except Exception as exc:
                 self._log("ERROR", f"Fehler bei GiftEvent-Verarbeitung: {exc}")
+
+        if TIKTOKLIVE_AVAILABLE and LinkMicBattleEvent is not None:
+            @client.on(LinkMicBattleEvent)
+            async def on_battle(event: LinkMicBattleEvent) -> None:
+                try:
+                    self._handle_battle_event(event)
+                except Exception as exc:
+                    self._log("ERROR", f"Fehler bei LinkMicBattleEvent-Verarbeitung: {exc}")
+
+        if TIKTOKLIVE_AVAILABLE and LinkMicArmiesEvent is not None:
+            @client.on(LinkMicArmiesEvent)
+            async def on_armies(event: LinkMicArmiesEvent) -> None:
+                try:
+                    self._handle_armies_event(event)
+                except Exception as exc:
+                    self._log("ERROR", f"Fehler bei LinkMicArmiesEvent-Verarbeitung: {exc}")
+
+    def _extract_battle_matchup(self, event: Any = None, anchors_info: Any = None) -> Dict[str, Any]:
+        """
+        Extrahiert vollständige Kontrahenten- und Teaminformationen aus anchors_info,
+        team_member und team_armies für 1v1, 2v2, 1v1v1 (3er) und 1v1v1v1 (4er-Einzel).
+        """
+        matchup = {
+            "battle_mode": "1v1",
+            "opponent_username": "",
+            "opponent_display_name": "",
+            "opponent_avatar_url": "",
+            "opponent_user_id": "",
+            "teammate_username": "",
+            "teammate_display_name": "",
+            "teammate_avatar_url": "",
+            "teammate_user_id": "",
+            "opponent2_username": "",
+            "opponent2_display_name": "",
+            "opponent2_avatar_url": "",
+            "opponent2_user_id": "",
+            "opponent3_username": "",
+            "opponent3_display_name": "",
+            "opponent3_avatar_url": "",
+            "opponent3_user_id": "",
+        }
+
+        anchors_raw = anchors_info or getattr(event, "anchors_info", None)
+        if not anchors_raw:
+            return matchup
+
+        items = anchors_raw.values() if isinstance(anchors_raw, dict) else anchors_raw
+        anchor_list = []
+        anchor_map_by_id = {}
+        clean_my_user = self.username.lower().lstrip("@")
+
+        for item in items:
+            val = getattr(item, "value", None) or item
+            user = getattr(val, "user", None)
+            if not user:
+                continue
+
+            u_id = str(getattr(user, "user_id", "") or "")
+            display_id = str(getattr(user, "display_id", "") or "").lstrip("@")
+            nick_name = str(getattr(user, "nick_name", "") or "")
+            avatar_thumb = getattr(user, "avatar_thumb", None)
+            avatar_url = ""
+            if avatar_thumb:
+                urls = getattr(avatar_thumb, "url_list", None) or []
+                if urls:
+                    avatar_url = str(urls[0])
+
+            p_data = {
+                "user_id": u_id,
+                "username": display_id,
+                "display_name": nick_name or display_id,
+                "avatar_url": avatar_url,
+            }
+            anchor_list.append(p_data)
+            if u_id:
+                anchor_map_by_id[u_id] = p_data
+
+        if not anchor_list:
+            return matchup
+
+        # 1. Fall: Genau 3 Teilnehmer -> Immer 3er-Match / Jeder-gegen-Jeden (1v1v1)
+        if len(anchor_list) == 3:
+            matchup["battle_mode"] = "1v1v1"
+            my_streamers = [a for a in anchor_list if a["username"].lower() == clean_my_user]
+            opponents = [a for a in anchor_list if a["username"].lower() != clean_my_user]
+            if not opponents and len(anchor_list) >= 3:
+                opponents = anchor_list[1:]
+
+            if len(opponents) > 0:
+                opp1 = opponents[0]
+                matchup["opponent_user_id"] = opp1["user_id"]
+                matchup["opponent_username"] = opp1["username"]
+                matchup["opponent_display_name"] = opp1["display_name"]
+                matchup["opponent_avatar_url"] = opp1["avatar_url"]
+            if len(opponents) > 1:
+                opp2 = opponents[1]
+                matchup["opponent2_user_id"] = opp2["user_id"]
+                matchup["opponent2_username"] = opp2["username"]
+                matchup["opponent2_display_name"] = opp2["display_name"]
+                matchup["opponent2_avatar_url"] = opp2["avatar_url"]
+            return matchup
+
+        # 2. Fall: 4 Teilnehmer -> Prüfen ob 2v2 Team-Battle oder 1v1v1v1 (4er-Einzel / FFA)
+        team_members = getattr(event, "team_member", None) if event else None
+        team_armies = getattr(event, "team_armies", None) if event else None
+
+        # Prüfen ob echte 2er-Teams vorliegen (in 2v2 hat jedes Team 2 Spieler)
+        has_2v2_teams = False
+        if team_members and len(team_members) == 2:
+            team_lens = [len(getattr(t, "user_id", None) or []) for t in team_members]
+            if all(tl >= 2 for tl in team_lens):
+                has_2v2_teams = True
+        elif team_armies and len(team_armies) == 2:
+            team_lens = [len(getattr(ta, "team_user", None) or []) for ta in team_armies]
+            if all(tl >= 2 for tl in team_lens):
+                has_2v2_teams = True
+
+        if len(anchor_list) >= 4 and not has_2v2_teams:
+            # 4er-Einzelmatch (1v1v1v1 / Free-For-All)
+            matchup["battle_mode"] = "1v1v1v1"
+            opponents = [a for a in anchor_list if a["username"].lower() != clean_my_user]
+            if len(opponents) < 3 and len(anchor_list) >= 4:
+                opponents = anchor_list[1:4]
+
+            if len(opponents) > 0:
+                opp1 = opponents[0]
+                matchup["opponent_user_id"] = opp1["user_id"]
+                matchup["opponent_username"] = opp1["username"]
+                matchup["opponent_display_name"] = opp1["display_name"]
+                matchup["opponent_avatar_url"] = opp1["avatar_url"]
+            if len(opponents) > 1:
+                opp2 = opponents[1]
+                matchup["opponent2_user_id"] = opp2["user_id"]
+                matchup["opponent2_username"] = opp2["username"]
+                matchup["opponent2_display_name"] = opp2["display_name"]
+                matchup["opponent2_avatar_url"] = opp2["avatar_url"]
+            if len(opponents) > 2:
+                opp3 = opponents[2]
+                matchup["opponent3_user_id"] = opp3["user_id"]
+                matchup["opponent3_username"] = opp3["username"]
+                matchup["opponent3_display_name"] = opp3["display_name"]
+                matchup["opponent3_avatar_url"] = opp3["avatar_url"]
+            return matchup
+
+        # 3. Fall: 2v2 Team Match
+        my_team = []
+        opp_team = []
+
+        if team_members:
+            for team in team_members:
+                t_uids = [str(u) for u in (getattr(team, "user_id", None) or [])]
+                is_my_team = any(
+                    (uid in anchor_map_by_id and anchor_map_by_id[uid]["username"].lower() == clean_my_user)
+                    for uid in t_uids
+                )
+                if is_my_team:
+                    my_team = [anchor_map_by_id[uid] for uid in t_uids if uid in anchor_map_by_id]
+                else:
+                    opp_team.extend([anchor_map_by_id[uid] for uid in t_uids if uid in anchor_map_by_id])
+
+        if (not my_team or not opp_team) and team_armies:
+            for t_army in team_armies:
+                t_users = getattr(t_army, "team_user", None) or []
+                t_uids = [str(getattr(tu, "user_id", "") or "") for tu in t_users]
+                is_my_team = any(
+                    (uid in anchor_map_by_id and anchor_map_by_id[uid]["username"].lower() == clean_my_user)
+                    for uid in t_uids
+                )
+                if is_my_team:
+                    my_team = [anchor_map_by_id[uid] for uid in t_uids if uid in anchor_map_by_id]
+                else:
+                    opp_team.extend([anchor_map_by_id[uid] for uid in t_uids if uid in anchor_map_by_id])
+
+        if not my_team and len(anchor_list) >= 4:
+            my_idx = 0
+            for idx, a in enumerate(anchor_list):
+                if a["username"].lower() == clean_my_user:
+                    my_idx = idx
+                    break
+            if my_idx < 2:
+                my_team = anchor_list[:2]
+                opp_team = anchor_list[2:4]
+            else:
+                my_team = anchor_list[2:4]
+                opp_team = anchor_list[:2]
+
+        if not my_team:
+            my_team = [a for a in anchor_list if a["username"].lower() == clean_my_user] or [anchor_list[0]]
+            opp_team = [a for a in anchor_list if a["username"].lower() != clean_my_user]
+
+        teammate = None
+        for a in my_team:
+            if a["username"].lower() != clean_my_user:
+                teammate = a
+                break
+
+        opp1 = opp_team[0] if len(opp_team) > 0 else None
+        opp2 = opp_team[1] if len(opp_team) > 1 else None
+
+        is_2v2 = bool(teammate or opp2 or len(anchor_list) >= 4)
+        matchup["battle_mode"] = "2v2" if is_2v2 else "1v1"
+
+        if opp1:
+            matchup["opponent_user_id"] = opp1["user_id"]
+            matchup["opponent_username"] = opp1["username"]
+            matchup["opponent_display_name"] = opp1["display_name"]
+            matchup["opponent_avatar_url"] = opp1["avatar_url"]
+
+        if teammate:
+            matchup["teammate_user_id"] = teammate["user_id"]
+            matchup["teammate_username"] = teammate["username"]
+            matchup["teammate_display_name"] = teammate["display_name"]
+            matchup["teammate_avatar_url"] = teammate["avatar_url"]
+
+        if opp2:
+            matchup["opponent2_user_id"] = opp2["user_id"]
+            matchup["opponent2_username"] = opp2["username"]
+            matchup["opponent2_display_name"] = opp2["display_name"]
+            matchup["opponent2_avatar_url"] = opp2["avatar_url"]
+
+        return matchup
+
+    def _extract_opponent_info(self, anchors_info: Any) -> Dict[str, Any]:
+        matchup = self._extract_battle_matchup(anchors_info=anchors_info)
+        return {
+            "user_id": matchup["opponent_user_id"],
+            "username": matchup["opponent_username"],
+            "display_name": matchup["opponent_display_name"],
+            "avatar_url": matchup["opponent_avatar_url"],
+        }
+
+    def _extract_armies_and_mvps(
+        self,
+        armies: Any,
+        matchup: Optional[Dict[str, Any]] = None,
+        opponent_user_id: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Extrahiert Punktestände und die Top-Spender (MVPs) aus der Armies-Struktur.
+        Unterstützt 1v1, 2v2, 1v1v1 (3er) sowie 1v1v1v1 (4er-Einzel).
+        """
+        data = {
+            "streamer_score": 0,
+            "opponent_score": 0,
+            "teammate_score": 0,
+            "opponent2_score": 0,
+            "opponent3_score": 0,
+            "streamer_mvp_name": "",
+            "streamer_mvp_score": 0,
+            "streamer_mvp_avatar": "",
+            "opponent_mvp_name": "",
+            "opponent_mvp_score": 0,
+            "opponent_mvp_avatar": "",
+        }
+        if not armies:
+            return data
+
+        try:
+            if isinstance(armies, dict):
+                items = list(armies.values())
+            elif isinstance(armies, (list, tuple)):
+                items = list(armies)
+            else:
+                items = [armies]
+
+            streamer_uid = str((matchup or {}).get("streamer_user_id", "") or "")
+            teammate_uid = str((matchup or {}).get("teammate_user_id", "") or "")
+            opp1_uid = str((matchup or {}).get("opponent_user_id", "") or opponent_user_id or "")
+            opp2_uid = str((matchup or {}).get("opponent2_user_id", "") or "")
+            opp3_uid = str((matchup or {}).get("opponent3_user_id", "") or "")
+            b_mode = str((matchup or {}).get("battle_mode", "1v1") or "1v1")
+
+            for idx, item in enumerate(items):
+                val = getattr(item, "value", None) or item
+                hostscore = int(getattr(val, "hostscore", 0) or getattr(val, "team_total_score", 0) or 0)
+                anchor_id = str(getattr(val, "anchor_id_str", "") or getattr(item, "key", "") or "")
+
+                user_armies_raw = getattr(val, "user_armies", None)
+                if hasattr(user_armies_raw, "user_armies"):
+                    user_armies_raw = getattr(user_armies_raw, "user_armies", None)
+
+                if isinstance(user_armies_raw, dict):
+                    user_list = list(user_armies_raw.values())
+                elif isinstance(user_armies_raw, (list, tuple)):
+                    user_list = list(user_armies_raw)
+                elif user_armies_raw is not None and not hasattr(user_armies_raw, "__iter__"):
+                    user_list = [user_armies_raw]
+                else:
+                    user_list = []
+
+                mvp_name = ""
+                mvp_score = 0
+                mvp_avatar = ""
+                if user_list:
+                    top_u = user_list[0]
+                    mvp_name = str(getattr(top_u, "nickname", "") or getattr(top_u, "display_id", "") or "")
+                    mvp_score = int(getattr(top_u, "score", 0) or getattr(top_u, "diamond_score", 0) or 0)
+                    av_thumb = getattr(top_u, "avatar_thumb", None)
+                    if av_thumb:
+                        urls = getattr(av_thumb, "url_list", None) or []
+                        if urls:
+                            mvp_avatar = str(urls[0])
+
+                # Einzelpunkte aus team_user (2v2 Team-Battle)
+                team_users = getattr(val, "team_user", None) or []
+                team_user_uids = []
+                for tu in team_users:
+                    tu_uid = str(getattr(tu, "user_id", "") or "")
+                    tu_score = int(getattr(tu, "score", 0) or 0)
+                    team_user_uids.append(tu_uid)
+                    if tu_uid and tu_uid == teammate_uid:
+                        data["teammate_score"] = tu_score
+                    elif tu_uid and tu_uid == opp2_uid:
+                        data["opponent2_score"] = tu_score
+
+                # Zuordnung nach Modus
+                if b_mode in ("1v1v1", "1v1v1v1"):
+                    # Free-for-all: direkte Zuweisung nach anchor_id oder Reihenfolge
+                    if streamer_uid and anchor_id == streamer_uid:
+                        data["streamer_score"] = hostscore
+                        if mvp_name:
+                            data["streamer_mvp_name"] = mvp_name
+                            data["streamer_mvp_score"] = mvp_score
+                            data["streamer_mvp_avatar"] = mvp_avatar
+                    elif opp1_uid and anchor_id == opp1_uid:
+                        data["opponent_score"] = hostscore
+                        if mvp_name:
+                            data["opponent_mvp_name"] = mvp_name
+                            data["opponent_mvp_score"] = mvp_score
+                            data["opponent_mvp_avatar"] = mvp_avatar
+                    elif opp2_uid and anchor_id == opp2_uid:
+                        data["opponent2_score"] = hostscore
+                    elif opp3_uid and anchor_id == opp3_uid:
+                        data["opponent3_score"] = hostscore
+                    else:
+                        # Fallback nach Index
+                        if idx == 0:
+                            data["streamer_score"] = hostscore
+                            if mvp_name:
+                                data["streamer_mvp_name"] = mvp_name
+                                data["streamer_mvp_score"] = mvp_score
+                                data["streamer_mvp_avatar"] = mvp_avatar
+                        elif idx == 1:
+                            data["opponent_score"] = hostscore
+                            if mvp_name:
+                                data["opponent_mvp_name"] = mvp_name
+                                data["opponent_mvp_score"] = mvp_score
+                                data["opponent_mvp_avatar"] = mvp_avatar
+                        elif idx == 2:
+                            data["opponent2_score"] = hostscore
+                        elif idx == 3:
+                            data["opponent3_score"] = hostscore
+                else:
+                    # 1v1 oder 2v2
+                    is_streamer_side = False
+                    if streamer_uid and (anchor_id == streamer_uid or streamer_uid in team_user_uids):
+                        is_streamer_side = True
+                    elif teammate_uid and (anchor_id == teammate_uid or teammate_uid in team_user_uids):
+                        is_streamer_side = True
+                    elif opp1_uid and (anchor_id == opp1_uid or opp1_uid in team_user_uids):
+                        is_streamer_side = False
+                    elif opp2_uid and (anchor_id == opp2_uid or opp2_uid in team_user_uids):
+                        is_streamer_side = False
+                    elif idx == 0:
+                        is_streamer_side = True
+                    else:
+                        is_streamer_side = False
+
+                    if is_streamer_side:
+                        data["streamer_score"] = hostscore
+                        if mvp_name:
+                            data["streamer_mvp_name"] = mvp_name
+                            data["streamer_mvp_score"] = mvp_score
+                            data["streamer_mvp_avatar"] = mvp_avatar
+                    else:
+                        data["opponent_score"] = hostscore
+                        if mvp_name:
+                            data["opponent_mvp_name"] = mvp_name
+                            data["opponent_mvp_score"] = mvp_score
+                            data["opponent_mvp_avatar"] = mvp_avatar
+        except Exception as exc:
+            logger.debug(f"_extract_armies_and_mvps Parsing-Fehler: {exc}")
+
+        return data
+
+    def _handle_battle_event(self, event: Any) -> None:
+        """
+        Verarbeitet LinkMicBattleEvents (Start, Ende, Abbruch und Updates).
+        """
+        action_val = getattr(event, "action", None)
+        try:
+            action_int = int(action_val) if action_val is not None else 0
+        except Exception:
+            action_int = 0
+        action_str = str(action_val or "").upper()
+
+        battle_id = str(getattr(event, "battle_id", "") or "")
+        if not battle_id:
+            settings = getattr(event, "battle_settings", None)
+            if settings:
+                battle_id = str(getattr(settings, "battle_id", "") or "")
+
+        anchors_info = getattr(event, "anchors_info", None)
+        armies = getattr(event, "armies", None) or getattr(event, "team_armies", None)
+
+        # ACTION 4 = OPEN (Duell beginnt)
+        if action_int == 4 or "OPEN" in action_str:
+            matchup = self._extract_battle_matchup(event, anchors_info)
+            duration = 300
+            b_settings = getattr(event, "battle_settings", None)
+            if b_settings:
+                duration = int(getattr(b_settings, "duration", 300) or 300)
+
+            db_id = record_battle_start(
+                streamer_id=self.streamer_id,
+                battle_id=battle_id or str(int(time.time())),
+                opponent_username=matchup["opponent_username"],
+                opponent_display_name=matchup["opponent_display_name"],
+                opponent_avatar_url=matchup["opponent_avatar_url"],
+                opponent_user_id=matchup["opponent_user_id"],
+                session_id=self.diag.session_id,
+                duration_seconds=duration,
+                battle_mode=matchup["battle_mode"],
+                teammate_user_id=matchup["teammate_user_id"],
+                teammate_username=matchup["teammate_username"],
+                teammate_display_name=matchup["teammate_display_name"],
+                teammate_avatar_url=matchup["teammate_avatar_url"],
+                opponent2_user_id=matchup["opponent2_user_id"],
+                opponent2_username=matchup["opponent2_username"],
+                opponent2_display_name=matchup["opponent2_display_name"],
+                opponent2_avatar_url=matchup["opponent2_avatar_url"],
+                opponent3_user_id=matchup.get("opponent3_user_id", ""),
+                opponent3_username=matchup.get("opponent3_username", ""),
+                opponent3_display_name=matchup.get("opponent3_display_name", ""),
+                opponent3_avatar_url=matchup.get("opponent3_avatar_url", ""),
+            )
+
+            with self._lock:
+                self._active_battle = {
+                    "db_id": db_id,
+                    "battle_id": battle_id,
+                    "battle_mode": matchup["battle_mode"],
+                    "opponent_user_id": matchup["opponent_user_id"],
+                    "opponent_username": matchup["opponent_username"],
+                    "opponent_display_name": matchup["opponent_display_name"],
+                    "opponent_avatar_url": matchup["opponent_avatar_url"],
+                    "teammate_user_id": matchup["teammate_user_id"],
+                    "teammate_username": matchup["teammate_username"],
+                    "teammate_display_name": matchup["teammate_display_name"],
+                    "teammate_avatar_url": matchup["teammate_avatar_url"],
+                    "opponent2_user_id": matchup["opponent2_user_id"],
+                    "opponent2_username": matchup["opponent2_username"],
+                    "opponent2_display_name": matchup["opponent2_display_name"],
+                    "opponent2_avatar_url": matchup["opponent2_avatar_url"],
+                    "opponent3_user_id": matchup.get("opponent3_user_id", ""),
+                    "opponent3_username": matchup.get("opponent3_username", ""),
+                    "opponent3_display_name": matchup.get("opponent3_display_name", ""),
+                    "opponent3_avatar_url": matchup.get("opponent3_avatar_url", ""),
+                    "streamer_rank": 0,
+                    "started_at": datetime.now().isoformat(timespec="seconds"),
+                    "streamer_score": 0,
+                    "opponent_score": 0,
+                    "teammate_score": 0,
+                    "opponent2_score": 0,
+                    "opponent3_score": 0,
+                    "streamer_mvp_name": "",
+                    "streamer_mvp_score": 0,
+                    "streamer_mvp_avatar": "",
+                    "opponent_mvp_name": "",
+                    "opponent_mvp_score": 0,
+                    "opponent_mvp_avatar": "",
+                    "coins_earned": 0,
+                }
+
+            if matchup["battle_mode"] == "2v2":
+                mode_label = "2v2 (Team-Match)"
+            elif matchup["battle_mode"] == "1v1v1":
+                mode_label = "1v1v1 (3er-Match)"
+            elif matchup["battle_mode"] == "1v1v1v1":
+                mode_label = "1v1v1v1 (4er-Einzelmatch)"
+            else:
+                mode_label = "1v1 Duell"
+
+            opp_parts = []
+            if matchup.get("opponent_username"):
+                opp_parts.append(f"@{matchup['opponent_username']}")
+            if matchup.get("opponent2_username"):
+                opp_parts.append(f"@{matchup['opponent2_username']}")
+            if matchup.get("opponent3_username"):
+                opp_parts.append(f"@{matchup['opponent3_username']}")
+            opp_name_display = " & ".join(opp_parts) if opp_parts else "Gegner"
+            team_str = f" mit @{matchup['teammate_username']}" if matchup.get("teammate_username") else ""
+            self._log("INFO", f"⚔️ {mode_label} gestartet: @{self.username}{team_str} VS {opp_name_display} (Battle #{battle_id})")
+
+        # ACTION 5 = FINISH oder ACTION 6 = CUT_SHORT (Duell beendet)
+        elif action_int in (5, 6) or any(k in action_str for k in ("FINISH", "CUT_SHORT")):
+            active = None
+            with self._lock:
+                active = self._active_battle
+
+            army_data = self._extract_armies_and_mvps(armies, matchup=active)
+
+            s_score = army_data["streamer_score"] or (active.get("streamer_score", 0) if active else 0)
+            o_score = army_data["opponent_score"] or (active.get("opponent_score", 0) if active else 0)
+            tm_score = army_data.get("teammate_score", 0) or (active.get("teammate_score", 0) if active else 0)
+            op2_score = army_data.get("opponent2_score", 0) or (active.get("opponent2_score", 0) if active else 0)
+            op3_score = army_data.get("opponent3_score", 0) or (active.get("opponent3_score", 0) if active else 0)
+
+            b_mode = active.get("battle_mode", "1v1") if active else "1v1"
+            computed_rank = 0
+
+            if b_mode in ("1v1v1", "1v1v1v1"):
+                # Platzierungs-Auswertung für FFA Modi
+                scores = [("streamer", s_score), ("opp1", o_score), ("opp2", op2_score)]
+                if b_mode == "1v1v1v1":
+                    scores.append(("opp3", op3_score))
+                scores_sorted = sorted(scores, key=lambda x: x[1], reverse=True)
+                for idx, (who, _) in enumerate(scores_sorted):
+                    if who == "streamer":
+                        computed_rank = idx + 1
+                        break
+                if computed_rank == 1:
+                    if len(scores_sorted) > 1 and scores_sorted[0][1] == scores_sorted[1][1] and scores_sorted[0][1] > 0:
+                        result = "DRAW"
+                    else:
+                        result = "WIN"
+                else:
+                    result = "LOSE"
+            else:
+                if s_score > o_score:
+                    result = "WIN"
+                elif s_score < o_score:
+                    result = "LOSE"
+                elif s_score == o_score and (s_score > 0 or o_score > 0):
+                    result = "DRAW"
+                else:
+                    result = "CANCELLED" if action_int == 6 else "DRAW"
+
+            db_id = active.get("db_id") if active else None
+            if not db_id:
+                matchup = self._extract_battle_matchup(event, anchors_info)
+                b_mode = matchup["battle_mode"]
+                db_id = record_battle_start(
+                    streamer_id=self.streamer_id,
+                    battle_id=battle_id or str(int(time.time())),
+                    opponent_username=matchup["opponent_username"],
+                    opponent_display_name=matchup["opponent_display_name"],
+                    opponent_avatar_url=matchup["opponent_avatar_url"],
+                    opponent_user_id=matchup["opponent_user_id"],
+                    session_id=self.diag.session_id,
+                    battle_mode=matchup["battle_mode"],
+                    teammate_user_id=matchup["teammate_user_id"],
+                    teammate_username=matchup["teammate_username"],
+                    teammate_display_name=matchup["teammate_display_name"],
+                    teammate_avatar_url=matchup["teammate_avatar_url"],
+                    opponent2_user_id=matchup["opponent2_user_id"],
+                    opponent2_username=matchup["opponent2_username"],
+                    opponent2_display_name=matchup["opponent2_display_name"],
+                    opponent2_avatar_url=matchup["opponent2_avatar_url"],
+                    opponent3_user_id=matchup.get("opponent3_user_id", ""),
+                    opponent3_username=matchup.get("opponent3_username", ""),
+                    opponent3_display_name=matchup.get("opponent3_display_name", ""),
+                    opponent3_avatar_url=matchup.get("opponent3_avatar_url", ""),
+                    streamer_rank=computed_rank,
+                )
+
+            record_battle_finish(
+                battle_db_id=db_id,
+                streamer_score=s_score,
+                opponent_score=o_score,
+                result=result,
+                streamer_mvp_name=army_data["streamer_mvp_name"] or (active.get("streamer_mvp_name", "") if active else ""),
+                streamer_mvp_score=army_data["streamer_mvp_score"] or (active.get("streamer_mvp_score", 0) if active else 0),
+                streamer_mvp_avatar=army_data["streamer_mvp_avatar"] or (active.get("streamer_mvp_avatar", "") if active else ""),
+                opponent_mvp_name=army_data["opponent_mvp_name"] or (active.get("opponent_mvp_name", "") if active else ""),
+                opponent_mvp_score=army_data["opponent_mvp_score"] or (active.get("opponent_mvp_score", 0) if active else 0),
+                opponent_mvp_avatar=army_data["opponent_mvp_avatar"] or (active.get("opponent_mvp_avatar", "") if active else ""),
+                teammate_score=tm_score,
+                opponent2_score=op2_score,
+                opponent3_score=op3_score,
+                streamer_rank=computed_rank,
+                battle_mode=b_mode,
+            )
+
+            with self._lock:
+                self._active_battle = None
+
+            rank_str = f" (Platz #{computed_rank})" if computed_rank > 0 else ""
+            opp_label = active.get("opponent_username", "") if active else ""
+            opp_display = f"@{opp_label}" if opp_label else "Gegner"
+            self._log("INFO", f"⚔️ Duell beendet ({b_mode}): @{self.username} ({s_score:,}{rank_str}) VS {opp_display} ({o_score:,}) -> {result}!")
+
+        # Zwischenstände während des laufenden Matches
+        elif self._active_battle and armies:
+            army_data = self._extract_armies_and_mvps(armies, matchup=self._active_battle)
+            with self._lock:
+                if self._active_battle:
+                    self._active_battle["streamer_score"] = army_data["streamer_score"]
+                    self._active_battle["opponent_score"] = army_data["opponent_score"]
+                    if army_data.get("teammate_score"):
+                        self._active_battle["teammate_score"] = army_data["teammate_score"]
+                    if army_data.get("opponent2_score"):
+                        self._active_battle["opponent2_score"] = army_data["opponent2_score"]
+                    if army_data.get("opponent3_score"):
+                        self._active_battle["opponent3_score"] = army_data["opponent3_score"]
+
+                    if army_data["streamer_mvp_name"]:
+                        self._active_battle["streamer_mvp_name"] = army_data["streamer_mvp_name"]
+                        self._active_battle["streamer_mvp_score"] = army_data["streamer_mvp_score"]
+                        self._active_battle["streamer_mvp_avatar"] = army_data["streamer_mvp_avatar"]
+                    if army_data["opponent_mvp_name"]:
+                        self._active_battle["opponent_mvp_name"] = army_data["opponent_mvp_name"]
+                        self._active_battle["opponent_mvp_score"] = army_data["opponent_mvp_score"]
+                        self._active_battle["opponent_mvp_avatar"] = army_data["opponent_mvp_avatar"]
+                    db_id = self._active_battle["db_id"]
+
+            update_battle_scores(
+                battle_db_id=db_id,
+                streamer_score=army_data["streamer_score"],
+                opponent_score=army_data["opponent_score"],
+                teammate_score=army_data.get("teammate_score") or None,
+                opponent2_score=army_data.get("opponent2_score") or None,
+                opponent3_score=army_data.get("opponent3_score") or None,
+                streamer_mvp_name=army_data["streamer_mvp_name"] or None,
+                streamer_mvp_score=army_data["streamer_mvp_score"] or None,
+                streamer_mvp_avatar=army_data["streamer_mvp_avatar"] or None,
+                opponent_mvp_name=army_data["opponent_mvp_name"] or None,
+                opponent_mvp_score=army_data["opponent_mvp_score"] or None,
+                opponent_mvp_avatar=army_data["opponent_mvp_avatar"] or None,
+            )
+
+    def _handle_armies_event(self, event: Any) -> None:
+        """
+        Verarbeitet LinkMicArmiesEvents bei neuen Geschenken/Punkteständen während des Duells.
+        """
+        battle_id = str(getattr(event, "battle_id", "") or "")
+        armies = getattr(event, "armies", None) or getattr(event, "team_armies", None)
+        if not armies:
+            return
+
+        with self._lock:
+            active = self._active_battle
+
+        if not active:
+            # Falls kein OPEN-Event kam, matchup extrahieren
+            matchup = self._extract_battle_matchup(event)
+            db_id = record_battle_start(
+                streamer_id=self.streamer_id,
+                battle_id=battle_id or str(int(time.time())),
+                opponent_username=matchup["opponent_username"],
+                opponent_display_name=matchup["opponent_display_name"],
+                opponent_avatar_url=matchup["opponent_avatar_url"],
+                opponent_user_id=matchup["opponent_user_id"],
+                session_id=self.diag.session_id,
+                battle_mode=matchup["battle_mode"],
+                teammate_user_id=matchup["teammate_user_id"],
+                teammate_username=matchup["teammate_username"],
+                teammate_display_name=matchup["teammate_display_name"],
+                teammate_avatar_url=matchup["teammate_avatar_url"],
+                opponent2_user_id=matchup["opponent2_user_id"],
+                opponent2_username=matchup["opponent2_username"],
+                opponent2_display_name=matchup["opponent2_display_name"],
+                opponent2_avatar_url=matchup["opponent2_avatar_url"],
+                opponent3_user_id=matchup.get("opponent3_user_id", ""),
+                opponent3_username=matchup.get("opponent3_username", ""),
+                opponent3_display_name=matchup.get("opponent3_display_name", ""),
+                opponent3_avatar_url=matchup.get("opponent3_avatar_url", ""),
+            )
+            with self._lock:
+                self._active_battle = {
+                    "db_id": db_id,
+                    "battle_id": battle_id,
+                    "battle_mode": matchup["battle_mode"],
+                    "opponent_user_id": matchup["opponent_user_id"],
+                    "opponent_username": matchup["opponent_username"],
+                    "opponent_display_name": matchup["opponent_display_name"],
+                    "opponent_avatar_url": matchup["opponent_avatar_url"],
+                    "teammate_user_id": matchup["teammate_user_id"],
+                    "teammate_username": matchup["teammate_username"],
+                    "teammate_display_name": matchup["teammate_display_name"],
+                    "teammate_avatar_url": matchup["teammate_avatar_url"],
+                    "opponent2_user_id": matchup["opponent2_user_id"],
+                    "opponent2_username": matchup["opponent2_username"],
+                    "opponent2_display_name": matchup["opponent2_display_name"],
+                    "opponent2_avatar_url": matchup["opponent2_avatar_url"],
+                    "opponent3_user_id": matchup.get("opponent3_user_id", ""),
+                    "opponent3_username": matchup.get("opponent3_username", ""),
+                    "opponent3_display_name": matchup.get("opponent3_display_name", ""),
+                    "opponent3_avatar_url": matchup.get("opponent3_avatar_url", ""),
+                    "streamer_rank": 0,
+                    "started_at": datetime.now().isoformat(timespec="seconds"),
+                    "streamer_score": 0,
+                    "opponent_score": 0,
+                    "teammate_score": 0,
+                    "opponent2_score": 0,
+                    "opponent3_score": 0,
+                    "streamer_mvp_name": "",
+                    "streamer_mvp_score": 0,
+                    "streamer_mvp_avatar": "",
+                    "opponent_mvp_name": "",
+                    "opponent_mvp_score": 0,
+                    "opponent_mvp_avatar": "",
+                    "coins_earned": 0,
+                }
+                active = self._active_battle
+
+        army_data = self._extract_armies_and_mvps(armies, matchup=active)
+
+        with self._lock:
+            if self._active_battle:
+                self._active_battle["streamer_score"] = army_data["streamer_score"]
+                self._active_battle["opponent_score"] = army_data["opponent_score"]
+                if army_data.get("teammate_score"):
+                    self._active_battle["teammate_score"] = army_data["teammate_score"]
+                if army_data.get("opponent2_score"):
+                    self._active_battle["opponent2_score"] = army_data["opponent2_score"]
+                if army_data.get("opponent3_score"):
+                    self._active_battle["opponent3_score"] = army_data["opponent3_score"]
+
+                if army_data["streamer_mvp_name"]:
+                    self._active_battle["streamer_mvp_name"] = army_data["streamer_mvp_name"]
+                    self._active_battle["streamer_mvp_score"] = army_data["streamer_mvp_score"]
+                    self._active_battle["streamer_mvp_avatar"] = army_data["streamer_mvp_avatar"]
+                if army_data["opponent_mvp_name"]:
+                    self._active_battle["opponent_mvp_name"] = army_data["opponent_mvp_name"]
+                    self._active_battle["opponent_mvp_score"] = army_data["opponent_mvp_score"]
+                    self._active_battle["opponent_mvp_avatar"] = army_data["opponent_mvp_avatar"]
+                db_id = self._active_battle["db_id"]
+
+        update_battle_scores(
+            battle_db_id=db_id,
+            streamer_score=army_data["streamer_score"],
+            opponent_score=army_data["opponent_score"],
+            teammate_score=army_data.get("teammate_score") or None,
+            opponent2_score=army_data.get("opponent2_score") or None,
+            opponent3_score=army_data.get("opponent3_score") or None,
+            streamer_mvp_name=army_data["streamer_mvp_name"] or None,
+            streamer_mvp_score=army_data["streamer_mvp_score"] or None,
+            streamer_mvp_avatar=army_data["streamer_mvp_avatar"] or None,
+            opponent_mvp_name=army_data["opponent_mvp_name"] or None,
+            opponent_mvp_score=army_data["opponent_mvp_score"] or None,
+            opponent_mvp_avatar=army_data["opponent_mvp_avatar"] or None,
+        )
+
+    def _finish_active_battle_if_any(self) -> None:
+        """
+        Beendet ein offenes Duell beim Server-Shutdown oder Stream-Ende sauber.
+        """
+        with self._lock:
+            active = self._active_battle
+            self._active_battle = None
+        if not active:
+            return
+        try:
+            s_score = int(active.get("streamer_score", 0) or 0)
+            o_score = int(active.get("opponent_score", 0) or 0)
+            op2_score = int(active.get("opponent2_score", 0) or 0)
+            op3_score = int(active.get("opponent3_score", 0) or 0)
+            b_mode = active.get("battle_mode", "1v1")
+            computed_rank = 0
+
+            if b_mode in ("1v1v1", "1v1v1v1"):
+                scores = [("streamer", s_score), ("opp1", o_score), ("opp2", op2_score)]
+                if b_mode == "1v1v1v1":
+                    scores.append(("opp3", op3_score))
+                scores_sorted = sorted(scores, key=lambda x: x[1], reverse=True)
+                for idx, (who, _) in enumerate(scores_sorted):
+                    if who == "streamer":
+                        computed_rank = idx + 1
+                        break
+                if computed_rank == 1:
+                    if len(scores_sorted) > 1 and scores_sorted[0][1] == scores_sorted[1][1] and scores_sorted[0][1] > 0:
+                        res = "DRAW"
+                    else:
+                        res = "WIN"
+                else:
+                    res = "LOSE"
+            else:
+                if s_score > o_score:
+                    res = "WIN"
+                elif s_score < o_score:
+                    res = "LOSE"
+                else:
+                    res = "DRAW"
+
+            record_battle_finish(
+                battle_db_id=active["db_id"],
+                streamer_score=s_score,
+                opponent_score=o_score,
+                result=res,
+                streamer_mvp_name=active.get("streamer_mvp_name", ""),
+                streamer_mvp_score=active.get("streamer_mvp_score", 0),
+                streamer_mvp_avatar=active.get("streamer_mvp_avatar", ""),
+                opponent_mvp_name=active.get("opponent_mvp_name", ""),
+                opponent_mvp_score=active.get("opponent_mvp_score", 0),
+                opponent_mvp_avatar=active.get("opponent_mvp_avatar", ""),
+                teammate_score=active.get("teammate_score", 0),
+                opponent2_score=active.get("opponent2_score", 0),
+                opponent3_score=active.get("opponent3_score", 0),
+                streamer_rank=computed_rank,
+                battle_mode=active.get("battle_mode", "1v1"),
+            )
+        except Exception as exc:
+            logger.debug("Fehler beim Beenden des aktiven Battles für @%s: %s", self.username, exc)
+        except Exception as exc:
+            logger.debug("Fehler beim Beenden des aktiven Battles für @%s: %s", self.username, exc)
 
     def _cache_gift_catalog(self, gift_info: Any) -> None:
         if not isinstance(gift_info, dict):
@@ -870,6 +1689,10 @@ class StreamerWorker:
             with self._lock:
                 self.diag.gifts_received_session += repeat_count
                 self.diag.coins_received_session += coins
+                if self._active_battle is not None:
+                    self._active_battle["coins_earned"] = (
+                        self._active_battle.get("coins_earned", 0) + coins
+                    )
             self._log(
                 "INFO",
                 f"Gift erfasst: {repeat_count}x {gift_name} ({coins} Coins) von @{sender_username}",

@@ -21,6 +21,7 @@ try:
         InlineKeyboardButton,
         InlineKeyboardMarkup,
         Update,
+        WebAppInfo,
     )
     from telegram.constants import ChatType, ParseMode
     from telegram.ext import (
@@ -38,6 +39,7 @@ except ImportError:
     ContextTypes = Any  # type: ignore
     InlineKeyboardButton = Any  # type: ignore
     InlineKeyboardMarkup = Any  # type: ignore
+    WebAppInfo = Any  # type: ignore
 
 from config import BASE_DIR, config
 from database import (
@@ -419,6 +421,7 @@ class TelegramBotService:
 
             # Lese-Befehle
             self._app.add_handler(CommandHandler(["start", "help"], self._cmd_help))
+            self._app.add_handler(CommandHandler(["app", "miniapp"], self._cmd_miniapp))
             self._app.add_handler(CommandHandler(["id", "whoami"], self._cmd_whoami))
             self._app.add_handler(CommandHandler("report", self._cmd_report))
             self._app.add_handler(CommandHandler(["streamer", "stats"], self._cmd_streamer))
@@ -494,6 +497,7 @@ class TelegramBotService:
             return
         commands = [
             BotCommand("start", "Hauptmenü & Befehlsübersicht öffnen"),
+            BotCommand("app", "📱 toktracker Mini-App (Live-Matches & Einnahmen)"),
             BotCommand("report", "24h-Gesamtbericht aller überwachten Streamer abrufen"),
             BotCommand("streamer", "Einzelabfrage für einen Streamer"),
             BotCommand("status", "Laufzeit-Status aller aktiven TikTokLive-Worker prüfen"),
@@ -841,6 +845,7 @@ class TelegramBotService:
         html_text: str,
         banner_path: str,
         reply_to_message_id: Optional[int] = None,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
         if os.path.exists(banner_path):
             with open(banner_path, "rb") as photo_file:
@@ -851,6 +856,7 @@ class TelegramBotService:
                         caption=html_text,
                         parse_mode=ParseMode.HTML,
                         reply_to_message_id=reply_to_message_id,
+                        reply_markup=reply_markup,
                     )
                     return
                 else:
@@ -865,6 +871,7 @@ class TelegramBotService:
             text=html_text,
             parse_mode=ParseMode.HTML,
             reply_to_message_id=reply_to_message_id,
+            reply_markup=reply_markup,
         )
 
     async def send_report_now(
@@ -1043,18 +1050,100 @@ class TelegramBotService:
             "(Coins &amp; Diamonds) und berechnet die Netto-Creator-Auszahlung in <b>EUR (€)</b> und <b>USD ($)</b>.\n\n"
             f"{id_info} | <b>Modus:</b> <code>{access['mode'].upper()}</code>\n\n"
             "<b>📋 Abfrage-Befehle (Privatchat &amp; Gruppe):</b>\n"
+            "• <code>/app</code> – 📱 toktracker Mini-App (Live-Matches &amp; Einnahmen) öffnen\n"
             "• <code>/report [stunden]</code> – Gesamtbericht aller Streamer\n"
             "• <code>/streamer &lt;username&gt; [stunden]</code> – Einzelabfrage pro Streamer\n"
             "• <code>/status</code> – Laufzeit-Status aller TikTokLive-Worker\n"
             "• <code>/id</code> – Eigene User-ID &amp; Gruppen-ID prüfen"
             f"{admin_section}"
         )
+
+        buttons = []
+        webapp_url = (config.telegram_webapp_url or "").strip()
+        if webapp_url:
+            if webapp_url.lower().startswith("https://"):
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="📱 toktracker Mini-App öffnen",
+                        web_app=WebAppInfo(url=webapp_url),
+                    )
+                ])
+            else:
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="🌐 toktracker Web-App öffnen",
+                        url=webapp_url,
+                    )
+                ])
+
+        reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+
         await self._send_with_optional_banner(
             bot=context.bot,
             chat_id=chat_id,
             html_text=text,
             banner_path=WELCOME_BANNER_PATH,
             reply_to_message_id=update.effective_message.message_id if is_grp else None,
+            reply_markup=reply_markup,
+        )
+
+    async def _cmd_miniapp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message or not update.effective_chat:
+            return
+        access = await self._authorize(update, require_admin=False)
+        if not access:
+            return
+
+        is_grp = self._is_group_chat(update)
+        webapp_url = (config.telegram_webapp_url or "").strip()
+
+        buttons = []
+        if webapp_url:
+            if webapp_url.lower().startswith("https://"):
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="⚡ toktracker Mini-App öffnen",
+                        web_app=WebAppInfo(url=webapp_url),
+                    )
+                ])
+            else:
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="🌐 toktracker Web-App im Browser öffnen",
+                        url=webapp_url,
+                    )
+                ])
+
+        reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+
+        text = (
+            "📱 <b>toktracker Telegram Mini-App</b>\n\n"
+            "Verfolge alle Live-Battles (1v1, 2v2, 3er &amp; 4er-Matches), Punktestände "
+            "und Einnahmen in Echtzeit direkt in der Telegram Mini-App!\n\n"
+            "✨ <b>Features:</b>\n"
+            "• ⚔️ <b>Live-Matches:</b> Punktestände, MVPs &amp; Ranglisten in Echtzeit\n"
+            "• 💰 <b>Einnahmen:</b> Netto-Creator-Auszahlung (€/$), Coins &amp; Top-Gifter\n"
+            "• 👥 <b>Streamer-Monitor:</b> Live-Zuschauer, Status &amp; Tagesverdienst\n\n"
+        )
+        if webapp_url:
+            text += f"🔗 <b>URL:</b> <code>{html.escape(webapp_url)}</code>\n\nTippe auf den Button unten, um die Mini-App zu starten:"
+        else:
+            text += (
+                "ℹ️ <i>Hinweis:</i> Es ist noch keine <code>TELEGRAM_WEBAPP_URL</code> in der <code>.env</code> hinterlegt.\n"
+                "Du erreichst die Mini-App im Browser unter:\n"
+                f"👉 <code>http://localhost:{config.app_port}/miniapp</code>\n\n"
+                "<i>Tipp für native Telegram WebApps:</i>\n"
+                "Hinterlege deine öffentliche HTTPS-Adresse in der <code>.env</code>:\n"
+                "<code>TELEGRAM_WEBAPP_URL=https://deine-domain.de/miniapp</code>"
+            )
+
+        await self._send_with_optional_banner(
+            bot=context.bot,
+            chat_id=update.effective_chat.id,
+            html_text=text,
+            banner_path=WELCOME_BANNER_PATH,
+            reply_to_message_id=update.effective_message.message_id if is_grp else None,
+            reply_markup=reply_markup,
         )
 
     async def _cmd_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

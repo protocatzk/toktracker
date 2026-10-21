@@ -54,6 +54,9 @@
             <button type="button" class="tab-btn" data-tab="tab-analytics" id="tabBtnAnalytics">
                 Graphen &amp; Analytics <span class="tab-badge" id="badgeAnalytics">Live</span>
             </button>
+            <button type="button" class="tab-btn" data-tab="tab-battles" id="tabBtnBattles">
+                TikTok Battles &amp; Duelle <span class="tab-badge" id="badgeBattles">0</span>
+            </button>
             <button type="button" class="tab-btn" data-tab="tab-gifts">
                 Gift-Protokoll &amp; Buchung <span class="tab-badge" id="badgeGifts">0</span>
             </button>
@@ -75,7 +78,8 @@
                 <option value="30d">Letzte 30 Tage</option>
             </select>
             <button type="button" id="btnRefresh">Aktualisieren</button>
-            <a class="btn-link" href="/api/export/gifts.csv">CSV Export</a>
+            <a class="btn-link" href="/api/export/gifts.csv">Gifts CSV</a>
+            <a class="btn-link" href="/api/export/battles.csv">Battles CSV</a>
             <a class="btn-link" href="/docs" target="_blank">API Docs</a>
             <button type="button" id="btnThemeToggle" class="mono" title="Zwischen Dark Mode und Light Mode wechseln">Theme: DARK</button>
         </div>
@@ -452,6 +456,179 @@
     </section>
 
     <!-- ========================================================= -->
+    <!-- TAB: TIKTOK BATTLES & DUELLE                             -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-battles">
+        <!-- Filter- & Scope-Leiste -->
+        <div class="analytics-toolbar">
+            <div class="an-toolbar-group">
+                <label for="battleStreamerSelect">Streamer:</label>
+                <select id="battleStreamerSelect">
+                    <option value="">Alle Streamer</option>
+                </select>
+
+                <label for="battleResultSelect">Ergebnis:</label>
+                <select id="battleResultSelect">
+                    <option value="ALL">Alle Ergebnisse</option>
+                    <option value="WIN">🏆 Nur Siege</option>
+                    <option value="LOSE">❌ Nur Niederlagen</option>
+                    <option value="DRAW">🤝 Unentschieden</option>
+                    <option value="ONGOING">🔴 Laufende Duelle</option>
+                </select>
+
+                <label for="battleModeSelect">Modus:</label>
+                <select id="battleModeSelect">
+                    <option value="ALL">Alle Modi</option>
+                    <option value="1v1">1 vs 1 Matches</option>
+                    <option value="2v2">👥 2 vs 2 (Team-Matches)</option>
+                    <option value="1v1v1">🔺 1 vs 1 vs 1 (3er-Matches)</option>
+                    <option value="1v1v1v1">⚡ 1 vs 1 vs 1 vs 1 (4er-Einzelmatches)</option>
+                </select>
+
+                <label for="battlePeriodSelect">Zeitraum:</label>
+                <select id="battlePeriodSelect">
+                    <option value="all">Gesamt (All-Time)</option>
+                    <option value="today">Heute</option>
+                    <option value="24h">Letzte 24 Stunden</option>
+                    <option value="7d">Letzte 7 Tage</option>
+                    <option value="30d">Letzte 30 Tage</option>
+                </select>
+
+                <input type="text" id="inputBattleSearch" placeholder="Gegner suchen..." style="width:170px;" />
+            </div>
+
+            <div class="an-toolbar-actions">
+                <button type="button" id="btnRefreshBattles" class="sm">Aktualisieren</button>
+                <a class="btn-link sm" href="/api/export/battles.csv">CSV Export</a>
+            </div>
+        </div>
+
+        <!-- KPI Übersicht für Battles -->
+        <div class="battle-kpi-bar">
+            <div class="battle-kpi-card">
+                <div class="kpi-title">Duelle Gesamt</div>
+                <div class="kpi-val" id="kpiTotalBattles">0</div>
+                <div class="kpi-sub" id="kpiOngoingBattles">0 aktiv</div>
+            </div>
+            <div class="battle-kpi-card">
+                <div class="kpi-title">Winrate (Siegesquote)</div>
+                <div class="kpi-val" id="kpiBattleWinrate">0,0 %</div>
+                <div class="kpi-sub" id="kpiWinLossDraw">0S / 0N / 0U</div>
+            </div>
+            <div class="battle-kpi-card">
+                <div class="kpi-title">Duell-Einnahmen Netto</div>
+                <div class="kpi-val" id="kpiBattleNetEur">0,00 €</div>
+                <div class="kpi-sub" id="kpiBattleCoins">0 Coins</div>
+            </div>
+            <div class="battle-kpi-card">
+                <div class="kpi-title">Höchster Battle-Score</div>
+                <div class="kpi-val" id="kpiMaxScore">0 Pkt</div>
+                <div class="kpi-sub">Eigener Bestwert</div>
+            </div>
+            <div class="battle-kpi-card">
+                <div class="kpi-title">Häufigster Gegner</div>
+                <div class="kpi-val highlight" id="kpiTopRival">-</div>
+                <div class="kpi-sub" id="kpiTopRivalSub">Keine Duelle</div>
+            </div>
+        </div>
+
+        <!-- Live Duelle Banner (wenn aktiv) -->
+        <div id="liveActiveBattlesContainer" style="display:none;" class="box live-battle-box">
+            <div class="box-header">
+                <h2><span class="live-pulse"></span> Aktuell laufende TikTok Battles</h2>
+                <span class="mono muted">Echtzeit-Zwischenstände</span>
+            </div>
+            <div id="liveActiveBattlesList" class="live-active-list"></div>
+        </div>
+
+        <!-- Hauptbereich: Battle-Historie (Versus-Karten) -->
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>TikTok Battle Protokoll &amp; Matchup-Log</h2>
+                    <div class="section-hint">Vollständige Historie aller absolvierten Duelle mit Punkten, Kontrahenten, MVPs und Einnahmen. Klicke auf <strong>Grafik anzeigen</strong> für eine stilisierte Duell-Visualisierung.</div>
+                </div>
+                <span class="mono muted" id="battlesTableMeta">0 Duelle erfasst</span>
+            </div>
+
+            <!-- Liste der Versus Matchup Cards -->
+            <div id="battlesFeed" class="battles-feed">
+                <div class="empty-state-card" id="battlesEmptyState">
+                    <div class="empty-icon">⚔️</div>
+                    <div class="empty-title">Bisher keine TikTok Battles im ausgewählten Zeitraum erfasst</div>
+                    <div class="empty-hint">Sobald ein überwachter Streamer ein Duell startet, werden alle Punkte, Kontrahenten und Geschenke hier live protokolliert.</div>
+                </div>
+            </div>
+
+            <!-- Paginierung -->
+            <div class="battles-pagination" id="battlesPagination" style="display:none;">
+                <button type="button" id="btnBattlesPrev" class="sm" disabled>&larr; Vorherige</button>
+                <span class="mono muted" id="battlesPageInfo">Seite 1 von 1</span>
+                <button type="button" id="btnBattlesNext" class="sm" disabled>Nächste &rarr;</button>
+            </div>
+        </div>
+
+        <!-- Head-to-Head Rivalen-Tabelle -->
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Head-to-Head Bilanz gegen Kontrahenten</h2>
+                    <div class="section-hint">Auswertung der Duelle gegen häufige Gegner (Spiele, Siegesquote, durchschnittliche Scores).</div>
+                </div>
+                <span class="mono muted" id="rivalsCountMeta">Top 10 Rivalen</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Gegner / TikTok-Profil</th>
+                            <th class="num-col">Matches</th>
+                            <th class="num-col">Bilanz (S-N-U)</th>
+                            <th class="num-col">Winrate</th>
+                            <th class="num-col">Ø Eigener Score</th>
+                            <th class="num-col">Ø Gegner Score</th>
+                            <th class="num-col">Gesamt Coins</th>
+                            <th class="num-col">Netto EUR</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rivalsTableBody">
+                        <tr><td colspan="8" class="muted">Keine Rivalen-Daten vorhanden.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modal für die Stilisierte Battle-Grafik -->
+    <div class="modal-overlay" id="modalBattleGraphic" style="display:none;">
+        <div class="modal-dialog modal-battle-dialog">
+            <div class="modal-header">
+                <h3>⚔️ TikTok Battle Matchup-Grafik</h3>
+                <button type="button" class="btn-close" id="btnCloseBattleModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Stilisierte Battle Graphic Card -->
+                <div class="stylized-battle-card" id="stylizedBattleCard">
+                    <!-- Wird dynamisch mit Stilisierung befüllt -->
+                </div>
+
+                <!-- Hidden Canvas für PNG Export -->
+                <canvas id="battleExportCanvas" width="960" height="540" style="display:none;"></canvas>
+
+                <!-- Geschenke-Aufschlüsselung während des Matches -->
+                <div class="battle-modal-gifts" id="battleModalGiftsContainer" style="display:none;">
+                    <h4>Erhaltene Geschenke während des Duells</h4>
+                    <div class="battle-gifts-list" id="battleModalGiftsList"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="primary" id="btnDownloadBattlePng">📥 Grafik als PNG herunterladen</button>
+                <button type="button" id="btnCloseBattleModalBtn">Schließen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================= -->
     <!-- TAB 2: GIFT-PROTOKOLL & MANUELLE BUCHUNG                  -->
     <!-- ========================================================= -->
     <section class="tab-panel" id="tab-gifts">
@@ -673,6 +850,6 @@
     </div>
 </footer>
 
-<script src="/static/dashboard.js?v=2.5.1"></script>
+<script src="/static/dashboard.js?v=2.7.0"></script>
 </body>
 </html>

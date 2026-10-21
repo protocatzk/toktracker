@@ -73,6 +73,8 @@ class AppConfig:
     telegram_access_mode: str = os.getenv("TELEGRAM_ACCESS_MODE", "whitelist").strip().lower()
     # Kommagetrennte Telegram User-IDs oder [@]usernames aus der .env (Initial-Admins / erlaubte Nutzer)
     telegram_allowed_users_raw: str = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
+    # Optionale externe WebApp / Mini-App URL für Telegram (z.B. https://meine-domain.com/miniapp)
+    telegram_webapp_url: str = os.getenv("TELEGRAM_WEBAPP_URL", os.getenv("WEBAPP_URL", "")).strip()
 
     def __post_init__(self) -> None:
         # Falls DATABASE_URL (z.B. mysql://user:pass@host:3306/dbname) angegeben wurde, Parameter daraus übernehmen
@@ -151,6 +153,7 @@ class AppConfig:
             "has_web_proxy": bool(self.tiktok_web_proxy),
             "has_telegram_config": bool(self.telegram_bot_token),
             "telegram_access_mode": self.telegram_access_mode,
+            "telegram_webapp_url": self.telegram_webapp_url,
         }
 
 

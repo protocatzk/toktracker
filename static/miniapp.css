@@ -1,0 +1,733 @@
+/* =====================================================================
+   toktracker Telegram Mini-App & Mobile Stylesheet
+   Tailored for Mobile Form Factor & Telegram WebApp Viewport
+   ===================================================================== */
+
+:root {
+    --tg-theme-bg-color: #0b0e14;
+    --tg-theme-secondary-bg-color: #121824;
+    --tg-theme-text-color: #f1f5f9;
+    --tg-theme-hint-color: #8b9bb4;
+    --tg-theme-link-color: #38bdf8;
+    --tg-theme-button-color: #3b82f6;
+    --tg-theme-button-text-color: #ffffff;
+    
+    --bg-body: var(--tg-theme-bg-color, #0b0e14);
+    --bg-surface: var(--tg-theme-secondary-bg-color, #121824);
+    --bg-card: rgba(22, 30, 46, 0.75);
+    --bg-card-hover: rgba(30, 41, 64, 0.9);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    
+    --color-win: #10b981;
+    --color-lose: #ef4444;
+    --color-draw: #f59e0b;
+    --color-gold: #f59e0b;
+    --color-silver: #94a3b8;
+    --color-bronze: #b45309;
+    --color-brand: #38bdf8;
+    --color-accent: #a855f7;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    background-color: var(--bg-body);
+    color: var(--tg-theme-text-color);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    padding-bottom: 74px; /* Platz für Sticky Bottom Navigation */
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Telegram Safe Area Padding */
+.app-container {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 12px 14px 20px 14px;
+}
+
+/* Mini-App Header */
+.ma-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 12px;
+}
+
+.ma-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ma-brand-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    object-fit: cover;
+    border: 1px solid var(--border-subtle);
+}
+
+.ma-brand-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ma-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--color-brand);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.ma-brand-sub {
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+}
+
+.ma-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-icon-refresh {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--tg-theme-text-color);
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    transition: transform 0.2s, background 0.15s;
+}
+
+.btn-icon-refresh:active {
+    transform: scale(0.92);
+}
+
+.btn-icon-refresh.spinning svg {
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Zeitraum Filter Pills */
+.ma-period-selector {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 2px 0 10px 0;
+    scrollbar-width: none;
+}
+
+.ma-period-selector::-webkit-scrollbar {
+    display: none;
+}
+
+.period-pill {
+    padding: 5px 12px;
+    border-radius: 20px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--tg-theme-hint-color);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.period-pill.active {
+    background: var(--color-brand);
+    color: #0b0e14;
+    border-color: var(--color-brand);
+    font-weight: 700;
+}
+
+/* KPI Summary Cards Grid */
+.ma-kpi-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.ma-kpi-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+.ma-kpi-card.full-width {
+    grid-column: span 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(168, 85, 247, 0.12) 100%);
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+.kpi-label {
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.kpi-value {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-family: var(--font-mono);
+}
+
+.kpi-value.highlight {
+    color: #38bdf8;
+    font-size: 22px;
+}
+
+.kpi-sub {
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+    margin-top: 2px;
+}
+
+/* Live Active Pulse Banner */
+.ma-live-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 10px;
+    margin-bottom: 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #34d399;
+}
+
+.ma-live-banner.no-active {
+    background: rgba(148, 163, 184, 0.08);
+    border-color: var(--border-subtle);
+    color: var(--tg-theme-hint-color);
+}
+
+.live-pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+    animation: livePulse 1.8s infinite;
+}
+
+@keyframes livePulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* Tab Views */
+.ma-tab-view {
+    display: none;
+}
+
+.ma-tab-view.active {
+    display: block;
+}
+
+.section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 12px 0 8px 0;
+}
+
+.section-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--tg-theme-hint-color);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.section-counter {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    color: var(--tg-theme-text-color);
+    font-family: var(--font-mono);
+}
+
+/* Mobile Battle Cards */
+.battle-card-mobile {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    position: relative;
+    overflow: hidden;
+}
+
+.battle-card-mobile.active-match {
+    border-color: rgba(56, 189, 248, 0.4);
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, rgba(22, 30, 46, 0.8) 100%);
+}
+
+.battle-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 11px;
+}
+
+.match-mode-pill {
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--tg-theme-text-color);
+    border: 1px solid var(--border-subtle);
+}
+
+.match-mode-pill.mode-1v1 { color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); }
+.match-mode-pill.mode-2v2 { color: #c084fc; border-color: rgba(192, 132, 252, 0.3); }
+.match-mode-pill.mode-1v1v1 { color: #f59e0b; border-color: rgba(245, 158, 11, 0.3); }
+.match-mode-pill.mode-1v1v1v1 { color: #ec4899; border-color: rgba(236, 72, 153, 0.3); }
+
+.match-result-badge {
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-weight: 800;
+    font-size: 10px;
+}
+
+.match-result-badge.win { background: rgba(16, 185, 129, 0.15); color: var(--color-win); border: 1px solid rgba(16, 185, 129, 0.3); }
+.match-result-badge.lose { background: rgba(239, 68, 68, 0.15); color: var(--color-lose); border: 1px solid rgba(239, 68, 68, 0.3); }
+.match-result-badge.draw { background: rgba(245, 158, 11, 0.15); color: var(--color-draw); border: 1px solid rgba(245, 158, 11, 0.3); }
+.match-result-badge.live { background: rgba(56, 189, 248, 0.15); color: var(--color-brand); border: 1px solid rgba(56, 189, 248, 0.3); animation: pulse 1.5s infinite; }
+
+/* 1v1 Battle Arena (Mobile) */
+.battle-arena-1v1 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.combatant-side {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 42%;
+    text-align: center;
+}
+
+.combatant-avatar-wrap {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    margin-bottom: 4px;
+}
+
+.combatant-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--border-subtle);
+}
+
+.winner-glow {
+    border-color: #10b981 !important;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+.rank-crown {
+    position: absolute;
+    top: -6px;
+    right: -4px;
+    font-size: 13px;
+}
+
+.combatant-name {
+    font-size: 12px;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.combatant-score {
+    font-size: 15px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    margin-top: 2px;
+}
+
+.vs-center-mobile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 16%;
+}
+
+.vs-text {
+    font-weight: 900;
+    font-size: 12px;
+    color: var(--tg-theme-hint-color);
+}
+
+/* Relative Duel Score Bar */
+.duel-score-bar-mobile {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    display: flex;
+    overflow: hidden;
+    margin: 8px 0;
+}
+
+.bar-side-left {
+    height: 100%;
+    background: #38bdf8;
+    transition: width 0.3s ease;
+}
+
+.bar-side-right {
+    height: 100%;
+    background: #ef4444;
+    transition: width 0.3s ease;
+}
+
+/* FFA Leaderboard Card Rows (3er & 4er) */
+.ffa-ranks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.ffa-row-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background: var(--bg-surface);
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+}
+
+.ffa-row-item.is-tracked {
+    border-color: rgba(56, 189, 248, 0.4);
+    background: rgba(56, 189, 248, 0.08);
+}
+
+.ffa-player-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ffa-rank-tag {
+    font-size: 11px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    width: 24px;
+}
+
+.ffa-avatar-small {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border-subtle);
+}
+
+.ffa-name {
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ffa-score {
+    font-size: 13px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: var(--tg-theme-text-color);
+}
+
+/* Battle Card Footer */
+.battle-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border-subtle);
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+}
+
+.battle-earnings-badge {
+    color: #34d399;
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+
+/* Streamer Cards List */
+.streamer-card-mobile {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background 0.15s;
+}
+
+.streamer-card-mobile.is-live {
+    border-color: rgba(16, 185, 129, 0.3);
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.06) 0%, rgba(22, 30, 46, 0.7) 100%);
+}
+
+.streamer-info-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.streamer-avatar-box {
+    position: relative;
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+}
+
+.streamer-avatar-ma {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border-subtle);
+}
+
+.streamer-live-dot {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 11px;
+    height: 11px;
+    background: #10b981;
+    border: 2px solid var(--bg-surface);
+    border-radius: 50%;
+}
+
+.streamer-text-col {
+    min-width: 0;
+}
+
+.streamer-title {
+    font-size: 13px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.streamer-subtitle {
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+}
+
+.streamer-financials-right {
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.streamer-eur-net {
+    font-size: 14px;
+    font-weight: 800;
+    color: #38bdf8;
+    font-family: var(--font-mono);
+}
+
+.streamer-coins {
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+    font-family: var(--font-mono);
+}
+
+/* Gifts Ticker List (Mobile) */
+.gift-item-mobile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+.gift-sender-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.gift-icon-placeholder {
+    width: 28px;
+    height: 28px;
+    background: rgba(56, 189, 248, 0.15);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.gift-text-wrap {
+    min-width: 0;
+}
+
+.gift-sender-name {
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gift-target-streamer {
+    font-size: 10px;
+    color: var(--tg-theme-hint-color);
+}
+
+.gift-coins-val {
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: #f59e0b;
+    flex-shrink: 0;
+}
+
+/* Bottom Navigation Bar (Telegram Native Style) */
+.ma-bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 58px;
+    background: rgba(18, 24, 36, 0.95);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    z-index: 100;
+    max-width: 520px;
+    margin: 0 auto;
+}
+
+.nav-tab-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: none;
+    border: none;
+    color: var(--tg-theme-hint-color);
+    font-size: 10px;
+    font-weight: 600;
+    gap: 3px;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.nav-tab-btn svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2;
+    transition: transform 0.15s;
+}
+
+.nav-tab-btn.active {
+    color: var(--color-brand);
+}
+
+.nav-tab-btn.active svg {
+    transform: scale(1.1);
+}
+
+/* Empty State / Loading State */
+.ma-empty-state {
+    text-align: center;
+    padding: 30px 16px;
+    color: var(--tg-theme-hint-color);
+    font-size: 13px;
+}
+
+.ma-empty-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}

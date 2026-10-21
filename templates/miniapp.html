@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>toktracker Mini-App</title>
+    
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <link rel="stylesheet" href="/static/miniapp.css?v=1.0.0" />
+</head>
+<body>
+
+<div class="app-container">
+
+    <!-- Mini-App Header -->
+    <header class="ma-header">
+        <div class="ma-brand">
+            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="ma-brand-logo" onerror="this.src='/static/avatar_default.png'" />
+            <div>
+                <div class="ma-brand-title">
+                    toktracker <span class="ma-badge">Mini-App</span>
+                </div>
+                <div class="ma-brand-sub" id="kpiLiveCount">-- LIVE</div>
+            </div>
+        </div>
+
+        <div class="ma-header-actions">
+            <button type="button" class="btn-icon-refresh" id="maBtnRefresh" title="Aktualisieren" aria-label="Aktualisieren">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Zeitraum Pills -->
+    <div class="ma-period-selector">
+        <button type="button" class="period-pill active" data-period="today">Heute</button>
+        <button type="button" class="period-pill" data-period="24h">24 Stunden</button>
+        <button type="button" class="period-pill" data-period="7d">7 Tage</button>
+        <button type="button" class="period-pill" data-period="30d">30 Tage</button>
+        <button type="button" class="period-pill" data-period="all">Gesamt</button>
+    </div>
+
+    <!-- Live Status Pulse Banner -->
+    <div class="ma-live-banner no-active" id="maLiveBanner">
+        <div class="live-pulse-dot"></div>
+        <span id="maLiveBannerText">Verbinde mit toktracker System...</span>
+    </div>
+
+    <!-- Compact KPI Grid -->
+    <div class="ma-kpi-grid">
+        <div class="ma-kpi-card full-width">
+            <div>
+                <div class="kpi-label">💰 Netto Creator-Auszahlung</div>
+                <div class="kpi-value highlight" id="kpiNetEur">0,00 €</div>
+            </div>
+            <div style="text-align: right;">
+                <div class="kpi-sub" id="kpiNetUsd">$0.00 USD</div>
+                <div class="kpi-sub" style="color: #38bdf8;">~50% Netto-Quote</div>
+            </div>
+        </div>
+
+        <div class="ma-kpi-card">
+            <div class="kpi-label">💎 Erfasste Coins</div>
+            <div class="kpi-value" id="kpiCoins">0</div>
+            <div class="kpi-sub">Diamonds gesamt</div>
+        </div>
+
+        <div class="ma-kpi-card">
+            <div class="kpi-label">🎁 Geschenke</div>
+            <div class="kpi-value" id="kpiGifts">0</div>
+            <div class="kpi-sub">Live Gift-Events</div>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- TAB 1: BATTLES & LIVE MATCHES                                  -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view active" id="tab-matches">
+        <!-- Live Active Battles Area -->
+        <div id="maLiveBattlesContainer"></div>
+
+        <div class="section-head">
+            <div class="section-title">⚔️ Match-Historie (1v1, 2v2, 3er & 4er)</div>
+        </div>
+        <div id="maRecentBattlesContainer">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Matches & Duelle...</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- TAB 2: STREAMER ÜBERSICHT                                      -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-streamers">
+        <div class="section-head">
+            <div class="section-title">👥 Streamer Monitor & Ranking</div>
+        </div>
+        <div id="maStreamersContainer">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Streamer-Daten...</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- TAB 3: LIVE GIFT TICKER                                        -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-gifts">
+        <div class="section-head">
+            <div class="section-title">🎁 Letzte Geschenke (Echtzeit)</div>
+        </div>
+        <div id="maGiftsContainer">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Gift-Ticker...</div>
+            </div>
+        </div>
+    </section>
+
+</div>
+
+<!-- Bottom Navigation Bar (Telegram Native Mobile Style) -->
+<nav class="ma-bottom-nav">
+    <button type="button" class="nav-tab-btn active" data-tab="tab-matches">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M14.5 17.5L3 6V3h3l11.5 11.5"/>
+            <path d="M13 19l6-6"/>
+            <path d="M16 16l4 4"/>
+            <path d="M19 21l2-2"/>
+            <path d="M9.5 6.5L18 15"/>
+        </svg>
+        <span>Matches</span>
+    </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-streamers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span>Streamer</span>
+    </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-gifts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <polyline points="20 12 20 22 4 22 4 12"/>
+            <rect x="2" y="7" width="20" height="5"/>
+            <line x1="12" y1="22" x2="12" y2="7"/>
+            <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+            <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+        </svg>
+        <span>Gifts</span>
+    </button>
+</nav>
+
+<script src="/static/miniapp.js?v=1.0.0"></script>
+</body>
+</html>

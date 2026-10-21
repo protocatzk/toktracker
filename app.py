@@ -18,6 +18,9 @@ from database import (
     delete_streamer,
     delete_telegram_user,
     get_analytics_data,
+    get_battles_list,
+    get_battle_stats,
+    get_battle_details,
     get_dashboard_overview,
     get_db,
     get_settings,
@@ -191,6 +194,28 @@ async def public_panel(request: Request):
         context={
             "telegram_bot_username": tg_diag.get("bot_username") or "",
             "telegram_state": tg_diag.get("state") or "offline",
+        },
+    )
+
+
+@app.get("/miniapp", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/webapp", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/app", response_class=HTMLResponse, include_in_schema=False)
+async def miniapp_page(request: Request):
+    """
+    Mobile-First Telegram Mini-App & WebApp (/miniapp):
+    Kompakte Übersicht über Live-Matches, Einnahmen, Streamer und Geschenke.
+    """
+    init_db()
+    monitor_manager.autostart_from_db()
+    tg_diag = telegram_bot_service.get_diagnostics()
+    return templates.TemplateResponse(
+        request=request,
+        name="miniapp.html",
+        context={
+            "telegram_bot_username": tg_diag.get("bot_username") or "",
+            "telegram_state": tg_diag.get("state") or "offline",
+            "webapp_url": config.telegram_webapp_url or "",
         },
     )
 
@@ -411,6 +436,115 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
 
 
 # =====================================================================
+# TELEGRAM MINI-APP API (MOBILE-FIRST)
+# =====================================================================
+
+@app.get(
+    "/api/miniapp/data",
+    tags=["Telegram Mini-App"],
+    summary="Kompakter Daten-Feed für die Telegram Mini-App (Live-Matches, Einnahmen, Streamer)",
+)
+async def api_miniapp_data(period: str = Query("today", description="today | 24h | 7d | 30d | all")):
+    init_db()
+    monitor_manager.autostart_from_db()
+
+    # 1. Dashboard-Übersicht & Einnahmen
+    overview = get_dashboard_overview(period=period)
+    totals = overview.get("totals", {})
+    cfg = overview.get("settings", {})
+
+    # 2. Streamer-Liste
+    streamers = []
+    streamer_map = {}
+    for s in overview.get("streamers", []):
+        uname = s["username"]
+        is_live = bool(s.get("is_live"))
+        is_tracking = monitor_manager.is_tracking(uname)
+        s_data = {
+            "id": s["id"],
+            "username": uname,
+            "display_name": s.get("display_name") or uname,
+            "avatar_url": s.get("avatar_url") or "",
+            "is_live": is_live,
+            "is_tracking": is_tracking,
+            "current_viewers": s.get("current_viewers") or 0,
+            "follower_count": s.get("follower_count") or 0,
+            "total_coins": s.get("total_coins") or 0,
+            "eur_net": s.get("eur_net") or 0.0,
+            "usd_net": s.get("usd_net") or 0.0,
+            "eur_gross": s.get("eur_gross") or 0.0,
+            "gift_events_count": s.get("gift_events_count") or 0,
+            "total_gifts_sent": s.get("total_gifts_sent") or 0,
+            "last_seen_at": s.get("last_seen_at"),
+        }
+        streamers.append(s_data)
+        streamer_map[s["id"]] = s_data
+        streamer_map[uname.lower()] = s_data
+
+    # Streamer sortieren: Erst LIVE, dann nach höchstem Umsatz
+    streamers.sort(key=lambda x: (not x["is_live"], -x["eur_net"], -x["total_coins"]))
+
+    # 3. Live aktive Battles aus den aktiven Workern
+    diag = monitor_manager.get_all_diagnostics()
+    live_battles = []
+    for w in diag.get("workers", []):
+        ab = w.get("active_battle")
+        if not ab:
+            continue
+        uname = w.get("username", "")
+        s_info = streamer_map.get(w.get("streamer_id")) or streamer_map.get(uname.lower()) or {}
+        live_battles.append({
+            "streamer_id": w.get("streamer_id"),
+            "username": uname,
+            "display_name": s_info.get("display_name") or uname,
+            "avatar_url": s_info.get("avatar_url") or "",
+            "battle": ab,
+        })
+
+    # 4. Kürzliche Battles
+    battles_resp = get_battles_list(period=period, limit=25)
+    recent_battles = battles_resp.get("battles", [])
+
+    # 5. Battle Stats
+    battle_stats = get_battle_stats(period=period)
+
+    # 6. Telegram Bot Info
+    tg_diag = telegram_bot_service.get_diagnostics()
+
+    return {
+        "period": period,
+        "totals": totals,
+        "live_battles": live_battles,
+        "recent_battles": recent_battles,
+        "streamers": streamers,
+        "recent_gifts": overview.get("recent_gifts", [])[:15],
+        "battle_stats": battle_stats,
+        "rates": {
+            "usd_per_diamond": cfg.get("usd_per_diamond", 0.005),
+            "gross_usd_per_coin": cfg.get("gross_usd_per_coin", 0.0106),
+            "usd_to_eur_rate": cfg.get("usd_to_eur_rate", 0.92),
+        },
+        "bot": {
+            "username": tg_diag.get("bot_username") or "",
+            "state": tg_diag.get("state") or "offline",
+        },
+    }
+
+
+@app.get(
+    "/api/miniapp/battles/{battle_id}",
+    tags=["Telegram Mini-App"],
+    summary="Detail-Informationen zu einem einzelnen Battle für die Mini-App",
+)
+async def api_miniapp_battle_detail(battle_id: int):
+    init_db()
+    battle = get_battle_details(battle_id)
+    if not battle:
+        raise HTTPException(status_code=404, detail="Battle nicht gefunden")
+    return battle
+
+
+# =====================================================================
 # 2. TELEGRAM-BOT SPEZIAL-ENDPOINTS (v1) – GESCHÜTZT DURCH ADMIN-AUTH ODER API-KEY
 # =====================================================================
 
@@ -566,6 +700,64 @@ async def api_analytics(
     init_db()
     monitor_manager.autostart_from_db()
     return get_analytics_data(streamer_id=streamer_id, period=period)
+
+
+@app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_get_battles(
+    streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+    result: Optional[str] = Query(None, description="WIN | LOSE | DRAW | ONGOING"),
+    mode: Optional[str] = Query(None, description="1v1 | 2v2"),
+    search: Optional[str] = Query(None, description="Suche nach Gegner-Name"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    init_db()
+    monitor_manager.autostart_from_db()
+    data = get_battles_list(
+        streamer_id=streamer_id,
+        period=period,
+        result_filter=result,
+        mode_filter=mode,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    # Laufende Battles aus aktiven Workern erfassen
+    diag = monitor_manager.get_all_diagnostics()
+    live_active = [
+        {
+            "streamer_id": s["streamer_id"],
+            "username": s["username"],
+            "battle": s["active_battle"],
+        }
+        for s in diag.get("workers", [])
+        if s.get("active_battle")
+    ]
+    data["live_active_battles"] = live_active
+    return data
+
+
+@app.get("/api/battles/stats", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/battles/stats", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_get_battle_stats(
+    streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+):
+    init_db()
+    monitor_manager.autostart_from_db()
+    return get_battle_stats(streamer_id=streamer_id, period=period)
+
+
+@app.get("/api/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_get_battle_detail(battle_id: int):
+    init_db()
+    battle = get_battle_details(battle_id)
+    if not battle:
+        raise HTTPException(status_code=404, detail="Battle nicht gefunden")
+    return battle
 
 
 @app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
@@ -784,6 +976,104 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=toktracker_gifts_export.csv"},
+    )
+
+
+@app.get("/api/export/battles.csv", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_export_battles_csv(streamer_id: Optional[int] = Query(None)):
+    init_db()
+    with get_db() as conn:
+        if streamer_id:
+            rows = conn.execute(
+                """
+                SELECT b.*, s.username AS streamer_username
+                FROM tiktok_battles b
+                JOIN streamers s ON s.id = b.streamer_id
+                WHERE b.streamer_id = ?
+                ORDER BY b.started_at DESC
+                """,
+                (streamer_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT b.*, s.username AS streamer_username
+                FROM tiktok_battles b
+                JOIN streamers s ON s.id = b.streamer_id
+                ORDER BY b.started_at DESC
+                """
+            ).fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
+    writer.writerow(
+        [
+            "id",
+            "battle_id",
+            "battle_mode",
+            "streamer_username",
+            "streamer_score",
+            "teammate_username",
+            "teammate_score",
+            "opponent_username",
+            "opponent_display_name",
+            "opponent_score",
+            "opponent2_username",
+            "opponent2_score",
+            "opponent3_username",
+            "opponent3_score",
+            "streamer_rank",
+            "started_at",
+            "ended_at",
+            "duration_seconds",
+            "result",
+            "streamer_mvp_name",
+            "streamer_mvp_score",
+            "opponent_mvp_name",
+            "opponent_mvp_score",
+            "coins_earned",
+            "eur_net",
+            "usd_net",
+            "status",
+        ]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r["id"],
+                r["battle_id"],
+                r["battle_mode"] or "1v1",
+                r["streamer_username"],
+                r["streamer_score"],
+                r["teammate_username"] or "",
+                r["teammate_score"] or 0,
+                r["opponent_username"],
+                r["opponent_display_name"],
+                r["opponent_score"],
+                r["opponent2_username"] or "",
+                r["opponent2_score"] or 0,
+                r["opponent3_username"] or "",
+                r["opponent3_score"] or 0,
+                r["streamer_rank"] or 0,
+                r["started_at"],
+                r["ended_at"] or "",
+                r["duration_seconds"],
+                r["result"],
+                r["streamer_mvp_name"] or "",
+                r["streamer_mvp_score"] or 0,
+                r["opponent_mvp_name"] or "",
+                r["opponent_mvp_score"] or 0,
+                r["coins_earned"] or 0,
+                r["eur_net"] or 0.0,
+                r["usd_net"] or 0.0,
+                r["status"],
+            ]
+        )
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=tiktok_battles_export.csv"},
     )
 
 

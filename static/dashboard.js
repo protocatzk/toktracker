@@ -27,6 +27,16 @@ function fmtNum(v) {
     return new Intl.NumberFormat("de-DE").format(v || 0);
 }
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function getChartThemeColors() {
     const isDark = (document.documentElement.getAttribute("data-theme") || "dark") === "dark";
     return {
@@ -80,6 +90,11 @@ function switchTab(tabId) {
     if (tabId === "tab-analytics") {
         setTimeout(() => {
             loadAnalytics();
+        }, 50);
+    } else if (tabId === "tab-battles") {
+        setTimeout(() => {
+            loadBattles();
+            loadBattleStats();
         }, 50);
     }
 }
@@ -153,6 +168,7 @@ async function loadOverview() {
         );
         populateSimulatorSelect(cachedStreamers);
         populateAnalyticsStreamerSelect(cachedStreamers);
+        populateBattleStreamerSelect(cachedStreamers);
     } catch (e) {
         console.error("Fehler beim Laden:", e);
     }
@@ -1211,6 +1227,1264 @@ async function loadAnalytics(isBackground = false) {
 }
 
 
+/* ==========================================================================
+   TIKTOK BATTLES & DUELLE LOGIK
+   ========================================================================== */
+let battleStreamerId = "";
+let battleResultFilter = "ALL";
+let battleModeFilter = "ALL";
+let battlePeriod = "all";
+let battleSearchTerm = "";
+let battleCurrentPage = 0;
+const BATTLE_PAGE_SIZE = 20;
+let currentSelectedBattle = null;
+
+function populateBattleStreamerSelect(streamers) {
+    const sel = document.getElementById("battleStreamerSelect");
+    if (!sel) return;
+    const currentVal = sel.value || battleStreamerId || "";
+
+    sel.innerHTML = `<option value="">Alle Streamer</option>` +
+        streamers.map((s) => `<option value="${s.id}">@${escapeHtml(s.username)} (${escapeHtml(s.display_name || s.username)})</option>`).join("");
+
+    if (currentVal && Array.from(sel.options).some(o => o.value === currentVal)) {
+        sel.value = currentVal;
+    } else {
+        sel.value = "";
+    }
+}
+
+async function loadBattles(isSilent = false) {
+    try {
+        const params = new URLSearchParams();
+        if (battleStreamerId) params.append("streamer_id", battleStreamerId);
+        if (battlePeriod) params.append("period", battlePeriod);
+        if (battleResultFilter && battleResultFilter !== "ALL") params.append("result", battleResultFilter);
+        if (battleModeFilter && battleModeFilter !== "ALL") params.append("mode", battleModeFilter);
+        if (battleSearchTerm) params.append("search", battleSearchTerm);
+        params.append("limit", String(BATTLE_PAGE_SIZE));
+        params.append("offset", String(battleCurrentPage * BATTLE_PAGE_SIZE));
+
+        const res = await fetch(`/api/battles?${params.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Update Tab-Badge
+        const badge = document.getElementById("badgeBattles");
+        if (badge) {
+            const liveCount = (data.live_active_battles || []).length;
+            if (liveCount > 0) {
+                badge.textContent = `${liveCount} LIVE`;
+                badge.style.background = "#ef4444";
+                badge.style.color = "#ffffff";
+            } else {
+                badge.textContent = fmtNum(data.total || 0);
+                badge.style.background = "";
+                badge.style.color = "";
+            }
+        }
+
+        renderLiveActiveBattles(data.live_active_battles || []);
+        renderBattlesFeed(data);
+    } catch (e) {
+        if (!isSilent) console.error("Fehler loadBattles:", e);
+    }
+}
+
+function renderLiveActiveBattles(liveBattles) {
+    const container = document.getElementById("liveActiveBattlesContainer");
+    const list = document.getElementById("liveActiveBattlesList");
+    if (!container || !list) return;
+
+    const validLive = liveBattles.filter(item => item && item.battle);
+    if (validLive.length === 0) {
+        container.style.display = "none";
+        list.innerHTML = "";
+        return;
+    }
+
+    container.style.display = "block";
+    list.innerHTML = validLive.map(item => {
+        const b = item.battle || {};
+        const sName = escapeHtml(item.username || "Streamer");
+        const oName = escapeHtml(b.opponent_display_name || b.opponent_username || "Gegner");
+        const sScore = (b.streamer_score || 0).toLocaleString("de-DE");
+        const oScore = (b.opponent_score || 0).toLocaleString("de-DE");
+        const coins = (b.coins_earned || 0).toLocaleString("de-DE");
+
+        const bMode = b.battle_mode || "1v1";
+        const is2v2 = bMode === "2v2" || Boolean(b.teammate_username);
+        const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
+
+        let modeBadge = `<span class="mode-badge mode-1v1" style="font-size:10px; padding:1px 5px;">1v1</span>`;
+        if (bMode === "2v2") {
+            modeBadge = `<span class="mode-badge mode-2v2" style="font-size:10px; padding:1px 5px;">2v2</span>`;
+        } else if (bMode === "1v1v1") {
+            modeBadge = `<span class="mode-badge mode-1v1v1" style="font-size:10px; padding:1px 5px;">1v1v1</span>`;
+        } else if (bMode === "1v1v1v1") {
+            modeBadge = `<span class="mode-badge mode-1v1v1v1" style="font-size:10px; padding:1px 5px;">4er-Einzel</span>`;
+        }
+
+        const tmStr = b.teammate_username ? ` <span class="muted" style="font-size:12px;">+ @${escapeHtml(b.teammate_username)}</span>` : "";
+        const op2Str = b.opponent2_username ? ` <span class="muted" style="font-size:12px;">vs @${escapeHtml(b.opponent2_username)}</span>` : "";
+        const op3Str = b.opponent3_username ? ` <span class="muted" style="font-size:12px;">vs @${escapeHtml(b.opponent3_username)}</span>` : "";
+
+        return `
+            <div class="live-active-card" style="background:var(--bg-card); border:1px solid #ef4444; border-radius:6px; padding:12px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <span class="live-pulse"></span>
+                    <div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            ${modeBadge}
+                            <strong>@${sName}</strong>${tmStr} <span style="color:#ef4444; font-weight:700;">VS</span> <strong>@${escapeHtml(b.opponent_username || "Gegner")}</strong>${op2Str}${op3Str}
+                        </div>
+                        <div class="muted" style="font-size:11px; margin-top:2px;">Battle ID: #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</div>
+                    </div>
+                </div>
+                <div style="font-family:'JetBrains Mono', Consolas, monospace; font-size:16px; font-weight:800;">
+                    <span style="color:#10b981;">${sScore}</span> : <span style="color:#ef4444;">${oScore}</span>
+                </div>
+                <div>
+                    <span class="pct-pill" style="border-color:#f59e0b; color:#f59e0b;">+${coins} Coins</span>
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+function renderBattlesFeed(data) {
+    const feed = document.getElementById("battlesFeed");
+    const empty = document.getElementById("battlesEmptyState");
+    const meta = document.getElementById("battlesTableMeta");
+    const pagination = document.getElementById("battlesPagination");
+    const pageInfo = document.getElementById("battlesPageInfo");
+    const prevBtn = document.getElementById("btnBattlesPrev");
+    const nextBtn = document.getElementById("btnBattlesNext");
+
+    if (!feed) return;
+
+    const total = data.total || 0;
+    if (meta) meta.textContent = `${fmtNum(total)} Duelle erfasst`;
+
+    const battles = data.battles || [];
+    if (battles.length === 0) {
+        if (empty) empty.style.display = "block";
+        feed.innerHTML = "";
+        if (empty) feed.appendChild(empty);
+        if (pagination) pagination.style.display = "none";
+        return;
+    }
+
+    if (empty) empty.style.display = "none";
+
+    feed.innerHTML = battles.map(b => {
+        const isWin = b.result === "WIN";
+        const isLose = b.result === "LOSE";
+        const isDraw = b.result === "DRAW";
+        const isOngoing = b.result === "ONGOING" || b.status === "active";
+
+        const bMode = b.battle_mode || "1v1";
+        const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
+        const is2v2 = bMode === "2v2" || Boolean(b.teammate_username);
+
+        let cardClass = "card-draw";
+        let resultLabel = "🤝 UNENTSCHIEDEN";
+        let resultClass = "draw";
+
+        if (isFfa && !isOngoing) {
+            const rank = b.streamer_rank || (isWin ? 1 : 2);
+            if (rank === 1) {
+                cardClass = "card-win";
+                resultLabel = "🥇 1. PLATZ (SIEG)";
+                resultClass = "win";
+            } else if (rank === 2) {
+                cardClass = "card-lose";
+                resultLabel = "🥈 2. PLATZ";
+                resultClass = "lose";
+            } else if (rank === 3) {
+                cardClass = "card-lose";
+                resultLabel = "🥉 3. PLATZ";
+                resultClass = "lose";
+            } else {
+                cardClass = "card-lose";
+                resultLabel = "4. PLATZ";
+                resultClass = "lose";
+            }
+        } else if (isWin) {
+            cardClass = "card-win";
+            resultLabel = "🏆 SIEG";
+            resultClass = "win";
+        } else if (isLose) {
+            cardClass = "card-lose";
+            resultLabel = "❌ NIEDERLAGE";
+            resultClass = "lose";
+        } else if (isOngoing) {
+            cardClass = "card-ongoing";
+            resultLabel = "🔴 LIVE DUELL";
+            resultClass = "ongoing";
+        }
+
+        const sScore = (b.streamer_score || 0);
+        const oScore = (b.opponent_score || 0);
+        const totScore = sScore + oScore;
+        const sPct = totScore > 0 ? Math.round((sScore / totScore) * 100) : 50;
+        const oPct = 100 - sPct;
+
+        const delta = Math.abs(sScore - oScore).toLocaleString("de-DE");
+        const deltaText = isWin ? `+${delta} Pkt` : (isLose ? `-${delta} Pkt` : `Gleichstand`);
+
+        const sAvatar = b.streamer_avatar_url || "/static/avatar_default.png";
+        const oAvatar = b.opponent_avatar_url || "/static/avatar_default.png";
+
+        const durMins = Math.floor((b.duration_seconds || 300) / 60);
+        const durSecs = (b.duration_seconds || 300) % 60;
+        const durStr = `${durMins}:${String(durSecs).padStart(2, "0")} Min`;
+
+        const matchDate = b.started_at ? b.started_at.replace("T", " ").substring(0, 16) : "-";
+
+        let modeBadge = `<span class="mode-badge mode-1v1">⚔️ 1 VS 1</span>`;
+        if (bMode === "2v2") {
+            modeBadge = `<span class="mode-badge mode-2v2">👥 2 VS 2 TEAM</span>`;
+        } else if (bMode === "1v1v1") {
+            modeBadge = `<span class="mode-badge mode-1v1v1">🔺 1 VS 1 VS 1 (3ER)</span>`;
+        } else if (bMode === "1v1v1v1") {
+            modeBadge = `<span class="mode-badge mode-1v1v1v1">⚡ 4ER-EINZEL (1V1V1V1)</span>`;
+        }
+
+        let matchupRowHtml = "";
+        if (isFfa) {
+            // Free-for-all Leaderboard Layout (3er oder 4er-Einzel)
+            const players = [
+                {
+                    username: b.streamer_username,
+                    name: b.streamer_display_name || b.streamer_username,
+                    avatar: sAvatar,
+                    score: sScore,
+                    isMine: true,
+                },
+                {
+                    username: b.opponent_username || "Gegner 1",
+                    name: b.opponent_display_name || b.opponent_username || "Gegner 1",
+                    avatar: oAvatar,
+                    score: oScore,
+                    isMine: false,
+                },
+                {
+                    username: b.opponent2_username || "Gegner 2",
+                    name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
+                    avatar: b.opponent2_avatar_url || "/static/avatar_default.png",
+                    score: b.opponent2_score || 0,
+                    isMine: false,
+                },
+            ];
+            if (bMode === "1v1v1v1" || b.opponent3_username) {
+                players.push({
+                    username: b.opponent3_username || "Gegner 3",
+                    name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
+                    avatar: b.opponent3_avatar_url || "/static/avatar_default.png",
+                    score: b.opponent3_score || 0,
+                    isMine: false,
+                });
+            }
+
+            players.sort((x, y) => (y.score || 0) - (x.score || 0));
+            const maxScore = Math.max(1, ...players.map(p => p.score || 0));
+
+            const rankPills = [
+                `<span class="rank-pill rank-1">🥇 #1</span>`,
+                `<span class="rank-pill rank-2">🥈 #2</span>`,
+                `<span class="rank-pill rank-3">🥉 #3</span>`,
+                `<span class="rank-pill rank-4">#4</span>`,
+            ];
+
+            matchupRowHtml = `
+                <div class="battle-ffa-grid">
+                    ${players.map((p, idx) => {
+                        const rankPill = rankPills[idx] || `<span class="rank-pill">#${idx + 1}</span>`;
+                        const pct = Math.round(((p.score || 0) / maxScore) * 100);
+                        const isWinnerSlot = idx === 0 && p.score > 0;
+                        return `
+                            <div class="ffa-player-card ${p.isMine ? 'is-my-streamer' : ''} ${isWinnerSlot ? 'is-winner' : ''}">
+                                ${p.isMine ? `<span class="my-streamer-tag">Dein Streamer</span>` : ''}
+                                <div style="display:flex; justify-content:space-between; width:100%; align-items:center; margin-bottom:4px;">
+                                    ${rankPill}
+                                    ${isWinnerSlot ? '<span style="font-size:13px;">👑</span>' : '<span></span>'}
+                                </div>
+                                <div class="ffa-avatar-wrap">
+                                    <img class="ffa-avatar" src="${p.avatar}" alt="${escapeHtml(p.username)}" onerror="this.src='/static/avatar_default.png';">
+                                </div>
+                                <div class="ffa-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+                                <div class="ffa-uname">@${escapeHtml(p.username)}</div>
+                                <div class="ffa-score ${isWinnerSlot ? 'score-win' : ''}">${(p.score || 0).toLocaleString("de-DE")} <span style="font-size:10px; font-weight:600; color:#94a3b8;">Pkt</span></div>
+                                <div class="ffa-bar-track" title="${pct}% der Führung">
+                                    <div class="ffa-bar-fill" style="width:${pct}%;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join("")}
+                </div>
+            `;
+        } else if (is2v2) {
+            matchupRowHtml = `
+                <div class="battle-matchup-row">
+                    <!-- Streamer Team (Links) -->
+                    <div class="battle-team-column streamer-team">
+                        <div class="team-header-row">
+                            <span class="muted" style="font-size:11px; font-weight:700;">TEAM STREAMER</span>
+                            <span class="team-total-tag ${isWin ? 'score-win' : (isLose ? 'score-lose' : '')}">${sScore.toLocaleString("de-DE")} Pkt</span>
+                        </div>
+                        <div class="team-roster-wrap">
+                            <div class="fighter-chip">
+                                <img class="chip-avatar ${isWin ? 'winner-ring' : ''}" src="${sAvatar}" onerror="this.src='/static/avatar_default.png';">
+                                <div style="overflow:hidden;">
+                                    <div class="chip-name">@${escapeHtml(b.streamer_username)}</div>
+                                    <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
+                                </div>
+                            </div>
+                            ${b.teammate_username ? `
+                            <div class="fighter-chip is-partner">
+                                <img class="chip-avatar" src="${b.teammate_avatar_url || '/static/avatar_default.png'}" onerror="this.src='/static/avatar_default.png';">
+                                <div style="overflow:hidden;">
+                                    <div class="chip-name">@${escapeHtml(b.teammate_username)} <span class="pct-pill" style="font-size:9px; padding:1px 4px;">Partner</span></div>
+                                    <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.teammate_display_name || b.teammate_username)}</div>
+                                </div>
+                                ${b.teammate_score ? `<div class="chip-score">${b.teammate_score.toLocaleString("de-DE")}</div>` : ''}
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Versus Mitte -->
+                    <div class="battle-versus-center">
+                        <span class="vs-badge">VS</span>
+                        <div class="versus-bar-container" title="${sPct}% vs ${oPct}%">
+                            <div class="versus-bar-fill-streamer" style="width:${sPct}%;"></div>
+                            <div class="versus-bar-fill-opponent" style="width:${oPct}%;"></div>
+                        </div>
+                        <span class="score-delta-text">${deltaText} (${sPct}% : ${oPct}%)</span>
+                    </div>
+
+                    <!-- Gegner Team (Rechts) -->
+                    <div class="battle-team-column opponent-team">
+                        <div class="team-header-row" style="justify-content:flex-end;">
+                            <span class="team-total-tag ${isLose ? 'score-win' : (isWin ? 'score-lose' : '')}">${oScore.toLocaleString("de-DE")} Pkt</span>
+                            <span class="muted" style="font-size:11px; font-weight:700;">TEAM GEGNER</span>
+                        </div>
+                        <div class="team-roster-wrap">
+                            <div class="fighter-chip" style="flex-direction:row-reverse; text-align:right;">
+                                <img class="chip-avatar ${isLose ? 'winner-ring' : ''}" src="${oAvatar}" onerror="this.src='/static/avatar_default.png';">
+                                <div style="overflow:hidden;">
+                                    <div class="chip-name">@${escapeHtml(b.opponent_username || 'Gegner 1')}</div>
+                                    <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner 1')}</div>
+                                </div>
+                            </div>
+                            ${b.opponent2_username ? `
+                            <div class="fighter-chip is-partner" style="flex-direction:row-reverse; text-align:right;">
+                                <img class="chip-avatar" src="${b.opponent2_avatar_url || '/static/avatar_default.png'}" onerror="this.src='/static/avatar_default.png';">
+                                <div style="overflow:hidden;">
+                                    <div class="chip-name">@${escapeHtml(b.opponent2_username)} <span class="pct-pill" style="font-size:9px; padding:1px 4px;">Partner</span></div>
+                                    <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.opponent2_display_name || b.opponent2_username)}</div>
+                                </div>
+                                ${b.opponent2_score ? `<div class="chip-score" style="margin-right:auto; margin-left:0;">${b.opponent2_score.toLocaleString("de-DE")}</div>` : ''}
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            matchupRowHtml = `
+                <div class="battle-matchup-row">
+                    <!-- Streamer Seite -->
+                    <div class="battle-participant streamer-side">
+                        <img class="battle-avatar ${isWin ? 'winner-ring' : (isLose ? 'loser-ring' : '')}" src="${sAvatar}" alt="Streamer" onerror="this.src='/static/avatar_default.png';">
+                        <div class="participant-details">
+                            <span class="participant-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</span>
+                            <span class="participant-uname">@${escapeHtml(b.streamer_username)}</span>
+                            <span class="participant-score ${isWin ? 'score-win' : (isLose ? 'score-lose' : '')}">${sScore.toLocaleString("de-DE")}</span>
+                        </div>
+                    </div>
+
+                    <!-- Versus Mitte -->
+                    <div class="battle-versus-center">
+                        <span class="vs-badge">VS</span>
+                        <div class="versus-bar-container" title="${sPct}% vs ${oPct}%">
+                            <div class="versus-bar-fill-streamer" style="width:${sPct}%;"></div>
+                            <div class="versus-bar-fill-opponent" style="width:${oPct}%;"></div>
+                        </div>
+                        <span class="score-delta-text">${deltaText} (${sPct}% : ${oPct}%)</span>
+                    </div>
+
+                    <!-- Gegner Seite -->
+                    <div class="battle-participant opponent-side">
+                        <div class="participant-details">
+                            <span class="participant-name">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</span>
+                            <span class="participant-uname">@${escapeHtml(b.opponent_username || 'unbekannt')}</span>
+                            <span class="participant-score ${isLose ? 'score-win' : (isWin ? 'score-lose' : '')}">${oScore.toLocaleString("de-DE")}</span>
+                        </div>
+                        <img class="battle-avatar ${isLose ? 'winner-ring' : (isWin ? 'loser-ring' : '')}" src="${oAvatar}" alt="Opponent" onerror="this.src='/static/avatar_default.png';">
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="battle-card ${cardClass}">
+                <div class="battle-card-header">
+                    <div style="display:flex; align-items:center;">
+                        ${modeBadge}
+                        <span class="battle-meta-time">Duell #${escapeHtml(String(b.battle_id || b.id))} · ${matchDate} · ${durStr}</span>
+                    </div>
+                    <span class="result-badge ${resultClass}">${resultLabel}</span>
+                </div>
+
+                ${matchupRowHtml}
+
+                <!-- MVP Strip -->
+                <div class="battle-mvp-strip">
+                    <div class="mvp-item">
+                        <span class="muted">Top-Spender:</span>
+                        <strong>${escapeHtml(b.streamer_mvp_name || 'Kein MVP')}</strong>
+                        ${b.streamer_mvp_score ? `<span class="pct-pill">${b.streamer_mvp_score.toLocaleString("de-DE")} Pkt</span>` : ''}
+                    </div>
+                    <div class="mvp-item">
+                        <span class="muted">Gegner-MVP:</span>
+                        <strong>${escapeHtml(b.opponent_mvp_name || 'Kein MVP')}</strong>
+                        ${b.opponent_mvp_score ? `<span class="pct-pill">${b.opponent_mvp_score.toLocaleString("de-DE")} Pkt</span>` : ''}
+                    </div>
+                </div>
+
+                <!-- Footer mit Einnahmen und Button für Grafik -->
+                <div class="battle-card-footer">
+                    <div class="battle-earnings-pill">
+                        <span>Duell-Einnahmen:</span>
+                        <span class="coins">+${(b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
+                        <span class="eur">(~ ${(b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Netto)</span>
+                    </div>
+                    <div class="battle-btn-group">
+                        <button type="button" class="sm primary" onclick="openBattleGraphicModal(${b.id})">🎨 Grafik anzeigen</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    // Paginierung
+    if (pagination && total > BATTLE_PAGE_SIZE) {
+        pagination.style.display = "flex";
+        const maxPages = Math.ceil(total / BATTLE_PAGE_SIZE);
+        if (pageInfo) pageInfo.textContent = `Seite ${battleCurrentPage + 1} von ${maxPages}`;
+        if (prevBtn) prevBtn.disabled = battleCurrentPage === 0;
+        if (nextBtn) nextBtn.disabled = battleCurrentPage >= maxPages - 1;
+    } else if (pagination) {
+        pagination.style.display = "none";
+    }
+}
+
+async function loadBattleStats() {
+    try {
+        const params = new URLSearchParams();
+        if (battleStreamerId) params.append("streamer_id", battleStreamerId);
+        if (battlePeriod) params.append("period", battlePeriod);
+
+        const res = await fetch(`/api/battles/stats?${params.toString()}`);
+        if (!res.ok) return;
+        const stats = await res.json();
+
+        document.getElementById("kpiTotalBattles").textContent = fmtNum(stats.total_battles || 0);
+        document.getElementById("kpiOngoingBattles").textContent = `${stats.ongoing || 0} aktiv`;
+        document.getElementById("kpiBattleWinrate").textContent = `${(stats.winrate_pct || 0).toFixed(1)} %`;
+        document.getElementById("kpiWinLossDraw").textContent = `${stats.wins || 0}S / ${stats.losses || 0}N / ${stats.draws || 0}U`;
+        document.getElementById("kpiBattleNetEur").textContent = fmtEUR(stats.total_eur_net || 0);
+        document.getElementById("kpiBattleCoins").textContent = `${fmtNum(stats.total_coins || 0)} Coins`;
+        document.getElementById("kpiMaxScore").textContent = `${fmtNum(stats.max_streamer_score || 0)} Pkt`;
+
+        const topRiv = stats.top_opponent;
+        if (topRiv) {
+            document.getElementById("kpiTopRival").textContent = `@${topRiv.opponent_username}`;
+            document.getElementById("kpiTopRivalSub").textContent = `${topRiv.matches_count} Matches (${topRiv.wins}S / ${topRiv.losses}N)`;
+        } else {
+            document.getElementById("kpiTopRival").textContent = "-";
+            document.getElementById("kpiTopRivalSub").textContent = "Keine Duelle";
+        }
+
+        renderBattleRivals(stats.rivals || []);
+    } catch (e) {
+        console.error("Fehler loadBattleStats:", e);
+    }
+}
+
+function renderBattleRivals(rivals) {
+    const tbody = document.getElementById("rivalsTableBody");
+    const meta = document.getElementById("rivalsCountMeta");
+    if (!tbody) return;
+
+    if (!rivals || rivals.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="muted">Keine Kontrahenten-Daten im gewählten Zeitraum vorhanden.</td></tr>`;
+        if (meta) meta.textContent = "0 Rivalen";
+        return;
+    }
+
+    if (meta) meta.textContent = `${rivals.length} Rivalen ausgewertet`;
+
+    tbody.innerHTML = rivals.map(r => {
+        const av = r.opponent_avatar_url || "/static/avatar_default.png";
+        const winrate = (r.winrate_pct || 0).toFixed(1);
+        const winrateColor = r.winrate_pct >= 50 ? '#10b981' : '#ef4444';
+
+        return `
+            <tr>
+                <td>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <img src="${av}" alt="Avatar" style="width:28px; height:28px; border-radius:50%; object-fit:cover;" onerror="this.src='/static/avatar_default.png';">
+                        <div>
+                            <strong>${escapeHtml(r.opponent_display_name || r.opponent_username)}</strong>
+                            <div class="muted" style="font-size:11px;">@${escapeHtml(r.opponent_username)}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="num-col"><strong>${r.matches_count}</strong></td>
+                <td class="num-col mono">${r.wins}S - ${r.losses}N - ${r.draws}U</td>
+                <td class="num-col mono" style="font-weight:700; color:${winrateColor};">${winrate} %</td>
+                <td class="num-col mono">${(r.avg_streamer_score || 0).toLocaleString("de-DE")}</td>
+                <td class="num-col mono">${(r.avg_opponent_score || 0).toLocaleString("de-DE")}</td>
+                <td class="num-col mono" style="color:#f59e0b; font-weight:700;">${fmtNum(r.total_coins || 0)}</td>
+                <td class="num-col mono" style="color:#10b981; font-weight:700;">${fmtEUR(r.total_eur_net || 0)}</td>
+            </tr>
+        `;
+    }).join("");
+}
+
+async function openBattleGraphicModal(battleId) {
+    try {
+        const res = await fetch(`/api/battles/${battleId}`);
+        if (!res.ok) {
+            alert("Battle-Details konnten nicht geladen werden.");
+            return;
+        }
+        const b = await res.json();
+        currentSelectedBattle = b;
+
+        const cardContainer = document.getElementById("stylizedBattleCard");
+        if (!cardContainer) return;
+
+        const isWin = b.result === "WIN";
+        const isLose = b.result === "LOSE";
+        const isDraw = b.result === "DRAW";
+
+        let outcomeLabel = "UNENTSCHIEDEN";
+        let outcomeClass = "draw";
+        if (isWin) {
+            outcomeLabel = "VICTORY / SIEG";
+            outcomeClass = "win";
+        } else if (isLose) {
+            outcomeLabel = "DEFEAT / NIEDERLAGE";
+            outcomeClass = "lose";
+        }
+
+        const sScore = b.streamer_score || 0;
+        const oScore = b.opponent_score || 0;
+        const totScore = sScore + oScore;
+        const sPct = totScore > 0 ? Math.round((sScore / totScore) * 100) : 50;
+        const oPct = 100 - sPct;
+
+        const sAvatar = b.streamer_avatar_url || "/static/avatar_default.png";
+        const oAvatar = b.opponent_avatar_url || "/static/avatar_default.png";
+
+        const durMins = Math.floor((b.duration_seconds || 300) / 60);
+        const durSecs = (b.duration_seconds || 300) % 60;
+        const durStr = `${String(durMins).padStart(2, "0")}:${String(durSecs).padStart(2, "0")} Min`;
+
+        const matchDate = b.started_at ? b.started_at.replace("T", " ").substring(0, 16) : "-";
+
+        const bMode = b.battle_mode || "1v1";
+        const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
+        const is2v2 = bMode === "2v2" || !!b.teammate_username;
+
+        let brandTitle = "⚔️ TIKTOK LIVE MATCHUP · TOKTRACKER";
+        if (bMode === "2v2") {
+            brandTitle = "⚔️ TIKTOK 2 VS 2 TEAM BATTLE · TOKTRACKER";
+        } else if (bMode === "1v1v1") {
+            brandTitle = "⚔️ TIKTOK 1 VS 1 VS 1 (3ER-MATCH) · TOKTRACKER";
+        } else if (bMode === "1v1v1v1") {
+            brandTitle = "⚔️ TIKTOK 4ER-EINZELMATCH (1V1V1V1) · TOKTRACKER";
+        }
+
+        let arenaHtml = "";
+        if (isFfa) {
+            const players = [
+                {
+                    username: b.streamer_username,
+                    name: b.streamer_display_name || b.streamer_username,
+                    avatar: sAvatar,
+                    score: sScore,
+                    isMine: true,
+                },
+                {
+                    username: b.opponent_username || "Gegner 1",
+                    name: b.opponent_display_name || b.opponent_username || "Gegner 1",
+                    avatar: oAvatar,
+                    score: oScore,
+                    isMine: false,
+                },
+                {
+                    username: b.opponent2_username || "Gegner 2",
+                    name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
+                    avatar: b.opponent2_avatar_url || "/static/avatar_default.png",
+                    score: b.opponent2_score || 0,
+                    isMine: false,
+                },
+            ];
+            if (bMode === "1v1v1v1" || b.opponent3_username) {
+                players.push({
+                    username: b.opponent3_username || "Gegner 3",
+                    name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
+                    avatar: b.opponent3_avatar_url || "/static/avatar_default.png",
+                    score: b.opponent3_score || 0,
+                    isMine: false,
+                });
+            }
+
+            players.sort((x, y) => (y.score || 0) - (x.score || 0));
+            const maxScore = Math.max(1, ...players.map(p => p.score || 0));
+
+            const rankPills = [
+                `<span class="rank-pill rank-1">🥇 #1 PLATZ</span>`,
+                `<span class="rank-pill rank-2">🥈 #2 PLATZ</span>`,
+                `<span class="rank-pill rank-3">🥉 #3 PLATZ</span>`,
+                `<span class="rank-pill rank-4">#4 PLATZ</span>`,
+            ];
+
+            arenaHtml = `
+            <div class="stylized-ffa-arena">
+                ${players.map((p, idx) => {
+                    const rankPill = rankPills[idx] || `<span class="rank-pill">#${idx + 1}</span>`;
+                    const pct = Math.round(((p.score || 0) / maxScore) * 100);
+                    const isWinnerSlot = idx === 0 && p.score > 0;
+                    return `
+                        <div class="stylized-ffa-slot ${isWinnerSlot ? 'is-first' : ''} ${p.isMine ? 'is-my-streamer' : ''}">
+                            <div style="margin-bottom:6px;">
+                                ${rankPill}
+                            </div>
+                            <div class="stylized-avatar-wrap">
+                                ${isWinnerSlot ? '<div class="stylized-crown">👑</div>' : ''}
+                                <img class="stylized-avatar ${isWinnerSlot ? 'winner-glow' : ''}" style="width:64px; height:64px;" src="${p.avatar}" alt="${escapeHtml(p.username)}" onerror="this.src='/static/avatar_default.png';">
+                            </div>
+                            <div class="stylized-name" style="font-size:13px; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.name)}</div>
+                            <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(p.username)}</div>
+                            <div class="stylized-score-digits ${isWinnerSlot ? 'score-win' : ''}" style="font-size:22px; margin:6px 0;">${(p.score || 0).toLocaleString("de-DE")}</div>
+                            <div class="ffa-bar-track" style="width:100%; height:6px;">
+                                <div class="ffa-bar-fill" style="width:${pct}%;"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join("")}
+            </div>
+            `;
+        } else if (is2v2) {
+            arenaHtml = `
+            <div class="stylized-matchup-arena is-2v2">
+                <!-- Streamer Team (Blau) -->
+                <div class="stylized-duo-column streamer-side">
+                    <div style="font-size:11px; font-weight:800; color:#3b82f6; text-transform:uppercase; letter-spacing:0.05em;">TEAM STREAMER</div>
+                    <div class="stylized-fighters-pair">
+                        <div class="stylized-chip-player">
+                            <div class="stylized-avatar-wrap">
+                                ${isWin ? '<div class="stylized-crown">👑</div>' : ''}
+                                <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${sAvatar}" alt="Streamer" onerror="this.src='/static/avatar_default.png';">
+                            </div>
+                            <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
+                            <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.streamer_username)}</div>
+                        </div>
+                        <div class="stylized-chip-player">
+                            <div class="stylized-avatar-wrap">
+                                ${isWin ? '<div class="stylized-crown">👑</div>' : ''}
+                                <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${b.teammate_avatar_url || '/static/avatar_default.png'}" alt="Partner" onerror="this.src='/static/avatar_default.png';">
+                            </div>
+                            <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.teammate_display_name || b.teammate_username || 'Partner')}</div>
+                            <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.teammate_username || 'partner')}</div>
+                        </div>
+                    </div>
+                    <div class="stylized-score-digits ${isWin ? 'score-win' : (isLose ? 'score-lose' : '')}" style="font-size:28px;">${sScore.toLocaleString("de-DE")} <span style="font-size:11px; font-weight:600; color:#94a3b8;">Team-Punkte</span></div>
+                </div>
+
+                <!-- Center Stage -->
+                <div class="stylized-center-stage">
+                    <div class="stylized-vs-symbol">VS</div>
+                    <div class="stylized-outcome-banner ${outcomeClass}">${outcomeLabel}</div>
+                    <div class="stylized-bar-wrapper">
+                        <div class="stylized-bar">
+                            <div class="stylized-bar-streamer" style="width:${sPct}%;"></div>
+                            <div class="stylized-bar-opponent" style="width:${oPct}%;"></div>
+                        </div>
+                        <div style="font-size:11px; text-align:center; font-family:'JetBrains Mono', Consolas, monospace; color:#94a3b8;">
+                            ${sPct}% : ${oPct}% · Differenz: ${Math.abs(sScore - oScore).toLocaleString("de-DE")} Pkt
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gegner Team (Rot) -->
+                <div class="stylized-duo-column opponent-side">
+                    <div style="font-size:11px; font-weight:800; color:#ef4444; text-transform:uppercase; letter-spacing:0.05em;">TEAM GEGNER</div>
+                    <div class="stylized-fighters-pair">
+                        <div class="stylized-chip-player">
+                            <div class="stylized-avatar-wrap">
+                                ${isLose ? '<div class="stylized-crown">👑</div>' : ''}
+                                <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${oAvatar}" alt="Gegner" onerror="this.src='/static/avatar_default.png';">
+                            </div>
+                            <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
+                            <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.opponent_username || 'gegner')}</div>
+                        </div>
+                        <div class="stylized-chip-player">
+                            <div class="stylized-avatar-wrap">
+                                ${isLose ? '<div class="stylized-crown">👑</div>' : ''}
+                                <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${b.opponent2_avatar_url || '/static/avatar_default.png'}" alt="Gegner 2" onerror="this.src='/static/avatar_default.png';">
+                            </div>
+                            <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.opponent2_display_name || b.opponent2_username || 'Gegner 2')}</div>
+                            <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.opponent2_username || 'gegner2')}</div>
+                        </div>
+                    </div>
+                    <div class="stylized-score-digits ${isLose ? 'score-win' : (isWin ? 'score-lose' : '')}" style="font-size:28px;">${oScore.toLocaleString("de-DE")} <span style="font-size:11px; font-weight:600; color:#94a3b8;">Team-Punkte</span></div>
+                </div>
+            </div>
+            `;
+        } else {
+            arenaHtml = `
+            <div class="stylized-matchup-arena">
+                <!-- Streamer -->
+                <div class="stylized-fighter">
+                    <div class="stylized-avatar-wrap">
+                        ${isWin ? '<div class="stylized-crown">👑</div>' : ''}
+                        <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" src="${sAvatar}" alt="Streamer" onerror="this.src='/static/avatar_default.png';">
+                    </div>
+                    <div class="stylized-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
+                    <div class="stylized-uname">@${escapeHtml(b.streamer_username)}</div>
+                    <div class="stylized-score-digits ${isWin ? 'score-win' : (isLose ? 'score-lose' : '')}">${sScore.toLocaleString("de-DE")}</div>
+                </div>
+
+                <!-- Center -->
+                <div class="stylized-center-stage">
+                    <div class="stylized-vs-symbol">VS</div>
+                    <div class="stylized-outcome-banner ${outcomeClass}">${outcomeLabel}</div>
+                    <div class="stylized-bar-wrapper">
+                        <div class="stylized-bar">
+                            <div class="stylized-bar-streamer" style="width:${sPct}%;"></div>
+                            <div class="stylized-bar-opponent" style="width:${oPct}%;"></div>
+                        </div>
+                        <div style="font-size:11px; text-align:center; font-family:'JetBrains Mono', Consolas, monospace; color:#94a3b8;">
+                            ${sPct}% : ${oPct}% · Differenz: ${Math.abs(sScore - oScore).toLocaleString("de-DE")} Pkt
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gegner -->
+                <div class="stylized-fighter">
+                    <div class="stylized-avatar-wrap">
+                        ${isLose ? '<div class="stylized-crown">👑</div>' : ''}
+                        <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" src="${oAvatar}" alt="Gegner" onerror="this.src='/static/avatar_default.png';">
+                    </div>
+                    <div class="stylized-name">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
+                    <div class="stylized-uname">@${escapeHtml(b.opponent_username || 'unbekannt')}</div>
+                    <div class="stylized-score-digits ${isLose ? 'score-win' : (isWin ? 'score-lose' : '')}">${oScore.toLocaleString("de-DE")}</div>
+                </div>
+            </div>
+            `;
+        }
+
+        cardContainer.innerHTML = `
+            <div class="stylized-battle-header">
+                <span class="stylized-brand">${brandTitle}</span>
+                <span class="stylized-time">${matchDate} · ${durStr}</span>
+            </div>
+
+            ${arenaHtml}
+
+            <!-- MVP Deck -->
+            <div class="stylized-mvp-deck">
+                <div class="stylized-mvp-card">
+                    <div>
+                        <div class="stylized-mvp-label">★ Streamer MVP</div>
+                        <div class="stylized-mvp-name">${escapeHtml(b.streamer_mvp_name ? '@' + b.streamer_mvp_name : 'Kein Spender erfasst')}</div>
+                        ${b.streamer_mvp_score ? `<div class="stylized-mvp-score">${b.streamer_mvp_score.toLocaleString("de-DE")} Punkte</div>` : ''}
+                    </div>
+                </div>
+                <div class="stylized-mvp-card right">
+                    <div>
+                        <div class="stylized-mvp-label">Gegner MVP ★</div>
+                        <div class="stylized-mvp-name">${escapeHtml(b.opponent_mvp_name ? '@' + b.opponent_mvp_name : 'Kein Spender erfasst')}</div>
+                        ${b.opponent_mvp_score ? `<div class="stylized-mvp-score">${b.opponent_mvp_score.toLocaleString("de-DE")} Punkte</div>` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Stats -->
+            <div class="stylized-footer-stats">
+                <div>
+                    Duell-Einnahmen: <span class="stylized-reward-badge">+${(b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
+                    <span style="color:#34d399; font-weight:700; margin-left:6px;">(~ ${(b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Netto)</span>
+                </div>
+                <div style="color:#64748b;">Battle-ID: #${escapeHtml(String(b.battle_id))}</div>
+            </div>
+        `;
+
+        // Render Gifts during match
+        const giftsContainer = document.getElementById("battleModalGiftsContainer");
+        const giftsList = document.getElementById("battleModalGiftsList");
+        if (giftsContainer && giftsList) {
+            const gifts = b.gifts || [];
+            if (gifts.length > 0) {
+                giftsContainer.style.display = "block";
+                giftsList.innerHTML = gifts.map(g => {
+                    const icon = g.gift_icon_url ? `<img src="${g.gift_icon_url}" alt="gift">` : '';
+                    return `
+                        <div class="battle-gift-pill">
+                            ${icon}
+                            <strong>${g.repeat_count}x ${escapeHtml(g.gift_name)}</strong>
+                            <span class="muted">(@${escapeHtml(g.sender_username)})</span>
+                            <span style="color:#f59e0b; font-weight:700;">${g.total_coins.toLocaleString("de-DE")} C</span>
+                        </div>
+                    `;
+                }).join("");
+            } else {
+                giftsContainer.style.display = "none";
+                giftsList.innerHTML = "";
+            }
+        }
+
+        const modal = document.getElementById("modalBattleGraphic");
+        if (modal) modal.style.display = "flex";
+    } catch (e) {
+        console.error("Fehler openBattleGraphicModal:", e);
+    }
+}
+
+function closeBattleGraphicModal() {
+    const modal = document.getElementById("modalBattleGraphic");
+    if (modal) modal.style.display = "none";
+    currentSelectedBattle = null;
+}
+
+function downloadBattleGraphicPng() {
+    if (!currentSelectedBattle) return;
+    const b = currentSelectedBattle;
+    const canvas = document.getElementById("battleExportCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const W = 960;
+    const H = 540;
+    canvas.width = W;
+    canvas.height = H;
+
+    // Background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+    bgGrad.addColorStop(0, "#090d16");
+    bgGrad.addColorStop(0.5, "#15192c");
+    bgGrad.addColorStop(1, "#0d121f");
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Neon Border
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#3b82f6";
+    ctx.strokeRect(10, 10, W - 20, H - 20);
+
+    const bMode = b.battle_mode || "1v1";
+    const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
+    const is2v2 = bMode === "2v2" || !!b.teammate_username;
+
+    // Top Header Banner
+    let bannerTitle = "TOKTRACKER // TIKTOK LIVE BATTLE MATCHUP";
+    if (bMode === "2v2") {
+        bannerTitle = "TOKTRACKER // 2 VS 2 TEAM BATTLE MATCHUP";
+    } else if (bMode === "1v1v1") {
+        bannerTitle = "TOKTRACKER // 1 VS 1 VS 1 (3ER-MATCH) FFA LEADERBOARD";
+    } else if (bMode === "1v1v1v1") {
+        bannerTitle = "TOKTRACKER // 4ER-EINZELMATCH (1V1V1V1) FFA LEADERBOARD";
+    }
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "bold 13px 'JetBrains Mono', Consolas, monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(bannerTitle, 30, 42);
+
+    const matchDate = b.started_at ? b.started_at.replace("T", " ") : "";
+    const durMins = Math.floor((b.duration_seconds || 300) / 60);
+    const durSecs = (b.duration_seconds || 300) % 60;
+    const durStr = `${String(durMins).padStart(2, "0")}:${String(durSecs).padStart(2, "0")} Min`;
+
+    ctx.textAlign = "right";
+    ctx.fillText(`${matchDate} · ${durStr}`, W - 30, 42);
+
+    // Divider line
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(30, 56);
+    ctx.lineTo(W - 30, 56);
+    ctx.stroke();
+
+    if (isFfa) {
+        // Free-for-all Podium Canvas Export (3er oder 4er-Einzel)
+        const players = [
+            {
+                username: b.streamer_username,
+                name: b.streamer_display_name || b.streamer_username,
+                score: b.streamer_score || 0,
+                isMine: true,
+            },
+            {
+                username: b.opponent_username || "Gegner 1",
+                name: b.opponent_display_name || b.opponent_username || "Gegner 1",
+                score: b.opponent_score || 0,
+                isMine: false,
+            },
+            {
+                username: b.opponent2_username || "Gegner 2",
+                name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
+                score: b.opponent2_score || 0,
+                isMine: false,
+            },
+        ];
+        if (bMode === "1v1v1v1" || b.opponent3_username) {
+            players.push({
+                username: b.opponent3_username || "Gegner 3",
+                name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
+                score: b.opponent3_score || 0,
+                isMine: false,
+            });
+        }
+        players.sort((x, y) => (y.score || 0) - (x.score || 0));
+        const maxScore = Math.max(1, ...players.map(p => p.score || 0));
+
+        // Result Tag
+        const streamerRank = b.streamer_rank || (b.result === "WIN" ? 1 : 2);
+        let outcomeText = "UNENTSCHIEDEN";
+        let outcomeColor = "#f59e0b";
+        let outcomeBg = "rgba(245, 158, 11, 0.3)";
+        if (streamerRank === 1 && b.result === "WIN") {
+            outcomeText = "🥇 1. PLATZ // SIEG";
+            outcomeColor = "#34d399";
+            outcomeBg = "rgba(16, 185, 129, 0.35)";
+        } else if (streamerRank === 2) {
+            outcomeText = "🥈 2. PLATZ";
+            outcomeColor = "#94a3b8";
+            outcomeBg = "rgba(148, 163, 184, 0.3)";
+        } else if (streamerRank === 3) {
+            outcomeText = "🥉 3. PLATZ";
+            outcomeColor = "#fb923c";
+            outcomeBg = "rgba(251, 146, 60, 0.3)";
+        } else if (streamerRank === 4) {
+            outcomeText = "4. PLATZ";
+            outcomeColor = "#64748b";
+            outcomeBg = "rgba(100, 116, 139, 0.3)";
+        }
+
+        ctx.textAlign = "center";
+        ctx.fillStyle = outcomeBg;
+        ctx.fillRect(W / 2 - 120, 72, 240, 32);
+        ctx.strokeStyle = outcomeColor;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(W / 2 - 120, 72, 240, 32);
+        ctx.fillStyle = outcomeColor;
+        ctx.font = "bold 14px 'JetBrains Mono', Consolas, monospace";
+        ctx.fillText(outcomeText, W / 2, 93);
+
+        const N = players.length;
+        const totalPad = 60;
+        const gap = 16;
+        const slotW = Math.floor((W - totalPad * 2 - (N - 1) * gap) / N);
+        const cardY = 120;
+        const cardH = 190;
+
+        players.forEach((p, idx) => {
+            const slotX = totalPad + idx * (slotW + gap);
+            const slotCenter = slotX + slotW / 2;
+
+            // Box Background
+            ctx.fillStyle = p.isMine ? "rgba(59, 130, 246, 0.12)" : "rgba(255, 255, 255, 0.04)";
+            ctx.fillRect(slotX, cardY, slotW, cardH);
+            ctx.lineWidth = p.isMine ? 2 : 1;
+            ctx.strokeStyle = p.isMine ? "#3b82f6" : (idx === 0 ? "#facc15" : "rgba(255, 255, 255, 0.12)");
+            ctx.strokeRect(slotX, cardY, slotW, cardH);
+
+            // Rank Badge
+            let rankColor = "#94a3b8";
+            if (idx === 0) rankColor = "#facc15";
+            else if (idx === 1) rankColor = "#e2e8f0";
+            else if (idx === 2) rankColor = "#fdba74";
+
+            ctx.fillStyle = rankColor;
+            ctx.font = "bold 13px 'JetBrains Mono', monospace";
+            ctx.fillText(`#${idx + 1} PLATZ`, slotCenter, cardY + 26);
+
+            if (idx === 0) {
+                ctx.font = "22px sans-serif";
+                ctx.fillText("👑", slotCenter, cardY + 54);
+            }
+
+            // Name & Uname
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 15px sans-serif";
+            const truncName = p.name.length > 13 ? p.name.slice(0, 12) + "…" : p.name;
+            ctx.fillText(truncName, slotCenter, cardY + 84);
+
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "12px 'JetBrains Mono', monospace";
+            ctx.fillText(`@${p.username}`, slotCenter, cardY + 104);
+
+            // Score digits
+            ctx.fillStyle = idx === 0 ? "#facc15" : (p.isMine ? "#60a5fa" : "#ffffff");
+            ctx.font = "bold 26px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText((p.score || 0).toLocaleString("de-DE"), slotCenter, cardY + 144);
+
+            // Score progress bar
+            const barPct = (p.score || 0) / maxScore;
+            const bPad = 16;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+            ctx.fillRect(slotX + bPad, cardY + 162, slotW - bPad * 2, 6);
+            ctx.fillStyle = idx === 0 ? "#facc15" : "#3b82f6";
+            ctx.fillRect(slotX + bPad, cardY + 162, (slotW - bPad * 2) * barPct, 6);
+
+            if (p.isMine) {
+                ctx.fillStyle = "#3b82f6";
+                ctx.font = "bold 10px 'JetBrains Mono', monospace";
+                ctx.fillText("★ DEIN STREAMER ★", slotCenter, cardY + 182);
+            }
+        });
+    } else {
+        // Center VS Symbol & Result Banner (1v1 oder 2v2)
+        ctx.textAlign = "center";
+        ctx.font = "italic 900 42px sans-serif";
+        ctx.fillStyle = "#60a5fa";
+        ctx.fillText("VS", W / 2, 160);
+
+        // Outcome Pill
+        let outcomeText = "UNENTSCHIEDEN";
+        let outcomeColor = "#f59e0b";
+        let outcomeBg = "rgba(245, 158, 11, 0.3)";
+        if (b.result === "WIN") {
+            outcomeText = "VICTORY / SIEG";
+            outcomeColor = "#34d399";
+            outcomeBg = "rgba(16, 185, 129, 0.35)";
+        } else if (b.result === "LOSE") {
+            outcomeText = "DEFEAT / NIEDERLAGE";
+            outcomeColor = "#f87171";
+            outcomeBg = "rgba(239, 68, 68, 0.35)";
+        } else if (b.result === "ONGOING") {
+            outcomeText = "LIVE MATCH";
+            outcomeColor = "#60a5fa";
+            outcomeBg = "rgba(59, 130, 246, 0.35)";
+        }
+
+        ctx.fillStyle = outcomeBg;
+        ctx.fillRect(W / 2 - 100, 185, 200, 32);
+        ctx.strokeStyle = outcomeColor;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(W / 2 - 100, 185, 200, 32);
+        ctx.fillStyle = outcomeColor;
+        ctx.font = "bold 14px 'JetBrains Mono', Consolas, monospace";
+        ctx.fillText(outcomeText, W / 2, 206);
+
+        const sName = b.streamer_display_name || b.streamer_username;
+        const sUname = `@${b.streamer_username}`;
+        const sScore = (b.streamer_score || 0).toLocaleString("de-DE");
+
+        const oName = b.opponent_display_name || b.opponent_username || "Gegner";
+        const oUname = b.opponent_username ? `@${b.opponent_username}` : "-";
+        const oScore = (b.opponent_score || 0).toLocaleString("de-DE");
+
+        if (is2v2) {
+            // Left Side: Streamer Team (2 Fighters)
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#60a5fa";
+            ctx.font = "bold 12px 'JetBrains Mono', monospace";
+            ctx.fillText("TEAM STREAMER", 220, 100);
+
+            // Fighter 1 (Main Streamer)
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 16px sans-serif";
+            ctx.fillText(sName.length > 14 ? sName.slice(0, 13) + "…" : sName, 140, 132);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "12px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(sUname, 140, 154);
+
+            // Fighter 2 (Teammate)
+            const tName = b.teammate_display_name || b.teammate_username || "Partner";
+            const tUname = `@${b.teammate_username || "partner"}`;
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 16px sans-serif";
+            ctx.fillText(tName.length > 14 ? tName.slice(0, 13) + "…" : tName, 300, 132);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "12px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(tUname, 300, 154);
+
+            // Combined Team Score
+            ctx.fillStyle = b.result === "WIN" ? "#34d399" : (b.result === "LOSE" ? "#94a3b8" : "#ffffff");
+            ctx.font = "bold 40px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(sScore, 220, 218);
+            ctx.font = "bold 11px 'JetBrains Mono', monospace";
+            ctx.fillStyle = "#94a3b8";
+            ctx.fillText("TEAM-GESAMT", 220, 238);
+
+            if (b.result === "WIN") {
+                ctx.font = "28px sans-serif";
+                ctx.fillText("👑", 220, 78);
+            }
+
+            // Right Side: Opponent Team (2 Fighters)
+            ctx.fillStyle = "#f87171";
+            ctx.font = "bold 12px 'JetBrains Mono', monospace";
+            ctx.fillText("TEAM GEGNER", W - 220, 100);
+
+            // Opponent 1
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 16px sans-serif";
+            ctx.fillText(oName.length > 14 ? oName.slice(0, 13) + "…" : oName, W - 300, 132);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "12px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(oUname, W - 300, 154);
+
+            // Opponent 2
+            const o2Name = b.opponent2_display_name || b.opponent2_username || "Gegner 2";
+            const o2Uname = `@${b.opponent2_username || "gegner2"}`;
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 16px sans-serif";
+            ctx.fillText(o2Name.length > 14 ? o2Name.slice(0, 13) + "…" : o2Name, W - 140, 132);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "12px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(o2Uname, W - 140, 154);
+
+            // Opponent Combined Team Score
+            ctx.fillStyle = b.result === "LOSE" ? "#34d399" : (b.result === "WIN" ? "#94a3b8" : "#ffffff");
+            ctx.font = "bold 40px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(oScore, W - 220, 218);
+            ctx.font = "bold 11px 'JetBrains Mono', monospace";
+            ctx.fillStyle = "#94a3b8";
+            ctx.fillText("TEAM-GESAMT", W - 220, 238);
+
+            if (b.result === "LOSE") {
+                ctx.font = "28px sans-serif";
+                ctx.fillText("👑", W - 220, 78);
+            }
+        } else {
+            // Left Side: Streamer (1v1)
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 24px sans-serif";
+            ctx.fillText(sName, 220, 140);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "14px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(sUname, 220, 168);
+
+            // Score digits
+            ctx.fillStyle = b.result === "WIN" ? "#34d399" : (b.result === "LOSE" ? "#94a3b8" : "#ffffff");
+            ctx.font = "bold 44px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(sScore, 220, 225);
+
+            if (b.result === "WIN") {
+                ctx.font = "34px sans-serif";
+                ctx.fillText("👑", 220, 100);
+            }
+
+            // Right Side: Opponent (1v1)
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 24px sans-serif";
+            ctx.fillText(oName, W - 220, 140);
+            ctx.fillStyle = "#94a3b8";
+            ctx.font = "14px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(oUname, W - 220, 168);
+
+            // Score digits
+            ctx.fillStyle = b.result === "LOSE" ? "#34d399" : (b.result === "WIN" ? "#94a3b8" : "#ffffff");
+            ctx.font = "bold 44px 'JetBrains Mono', Consolas, monospace";
+            ctx.fillText(oScore, W - 220, 225);
+
+            if (b.result === "LOSE") {
+                ctx.font = "34px sans-serif";
+                ctx.fillText("👑", W - 220, 100);
+            }
+        }
+
+        // Versus Score Bar (Center, nur für 1v1 und 2v2)
+        const totScore = (b.streamer_score || 0) + (b.opponent_score || 0);
+        const sPct = totScore > 0 ? (b.streamer_score / totScore) : 0.5;
+        const barW = 540;
+        const barX = (W - barW) / 2;
+        const barY = 270;
+        const barH = 16;
+
+        ctx.fillStyle = "#1e293b";
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = "#10b981";
+        ctx.fillRect(barX, barY, barW * sPct, barH);
+        ctx.fillStyle = "#ef4444";
+        ctx.fillRect(barX + barW * sPct, barY, barW * (1 - sPct), barH);
+    }
+
+    // MVPs Section
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.beginPath();
+    ctx.moveTo(30, 330);
+    ctx.lineTo(W - 30, 330);
+    ctx.stroke();
+
+    // Streamer MVP
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#f59e0b";
+    ctx.font = "bold 12px 'JetBrains Mono', monospace";
+    ctx.fillText("★ STREAMER MVP SUPPORTER", 40, 360);
+    ctx.fillStyle = "#f1f5f9";
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText(b.streamer_mvp_name ? `@${b.streamer_mvp_name}` : "Kein MVP erfasst", 40, 386);
+    if (b.streamer_mvp_score) {
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "13px 'JetBrains Mono', monospace";
+        ctx.fillText(`${b.streamer_mvp_score.toLocaleString("de-DE")} Punkte beigesteuert`, 40, 410);
+    }
+
+    // Opponent MVP
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#f59e0b";
+    ctx.font = "bold 12px 'JetBrains Mono', monospace";
+    ctx.fillText("RIVAL MVP SUPPORTER ★", W - 40, 360);
+    ctx.fillStyle = "#f1f5f9";
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText(b.opponent_mvp_name ? `@${b.opponent_mvp_name}` : "Kein MVP erfasst", W - 40, 386);
+    if (b.opponent_mvp_score) {
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "13px 'JetBrains Mono', monospace";
+        ctx.fillText(`${b.opponent_mvp_score.toLocaleString("de-DE")} Punkte beigesteuert`, W - 40, 410);
+    }
+
+    // Footer Strip: Earned Coins & Netto EUR
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.beginPath();
+    ctx.moveTo(30, 450);
+    ctx.lineTo(W - 30, 450);
+    ctx.stroke();
+
+    const coinsEarned = (b.coins_earned || 0).toLocaleString("de-DE");
+    const eurNet = (b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "bold 14px 'JetBrains Mono', monospace";
+    ctx.fillText(`Duell-Einnahmen: ${coinsEarned} Coins  (~ ${eurNet} € Netto-Auszahlung)`, 40, 490);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#64748b";
+    ctx.font = "12px 'JetBrains Mono', monospace";
+    ctx.fillText(`Battle ID: #${b.battle_id}`, W - 40, 490);
+
+    // Export image download
+    const link = document.createElement("a");
+    link.download = `tiktok_battle_${b.battle_id || b.id}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+}
+
+
 document.addEventListener("DOMContentLoaded", () => {
     const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
     applyTheme(currentTheme);
@@ -1235,6 +2509,9 @@ document.addEventListener("DOMContentLoaded", () => {
         loadOverview();
         if (document.getElementById("tab-analytics")?.classList.contains("active")) {
             loadAnalytics(true);
+        } else if (document.getElementById("tab-battles")?.classList.contains("active")) {
+            loadBattles(true);
+            loadBattleStats();
         }
     }, 4000);
 
@@ -1386,5 +2663,69 @@ document.addEventListener("DOMContentLoaded", () => {
             }),
         });
         loadOverview();
+    });
+
+    // Battle Toolbar & Filter Listeners
+    document.getElementById("battleStreamerSelect")?.addEventListener("change", (e) => {
+        battleStreamerId = e.target.value;
+        battleCurrentPage = 0;
+        loadBattles();
+        loadBattleStats();
+    });
+
+    document.getElementById("battleResultSelect")?.addEventListener("change", (e) => {
+        battleResultFilter = e.target.value;
+        battleCurrentPage = 0;
+        loadBattles();
+    });
+
+    document.getElementById("battleModeSelect")?.addEventListener("change", (e) => {
+        battleModeFilter = e.target.value;
+        battleCurrentPage = 0;
+        loadBattles();
+    });
+
+    document.getElementById("battlePeriodSelect")?.addEventListener("change", (e) => {
+        battlePeriod = e.target.value;
+        battleCurrentPage = 0;
+        loadBattles();
+        loadBattleStats();
+    });
+
+    let searchTimeout = null;
+    document.getElementById("inputBattleSearch")?.addEventListener("input", (e) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            battleSearchTerm = e.target.value;
+            battleCurrentPage = 0;
+            loadBattles();
+        }, 300);
+    });
+
+    document.getElementById("btnRefreshBattles")?.addEventListener("click", () => {
+        loadBattles();
+        loadBattleStats();
+    });
+
+    document.getElementById("btnBattlesPrev")?.addEventListener("click", () => {
+        if (battleCurrentPage > 0) {
+            battleCurrentPage--;
+            loadBattles();
+        }
+    });
+
+    document.getElementById("btnBattlesNext")?.addEventListener("click", () => {
+        battleCurrentPage++;
+        loadBattles();
+    });
+
+    // Battle Modal Listeners
+    document.getElementById("btnCloseBattleModal")?.addEventListener("click", closeBattleGraphicModal);
+    document.getElementById("btnCloseBattleModalBtn")?.addEventListener("click", closeBattleGraphicModal);
+    document.getElementById("btnDownloadBattlePng")?.addEventListener("click", downloadBattleGraphicPng);
+    document.getElementById("modalBattleGraphic")?.addEventListener("click", (e) => {
+        if (e.target.id === "modalBattleGraphic") {
+            closeBattleGraphicModal();
+        }
     });
 });
