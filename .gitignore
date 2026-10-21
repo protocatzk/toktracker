@@ -1,1 +1,14 @@
+# Datenbank-Dateien
 /tiktok_earnings.db
+/tiktok_earnings.db-shm
+/tiktok_earnings.db-wal
+
+# Secrets & lokale Umgebungsvariablen (NIEMALS committen!)
+.env
+.env.local
+.env.*.local
+
+# Python / Virtualenv
+.venv/
+__pycache__/
+*.py[cod]

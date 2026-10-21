@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from config import config
 from database import (
     build_streamer_bot_report,
     clear_demo_data,
@@ -99,10 +100,10 @@ def verify_api_key(
     api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
 ) -> None:
     """
-    Prüft den optionalen API-Key (aus Einstellungen oder Umgebungsvariable TIKTOK_API_KEY).
+    Prüft den optionalen API-Key (aus .env TIKTOK_API_KEY oder SQLite-Settings).
     Wenn kein Key konfiguriert ist (leer), sind alle lokalen Zugriffe ohne Header erlaubt.
     """
-    configured_key = (os.environ.get("TIKTOK_API_KEY") or get_settings().get("api_key") or "").strip()
+    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
     if not configured_key:
         return
     provided = (x_api_key or api_key or "").strip()
@@ -136,6 +137,7 @@ async def index(request: Request):
         context={
             "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
             "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
         },
     )
 
@@ -155,10 +157,6 @@ async def api_v1_daily_report(
     hours: int = Query(24, ge=1, le=720, description="Auswertungszeitraum in Stunden (Standard: 24h)"),
     only_active: bool = Query(False, description="Wenn True, nur Streamer mit Einnahmen > 0 im Zeitraum"),
 ):
-    """
-    Liefert den strukturierten Bericht für den Telegram-Bot (alle 24h) über sämtliche Streamer
-    in der Datenbank, inklusive vorformatiertem `telegram_markdown` und `telegram_html` Text.
-    """
     init_db()
     cfg = get_settings()
     now = datetime.now()
@@ -174,7 +172,6 @@ async def api_v1_daily_report(
             continue
         cards.append(card)
 
-    # Sortiere nach höchsten Einnahmen im Zeitraum
     cards.sort(key=lambda c: (c.period_coins, c.alltime_coins), reverse=True)
 
     total_period_coins = sum(c.period_coins for c in cards)
@@ -185,7 +182,6 @@ async def api_v1_daily_report(
     total_gifts_sent = sum(c.period_gifts_sent for c in cards)
     live_now = sum(1 for c in cards if c.is_live)
 
-    # Vorformatierter Telegram Markdown & HTML Bericht
     md_lines = [
         f"📋 *TikTok Streamer Einnahmen-Report ({hours}h)*",
         f"🕒 Stand: `{now.strftime('%d.%m.%Y %H:%M')}`",
@@ -253,10 +249,6 @@ async def api_v1_streamer_single_report(
     identifier: str,
     hours: int = Query(24, ge=1, le=8760, description="Zeitraum in Stunden für die Auswertung (Standard: 24h)"),
 ):
-    """
-    Ideal für On-Demand-Befehle im Telegram-Bot wie `/streamer montanablack` oder `/stats @eliasn97`.
-    Akzeptiert sowohl den TikTok-Username (mit oder ohne `@`) als auch die interne Datenbank-ID.
-    """
     init_db()
     streamer = get_streamer_by_id_or_username(identifier)
     if not streamer:
@@ -531,4 +523,4 @@ async def api_clear_demo():
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=5000, reload=False)
+    uvicorn.run("app:app", host=config.app_host, port=config.app_port, reload=False)

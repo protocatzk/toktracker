@@ -15,6 +15,7 @@ import httpx
 try:
     from TikTokLive import TikTokLiveClient
     from TikTokLive.client.errors import UserOfflineError
+    from TikTokLive.client.web.web_settings import WebDefaults
     from TikTokLive.events import (
         ConnectEvent,
         DisconnectEvent,
@@ -26,7 +27,9 @@ try:
 except ImportError:
     TIKTOKLIVE_AVAILABLE = False
     UserOfflineError = Exception  # type: ignore
+    WebDefaults = None  # type: ignore
 
+from config import config
 from database import (
     end_stream_session,
     get_settings,
@@ -45,6 +48,10 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
+# Falls ein EulerStream Sign-API-Key in .env / Umgebungsvariablen hinterlegt ist, global setzen
+if TIKTOKLIVE_AVAILABLE and WebDefaults is not None and config.has_sign_api_key:
+    WebDefaults.tiktok_sign_api_key = config.tiktok_sign_api_key
+
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -54,7 +61,6 @@ DEFAULT_HEADERS = {
     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
-# Fallback-Werte für bekannte TikTok-Geschenke, falls diamond_count im Event 0 ist
 KNOWN_GIFT_DIAMONDS: Dict[str, int] = {
     "rose": 1,
     "tiktok": 1,
@@ -62,7 +68,7 @@ KNOWN_GIFT_DIAMONDS: Dict[str, int] = {
     "ice cream cone": 1,
     "finger heart": 5,
     "mic": 5,
-    "Rosa": 10,
+    "rosa": 10,
     "perfume": 20,
     "doughnut": 30,
     "cap": 99,
@@ -73,6 +79,7 @@ KNOWN_GIFT_DIAMONDS: Dict[str, int] = {
     "money gun": 500,
     "swan": 699,
     "galaxy": 1000,
+    "fireworks": 1088,
     "whale diving": 2150,
     "motorcycle": 2988,
     "sports car": 7000,
@@ -89,6 +96,7 @@ def fetch_tiktok_user_info(username: str) -> Dict[str, Any]:
     """
     Fragt TikTok-Web-Endpoints (@username) ab, um Anzeigename, Avatar,
     Follower-Anzahl, Room-ID und aktuellen Live-Status zu ermitteln.
+    Nutzt automatisch TIKTOK_SESSION_ID falls in .env konfiguriert.
     """
     clean_user = username.strip().lstrip("@").lower()
     result: Dict[str, Any] = {
@@ -101,10 +109,22 @@ def fetch_tiktok_user_info(username: str) -> Dict[str, Any]:
         "title": "",
     }
 
+    cookies = {}
+    if config.has_tiktok_session:
+        cookies["sessionid"] = config.tiktok_session_id
+        cookies["sessionid_ss"] = config.tiktok_session_id
+        cookies["sid_tt"] = config.tiktok_session_id
+        if config.tiktok_target_idc:
+            cookies["tt-target-idc"] = config.tiktok_target_idc
+
     try:
         url = f"https://www.tiktok.com/@{clean_user}"
         with httpx.Client(
-            headers=DEFAULT_HEADERS, follow_redirects=True, timeout=8.0
+            headers=DEFAULT_HEADERS,
+            cookies=cookies,
+            proxy=config.tiktok_web_proxy,
+            follow_redirects=True,
+            timeout=8.0,
         ) as client:
             resp = client.get(url)
             if resp.status_code == 200:
@@ -170,8 +190,9 @@ class WorkerDiagnostics:
     """Laufzeit-Telemetrie pro überwachtem Streamer."""
     streamer_id: int
     username: str
-    state: str = "stopped"  # stopped | connecting | connected | polling_offline | backoff | error
+    state: str = "stopped"
     auto_reconnect: bool = True
+    authenticated_session: bool = False
     room_id: str = ""
     session_id: Optional[int] = None
     connected_since: Optional[str] = None
@@ -187,16 +208,6 @@ class WorkerDiagnostics:
 
 
 class StreamerWorker:
-    """
-    Hintergrund-Worker für einen einzelnen TikTok-Streamer.
-    Funktionen:
-    - Eigener asyncio-Loop in dediziertem Daemon-Thread
-    - Optionale Auto-Live-Überwachung (wartet bis Streamer live geht und verbindet automatisch)
-    - Exponentieller Reconnect-Backoff bei Verbindungsabbrüchen
-    - Sicheres Streak-Handling (flush von offenen Streaks nach Timeout oder bei Disconnect)
-    - Extraktion von Gift-Katalog, Zuschauerzahlen (RoomUserSeqEvent) und Fan-Tickets
-    """
-
     STREAK_TIMEOUT_SECONDS = 12.0
 
     def __init__(
@@ -211,6 +222,7 @@ class StreamerWorker:
             streamer_id=streamer_id,
             username=self.username,
             auto_reconnect=auto_reconnect,
+            authenticated_session=config.has_tiktok_session,
         )
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -244,6 +256,7 @@ class StreamerWorker:
                 "is_running": self.is_alive(),
                 "state": self.diag.state,
                 "auto_reconnect": self.diag.auto_reconnect,
+                "authenticated_session": self.diag.authenticated_session,
                 "room_id": self.diag.room_id,
                 "session_id": self.diag.session_id,
                 "connected_since": self.diag.connected_since,
@@ -332,14 +345,34 @@ class StreamerWorker:
             except Exception:
                 pass
 
+    def _create_configured_client(self) -> Any:
+        """
+        Erstellt eine TikTokLiveClient-Instanz und injiziert Session-Cookies
+        (`sessionid` + `tt-target-idc`) sowie optionale Proxies aus der .env / Umgebung.
+        """
+        web_proxy = httpx.Proxy(config.tiktok_web_proxy) if config.tiktok_web_proxy else None
+        client = TikTokLiveClient(
+            unique_id=f"@{self.username}",
+            web_proxy=web_proxy,
+        )
+        if config.has_tiktok_session:
+            client.web.set_session(
+                session_id=config.tiktok_session_id,
+                tt_target_idc=config.tiktok_target_idc or "eu-ttp2",
+            )
+            with self._lock:
+                self.diag.authenticated_session = True
+        return client
+
     async def _supervisor_loop(self) -> None:
-        """Überwacht den Streamer, verbindet bei Live-Status und führt Reconnect/Polling durch."""
         backoff = 5.0
 
         while not self._stop_event.is_set():
             with self._lock:
                 self.diag.state = "connecting"
-            self._log("INFO", "Prüfe Live-Status & verbinde mit TikTok Webcast...")
+
+            auth_hint = " (mit Session-Cookie)" if config.has_tiktok_session else " (anonym)"
+            self._log("INFO", f"Prüfe Live-Status & verbinde mit TikTok Webcast{auth_hint}...")
 
             update_streamer_runtime_state(
                 self.username,
@@ -347,14 +380,13 @@ class StreamerWorker:
                 auto_monitor=self.diag.auto_reconnect,
             )
 
-            client = TikTokLiveClient(unique_id=f"@{self.username}")
+            client = self._create_configured_client()
             with self._lock:
                 self._client = client
 
             self._register_handlers(client)
 
             try:
-                # Startet die WebSocket-Verbindung und gibt den internen Loop-Task zurück
                 ws_task = await client.start(
                     process_connect_events=True,
                     compress_ws_events=True,
@@ -365,7 +397,6 @@ class StreamerWorker:
                 backoff = 5.0
                 self.diag.reconnect_attempts = 0
 
-                # Begleit-Task zum regelmäßigen Flushen abgelaufener Streak-Combos
                 streak_watchdog = asyncio.create_task(self._streak_watchdog_loop())
                 try:
                     await ws_task
@@ -434,7 +465,6 @@ class StreamerWorker:
                 with self._lock:
                     self._client = None
 
-            # Falls ws_task regulär endete (z.B. Stream beendet)
             if not self.diag.auto_reconnect or self._stop_event.is_set():
                 break
 
@@ -576,14 +606,12 @@ class StreamerWorker:
         diamond_count = int(getattr(gift, "diamond_count", 0) or 0)
         gift_icon_url = ""
 
-        # Icon aus Protobuf-Gift-Objekt falls vorhanden
         icon_obj = getattr(gift, "icon", None) or getattr(gift, "image", None)
         if icon_obj is not None:
             url_list = getattr(icon_obj, "url_list", None) or []
             if url_list:
                 gift_icon_url = str(url_list[0])
 
-        # Fallback über den beim Connect geladenen Room-Gift-Katalog
         if gift_id in self._gift_catalog_cache:
             cat_name, cat_diamonds, cat_icon = self._gift_catalog_cache[gift_id]
             if not gift_name:
@@ -620,10 +648,8 @@ class StreamerWorker:
 
         streaking = bool(getattr(event, "streaking", False))
 
-        # Eindeutiger Key für laufende Streak-Gruppen eines Nutzers
         streak_key = f"{sender_user_id or sender_username}:{gift_id}:{group_id or 'default'}"
 
-        # Idempotente Event-UID für SQLite (verhindert Doppelzählung)
         if group_id and group_id != "0":
             raw_uid = f"tt:{self.streamer_id}:{sender_user_id or sender_username}:{gift_id}:grp:{group_id}"
         elif msg_id:
@@ -667,7 +693,6 @@ class StreamerWorker:
 
         streak_key = meta["streak_key"]
 
-        # Solange ein Zuschauer noch in der Combo tippt (streaking=True), aktualisieren wir den Zwischenstand
         if meta["streaking"]:
             with self._lock:
                 self._pending_streaks[streak_key] = PendingStreak(
@@ -690,7 +715,6 @@ class StreamerWorker:
                 )
             return
 
-        # Streak ist beendet oder nicht-streakbares Geschenk -> aus Pending entfernen und sofort buchen
         with self._lock:
             self._pending_streaks.pop(streak_key, None)
 
@@ -811,10 +835,6 @@ class StreamerWorker:
 
 
 class StreamerMonitorManager:
-    """
-    Zentrale Backend-Steuerung für alle StreamerWorker-Instanzen.
-    """
-
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._workers: Dict[str, StreamerWorker] = {}
@@ -847,6 +867,7 @@ class StreamerMonitorManager:
         connected_count = sum(1 for s in snapshots if s["state"] == "connected")
         return {
             "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "env_config": config.public_summary(),
             "workers_total": len(snapshots),
             "workers_running": active_count,
             "workers_connected": connected_count,

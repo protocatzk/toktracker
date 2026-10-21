@@ -13,6 +13,8 @@
             <h1>TikTok Streamer Einnahmen – FastAPI Backend &amp; Bot API</h1>
             <div class="mono">
                 TikTokLive: <strong>{{ "Aktiv" if tiktoklive_available else "Nicht verfügbar" }}</strong>
+                | Session-Cookie: <strong>{{ "Gesetzt (" ~ env_summary.tiktok_target_idc ~ ")" if env_summary.has_tiktok_session else "Anonym (nicht gesetzt)" }}</strong>
+                | Sign-Key: <strong>{{ "Gesetzt" if env_summary.has_sign_api_key else "Standard" }}</strong>
                 | <span id="sysWorkerInfo">Worker: 0 aktiv</span>
             </div>
         </div>
