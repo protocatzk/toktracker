@@ -16,6 +16,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "usd_to_eur_rate": "0.92",         # Wechselkurs USD -> EUR
     "currency_primary": "EUR",         # Primäre Anzeige-Währung (EUR oder USD)
     "poll_interval_seconds": "45",     # Intervall für Auto-Live-Check wenn Streamer offline ist
+    "api_key": "",                     # Optionaler API-Key für externe Bot-Abfragen
 }
 
 _db_init_lock = threading.Lock()
@@ -114,7 +115,6 @@ def init_db() -> None:
                 """
             )
 
-            # Sanfte Migrationen falls bereits eine ältere DB-Datei existiert
             _ensure_column(conn, "streamers", "auto_monitor", "INTEGER DEFAULT 0")
             _ensure_column(conn, "streamers", "current_viewers", "INTEGER DEFAULT 0")
             _ensure_column(conn, "streamers", "last_error", "TEXT DEFAULT ''")
@@ -156,6 +156,7 @@ def get_settings() -> Dict[str, Any]:
         "usd_to_eur_rate": float(data.get("usd_to_eur_rate", 0.92)),
         "currency_primary": data.get("currency_primary", "EUR"),
         "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
+        "api_key": str(data.get("api_key", "")),
     }
 
 
@@ -168,6 +169,29 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     (key, str(new_settings[key])),
                 )
     return get_settings()
+
+
+def get_streamer_by_id_or_username(identifier: str | int) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        if isinstance(identifier, int) or str(identifier).isdigit():
+            row = conn.execute(
+                "SELECT * FROM streamers WHERE id = ?", (int(identifier),)
+            ).fetchone()
+            if row:
+                return dict(row)
+        clean = str(identifier).strip().lstrip("@").lower()
+        row = conn.execute(
+            "SELECT * FROM streamers WHERE username = ?", (clean,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_auto_monitor_streamers() -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM streamers WHERE auto_monitor = 1"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def upsert_streamer(
@@ -302,7 +326,6 @@ def update_streamer_runtime_state(
 def start_stream_session(
     streamer_id: int, room_id: str = "", title: str = ""
 ) -> int:
-    """Öffnet eine neue Stream-Session oder gibt die bereits aktive Session für diese Room-ID zurück."""
     now = datetime.now().isoformat(timespec="seconds")
     with get_db() as conn:
         active = conn.execute(
@@ -405,10 +428,6 @@ def record_gift_event(
     source: str = "tiktoklive",
     created_at: Optional[str] = None,
 ) -> Tuple[Optional[Dict[str, Any]], bool]:
-    """
-    Speichert ein Gift-Event idempotent in der Datenbank.
-    Gibt (event_dict, created_new) zurück. Wenn event_uid bereits existiert, wird Duplikat-Buchung verhindert.
-    """
     cfg = get_settings()
     diamond_count = max(0, int(diamond_count))
     repeat_count = max(1, int(repeat_count))
@@ -502,6 +521,8 @@ def _get_period_cutoff(period: str) -> Optional[str]:
     now = datetime.now()
     if period == "today":
         return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
+    if period == "24h":
+        return (now - timedelta(hours=24)).isoformat(timespec="seconds")
     if period == "7d":
         return (now - timedelta(days=7)).isoformat(timespec="seconds")
     if period == "30d":
@@ -787,6 +808,189 @@ def get_streamer_detail(streamer_id: int, period: str = "all") -> Optional[Dict[
             "sessions": sessions,
             "recent_events": recent_events,
         }
+
+
+def build_streamer_bot_report(
+    streamer_row: Dict[str, Any],
+    hours: int = 24,
+    is_tracking_active: bool = False,
+    worker_state: str = "stopped",
+) -> Dict[str, Any]:
+    """
+    Erzeugt einen vollständigen Auswertungsblock für einen einzelnen Streamer
+    (Zeitraum z.B. 24h + All-Time-Werte + Top-Gifts + Top-Gifter + Telegram-Text).
+    """
+    cfg = get_settings()
+    cutoff = (datetime.now() - timedelta(hours=max(1, hours))).isoformat(timespec="seconds")
+    sid = int(streamer_row["id"])
+
+    with get_db() as conn:
+        period_agg = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(total_coins), 0) AS coins,
+                COALESCE(SUM(repeat_count), 0) AS gifts_sent,
+                COUNT(id) AS gift_events,
+                COUNT(DISTINCT sender_username) AS unique_gifters
+            FROM gift_events
+            WHERE streamer_id = ? AND created_at >= ?
+            """,
+            (sid, cutoff),
+        ).fetchone()
+
+        alltime_agg = conn.execute(
+            """
+            SELECT COALESCE(SUM(total_coins), 0) AS coins
+            FROM gift_events
+            WHERE streamer_id = ?
+            """,
+            (sid,),
+        ).fetchone()
+
+        sess_agg = conn.execute(
+            """
+            SELECT
+                COUNT(id) AS sessions_count,
+                COALESCE(MAX(peak_viewers), 0) AS max_peak_viewers
+            FROM stream_sessions
+            WHERE streamer_id = ? AND (started_at >= ? OR status = 'active')
+            """,
+            (sid, cutoff),
+        ).fetchone()
+
+        top_gifts_rows = conn.execute(
+            """
+            SELECT
+                gift_name,
+                diamond_count,
+                SUM(repeat_count) AS total_quantity,
+                SUM(total_coins) AS total_coins,
+                COUNT(id) AS events_count
+            FROM gift_events
+            WHERE streamer_id = ? AND created_at >= ?
+            GROUP BY gift_name, diamond_count
+            ORDER BY total_coins DESC
+            LIMIT 5
+            """,
+            (sid, cutoff),
+        ).fetchall()
+
+        top_gifters_rows = conn.execute(
+            """
+            SELECT
+                sender_username,
+                MAX(sender_nickname) AS sender_nickname,
+                MAX(is_super_fan) AS is_super_fan,
+                SUM(total_coins) AS total_coins,
+                SUM(repeat_count) AS gifts_sent,
+                COUNT(id) AS transactions
+            FROM gift_events
+            WHERE streamer_id = ? AND created_at >= ?
+            GROUP BY sender_username
+            ORDER BY total_coins DESC
+            LIMIT 5
+            """,
+            (sid, cutoff),
+        ).fetchall()
+
+    p_coins = int(period_agg["coins"] or 0)
+    p_usd_net = round(p_coins * cfg["usd_per_diamond"], 2)
+    p_eur_net = round(p_usd_net * cfg["usd_to_eur_rate"], 2)
+    p_usd_gross = round(p_coins * cfg["gross_usd_per_coin"], 2)
+    p_eur_gross = round(p_usd_gross * cfg["usd_to_eur_rate"], 2)
+
+    all_coins = int(alltime_agg["coins"] or 0)
+    all_usd_net = round(all_coins * cfg["usd_per_diamond"], 2)
+    all_eur_net = round(all_usd_net * cfg["usd_to_eur_rate"], 2)
+
+    top_gifts = []
+    for g in top_gifts_rows:
+        c = int(g["total_coins"] or 0)
+        u_net = round(c * cfg["usd_per_diamond"], 2)
+        e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+        top_gifts.append(
+            {
+                "gift_name": g["gift_name"],
+                "diamond_count": int(g["diamond_count"] or 0),
+                "total_quantity": int(g["total_quantity"] or 0),
+                "total_coins": c,
+                "events_count": int(g["events_count"] or 0),
+                "usd_net": u_net,
+                "eur_net": e_net,
+            }
+        )
+
+    top_gifters = []
+    for tg in top_gifters_rows:
+        c = int(tg["total_coins"] or 0)
+        u_net = round(c * cfg["usd_per_diamond"], 2)
+        e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+        top_gifters.append(
+            {
+                "sender_username": tg["sender_username"],
+                "sender_nickname": tg["sender_nickname"] or tg["sender_username"],
+                "is_super_fan": bool(tg["is_super_fan"]),
+                "total_coins": c,
+                "gifts_sent": int(tg["gifts_sent"] or 0),
+                "transactions": int(tg["transactions"] or 0),
+                "usd_net": u_net,
+                "eur_net": e_net,
+            }
+        )
+
+    uname = streamer_row["username"]
+    dname = streamer_row["display_name"] or uname
+    live_icon = "🟢 LIVE" if streamer_row.get("is_live") else "⚪ Offline"
+    top_gift_str = (
+        f"{top_gifts[0]['gift_name']} ({top_gifts[0]['total_coins']:,} Coins)"
+        if top_gifts
+        else "Keine"
+    )
+    top_gifter_str = (
+        f"@{top_gifters[0]['sender_username']} ({top_gifters[0]['total_coins']:,} Coins)"
+        if top_gifters
+        else "Keine"
+    )
+
+    telegram_text = (
+        f"📊 *{dname}* (@{uname}) [{live_icon}]\n"
+        f"• Zeitraum ({hours}h): *{p_eur_net:,.2f} €* (${p_usd_net:,.2f}) | *{p_coins:,} Coins*\n"
+        f"• Brutto-Kaufwert ({hours}h): {p_eur_gross:,.2f} € | Gifts: {int(period_agg['gifts_sent'] or 0)} ({int(period_agg['unique_gifters'] or 0)} Gifter)\n"
+        f"• Top Gift: {top_gift_str}\n"
+        f"• Top Spender: {top_gifter_str}\n"
+        f"• Gesamt (All-Time): {all_eur_net:,.2f} € ({all_coins:,} Coins)"
+    )
+
+    return {
+        "streamer_id": sid,
+        "username": uname,
+        "display_name": dname,
+        "is_live": bool(streamer_row.get("is_live")),
+        "is_tracking_active": is_tracking_active,
+        "worker_state": worker_state,
+        "current_viewers": int(streamer_row.get("current_viewers") or 0),
+        "follower_count": int(streamer_row.get("follower_count") or 0),
+        "period_hours": hours,
+        "period_coins": p_coins,
+        "period_gifts_sent": int(period_agg["gifts_sent"] or 0),
+        "period_gift_events": int(period_agg["gift_events"] or 0),
+        "period_unique_gifters": int(period_agg["unique_gifters"] or 0),
+        "period_usd_net": p_usd_net,
+        "period_eur_net": p_eur_net,
+        "period_usd_gross": p_usd_gross,
+        "period_eur_gross": p_eur_gross,
+        "period_sessions_count": int(sess_agg["sessions_count"] or 0),
+        "period_peak_viewers": max(
+            int(sess_agg["max_peak_viewers"] or 0),
+            int(streamer_row.get("current_viewers") or 0),
+        ),
+        "alltime_coins": all_coins,
+        "alltime_usd_net": all_usd_net,
+        "alltime_eur_net": all_eur_net,
+        "top_gifts": top_gifts,
+        "top_gifters": top_gifters,
+        "telegram_text": telegram_text,
+    }
 
 
 def seed_demo_data() -> None:

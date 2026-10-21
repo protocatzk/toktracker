@@ -102,6 +102,7 @@ function renderStreamerTable(streamers) {
                     <td>
                         <button type="button" onclick="toggleWorker(${s.id})">${trackBtnText}</button>
                         <button type="button" onclick="showStreamerDetail(${s.id})">Details</button>
+                        <a class="btn-link mono" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank" title="JSON Einzelabfrage für Telegram Bot">Bot-JSON</a>
                         <button type="button" onclick="refreshStreamer(${s.id})">Profil-Check</button>
                         <button type="button" class="danger" onclick="deleteStreamer(${s.id}, '${s.username}')">X</button>
                     </td>

@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TikTok Streamer Einnahmen (Backend Console)</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <title>TikTok Streamer Einnahmen (FastAPI Backend Console)</title>
+    <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
 <div class="container">
     <div class="top-bar">
         <div>
-            <h1>TikTok Streamer Einnahmen – Backend Übersicht</h1>
+            <h1>TikTok Streamer Einnahmen – FastAPI Backend &amp; Bot API</h1>
             <div class="mono">
                 TikTokLive: <strong>{{ "Aktiv" if tiktoklive_available else "Nicht verfügbar" }}</strong>
                 | <span id="sysWorkerInfo">Worker: 0 aktiv</span>
@@ -20,13 +20,15 @@
             <label for="periodSelect">Zeitraum:</label>
             <select id="periodSelect">
                 <option value="all">Gesamt</option>
+                <option value="24h">Letzte 24h (Bot-Fenster)</option>
                 <option value="today">Heute</option>
                 <option value="7d">Letzte 7 Tage</option>
                 <option value="30d">Letzte 30 Tage</option>
             </select>
             <button type="button" id="btnRefresh">Aktualisieren</button>
+            <a class="btn-link" href="/docs" target="_blank"><strong>Swagger API Docs (/docs)</strong></a>
+            <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h Bot-Report JSON</a>
             <a class="btn-link" href="/api/export/gifts.csv">CSV Export</a>
-            <a class="btn-link" href="/api/system/status" target="_blank">JSON Diagnose</a>
         </div>
     </div>
 
@@ -55,7 +57,7 @@
         <div class="box">
             <h2>1. Streamer hinzufügen &amp; TikTokLive-Worker starten</h2>
             <form id="formAddStreamer" class="inline-form">
-                <input type="text" id="inputUsername" placeholder="@username" required />
+                <input type="text" id="inputUsername" placeholder="@username (z.B. montanablack)" required />
                 <label>
                     <input type="checkbox" id="checkAutoTrack" checked />
                     Worker direkt starten
@@ -105,7 +107,7 @@
                     <th>Netto (USD)</th>
                     <th>Brutto (EUR)</th>
                     <th>Top Gift / Top Gifter</th>
-                    <th>Steuerung</th>
+                    <th>Steuerung &amp; Bot-Endpoint</th>
                 </tr>
             </thead>
             <tbody id="streamerTableBody">
@@ -114,7 +116,7 @@
         </table>
     </div>
 
-    <!-- Detail-Ansicht für ausgewählten Streamer (wird bei Klick eingeblendet) -->
+    <!-- Detail-Ansicht für ausgewählten Streamer -->
     <div class="box" id="streamerDetailBox" style="display:none;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h2 id="detailTitle" style="margin:0;">Streamer Detail-Auswertung</h2>
@@ -182,13 +184,13 @@
             <h2>Backend-Parameter &amp; Worker-Logs</h2>
             <form id="formSettings" class="inline-form" style="margin-bottom:12px;">
                 <label>USD/Coin Netto:
-                    <input type="number" step="0.0001" id="setUsdPerDiamond" style="width:75px;" required />
+                    <input type="number" step="0.0001" id="setUsdPerDiamond" style="width:70px;" required />
                 </label>
                 <label>USD/Coin Brutto:
-                    <input type="number" step="0.0001" id="setGrossUsdPerCoin" style="width:75px;" required />
+                    <input type="number" step="0.0001" id="setGrossUsdPerCoin" style="width:70px;" required />
                 </label>
                 <label>USD→EUR:
-                    <input type="number" step="0.001" id="setUsdToEur" style="width:65px;" required />
+                    <input type="number" step="0.001" id="setUsdToEur" style="width:60px;" required />
                 </label>
                 <label>Poll (s):
                     <input type="number" id="setPollInterval" style="width:55px;" required />
@@ -203,6 +205,6 @@
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+<script src="/static/dashboard.js"></script>
 </body>
 </html>
