@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>toktracker – Streamer Earnings &amp; Bot Console</title>
+    <title>toktracker – Admin Console · Live Earnings &amp; Analytics</title>
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
     <script>
         (function () {
             try {
@@ -16,19 +17,26 @@
 </head>
 <body>
 
-<!-- Kopfbereich: Branding & Systemstatus-Pills -->
+<!-- Kopfbereich: toktracker Brand & Systemstatus-Pills -->
 <header class="app-header">
     <div class="header-inner">
-        <div class="brand-block">
-            <h1 class="brand-title">toktracker</h1>
-            <span class="brand-subtitle">TikTok Live Earnings &amp; Telegram Bot Backend</span>
-        </div>
+        <a href="/" class="brand-block">
+            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <div class="brand-text">
+                <div class="brand-title-row">
+                    <h1 class="brand-title">toktracker</h1>
+                    <span class="brand-mode-tag">ADMIN CONSOLE</span>
+                </div>
+                <span class="brand-subtitle">LIVE EARNINGS · ANALYTICS · BOT BACKEND</span>
+            </div>
+        </a>
         <div class="status-strip">
             <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
             <span class="pill">Session: <strong>{{ env_summary.tiktok_target_idc | upper if env_summary.has_tiktok_session else "ANONYM" }}</strong></span>
             <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
             <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
             <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
+            <a class="btn-link primary sm" href="/public">Öffentliches User-Panel →</a>
         </div>
     </div>
 </header>
@@ -267,31 +275,27 @@
     <!-- TAB 3: TELEGRAM-BOT & ZUGRIFFSKONTROLLE (WHITELIST)       -->
     <!-- ========================================================= -->
     <section class="tab-panel" id="tab-telegram">
-        <div class="box">
-            <div class="box-header">
-                <div>
-                    <h2>Telegram-Bot Steuerung &amp; Zugriffsmodus</h2>
-                    <div class="section-hint">
-                        Im Modus <strong>WHITELIST</strong> können nur freigeschaltete Nutzer (im Privatchat und in Gruppen) Befehle ausführen.
-                        Im Modus <strong>PUBLIC</strong> sind Abfrage-Befehle für alle Telegram-Nutzer offen, während Verwaltungsbefehle auf Admins beschränkt bleiben.
+        <div class="brand-banner-card">
+            <img src="/pictures/daily_report_banner.jpg" alt="toktracker 24h Report" class="brand-banner-img" />
+            <div>
+                <h2>Telegram-Bot Steuerung &amp; Zugriffsmodus</h2>
+                <div class="section-hint" style="margin-bottom:10px;">
+                    Im Modus <strong>WHITELIST</strong> können nur freigeschaltete Nutzer (im Privatchat und in Gruppen) Befehle ausführen.
+                    Im Modus <strong>PUBLIC</strong> sind Abfrage-Befehle für alle Telegram-Nutzer offen, während Verwaltungsbefehle auf Admins beschränkt bleiben.
+                </div>
+                <div class="inline-form" style="justify-content:space-between;">
+                    <div class="inline-form">
+                        <label for="selectTelegramMode" class="mono"><strong>Zugriffsmodus:</strong></label>
+                        <select id="selectTelegramMode">
+                            <option value="whitelist">WHITELIST – Nur freigeschaltete Personen (@username / ID)</option>
+                            <option value="public">PUBLIC – Für alle Telegram-Nutzer geöffnet</option>
+                        </select>
+                        <button type="button" id="btnSendTelegramReport" class="primary">24h-Bericht an Telegram senden</button>
+                        <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h-Report JSON</a>
                     </div>
-                </div>
-                <div class="inline-form">
-                    <button type="button" id="btnSendTelegramReport" class="primary">24h-Bericht jetzt an Telegram senden</button>
-                    <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h-Report JSON</a>
-                </div>
-            </div>
-
-            <div class="inline-form" style="justify-content:space-between;">
-                <div class="inline-form">
-                    <label for="selectTelegramMode"><strong>Aktiver Bot-Zugriffsmodus:</strong></label>
-                    <select id="selectTelegramMode">
-                        <option value="whitelist">WHITELIST – Nur freigeschaltete Personen (@username / ID)</option>
-                        <option value="public">PUBLIC – Für alle Telegram-Nutzer geöffnet</option>
-                    </select>
-                </div>
-                <div class="mono muted">
-                    Bot-Befehle für Admins im Chat: <code>/allow</code>, <code>/revoke</code>, <code>/users</code>, <code>/mode</code>
+                    <div class="mono muted">
+                        Admin-Befehle: <code>/allow</code>, <code>/revoke</code>, <code>/users</code>, <code>/mode</code>
+                    </div>
                 </div>
             </div>
         </div>
@@ -380,16 +384,16 @@
                 <table>
                     <tbody>
                         <tr>
+                            <td class="mono">GET /api/public/overview</td>
+                            <td>Öffentliche Live-Übersicht für das User-Panel (Read-Only)</td>
+                        </tr>
+                        <tr>
                             <td class="mono">GET /api/v1/reports/daily?hours=24</td>
                             <td>Vollständiger 24h-Gesamtbericht (JSON + Telegram HTML/Markdown)</td>
                         </tr>
                         <tr>
                             <td class="mono">GET /api/v1/streamers/{name}/report</td>
                             <td>Einzelabfrage für einen Streamer per @username oder ID</td>
-                        </tr>
-                        <tr>
-                            <td class="mono">GET /api/v1/telegram/users</td>
-                            <td>Liste aller Telegram-Nutzer, Rollen &amp; Zugriffsmodus</td>
                         </tr>
                         <tr>
                             <td class="mono">GET /api/v1/system/status</td>
@@ -420,6 +424,13 @@
         </div>
     </section>
 </main>
+
+<footer class="app-footer">
+    <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
+    <div>
+        <a href="/public">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a>
+    </div>
+</footer>
 
 <script src="/static/dashboard.js"></script>
 </body>

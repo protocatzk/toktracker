@@ -92,9 +92,9 @@ app = FastAPI(
     title="toktracker – Streamer Earnings & Bot API",
     description=(
         "toktracker Backend-Service zur Echtzeit-Erfassung von TikTokLive-Geschenken (Coins/Diamonds) "
-        "mit fertigen 24h-Report- und Einzelabfrage-Endpoints sowie integriertem Telegram-Bot."
+        "mit fertigen 24h-Report- und Einzelabfrage-Endpoints, öffentlichem User-Panel sowie integriertem Telegram-Bot."
     ),
-    version="2.3.0",
+    version="2.4.0",
     lifespan=lifespan,
 )
 
@@ -131,10 +131,11 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 
 
 # =====================================================================
-# 1. TOKTRACKER WEB-INTERFACE (HTML)
+# 1. TOKTRACKER WEB-INTERFACE (ADMIN CONSOLE & PUBLIC USER PANEL)
 # =====================================================================
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 async def index(request: Request):
     init_db()
     monitor_manager.autostart_from_db()
@@ -148,6 +149,112 @@ async def index(request: Request):
             "telegram_diag": telegram_bot_service.get_diagnostics(),
         },
     )
+
+
+@app.get("/public", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/panel", response_class=HTMLResponse, include_in_schema=False)
+async def public_panel(request: Request):
+    init_db()
+    monitor_manager.autostart_from_db()
+    tg_diag = telegram_bot_service.get_diagnostics()
+    return templates.TemplateResponse(
+        request=request,
+        name="public.html",
+        context={
+            "telegram_bot_username": tg_diag.get("bot_username") or "",
+            "telegram_state": tg_diag.get("state") or "offline",
+        },
+    )
+
+
+# =====================================================================
+# 1b. PUBLIC READ-ONLY API (FÜR DAS ÖFFENTLICHE USER-PANEL)
+# =====================================================================
+
+@app.get(
+    "/api/public/overview",
+    tags=["Public Panel API"],
+    summary="Öffentliche Read-Only Übersicht für das User-Panel (ohne interne Logs/Whitelist)",
+)
+async def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
+    init_db()
+    monitor_manager.autostart_from_db()
+    raw = get_dashboard_overview(period=period)
+
+    public_streamers = []
+    for s in raw.get("streamers", []):
+        uname = s["username"]
+        public_streamers.append(
+            {
+                "id": s["id"],
+                "username": uname,
+                "display_name": s.get("display_name") or uname,
+                "avatar_url": s.get("avatar_url") or "",
+                "follower_count": s.get("follower_count") or 0,
+                "current_viewers": s.get("current_viewers") or 0,
+                "is_live": bool(s.get("is_live")),
+                "is_tracking_active": monitor_manager.is_tracking(uname),
+                "total_coins": s.get("total_coins") or 0,
+                "gift_events_count": s.get("gift_events_count") or 0,
+                "total_gifts_sent": s.get("total_gifts_sent") or 0,
+                "unique_gifters": s.get("unique_gifters") or 0,
+                "usd_net": s.get("usd_net") or 0.0,
+                "eur_net": s.get("eur_net") or 0.0,
+                "usd_gross": s.get("usd_gross") or 0.0,
+                "eur_gross": s.get("eur_gross") or 0.0,
+                "top_gift": s.get("top_gift"),
+                "top_gifter": s.get("top_gifter"),
+                "last_seen_at": s.get("last_seen_at"),
+            }
+        )
+
+    cfg = raw.get("settings") or {}
+    return {
+        "period": raw.get("period", period),
+        "totals": raw.get("totals", {}),
+        "streamers": public_streamers,
+        "recent_gifts": raw.get("recent_gifts", []),
+        "rates": {
+            "usd_per_diamond": cfg.get("usd_per_diamond", 0.005),
+            "gross_usd_per_coin": cfg.get("gross_usd_per_coin", 0.0106),
+            "usd_to_eur_rate": cfg.get("usd_to_eur_rate", 0.92),
+        },
+    }
+
+
+@app.get(
+    "/api/public/streamers/{identifier}",
+    tags=["Public Panel API"],
+    summary="Öffentliche Read-Only Detail-Auswertung eines Streamers",
+)
+async def api_public_streamer_detail(identifier: str, period: str = Query("24h")):
+    init_db()
+    s_row = get_streamer_by_id_or_username(identifier)
+    if not s_row:
+        raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
+
+    detail = get_streamer_detail(s_row["id"], period=period)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
+
+    s = detail["streamer"]
+    uname = s["username"]
+    return {
+        "streamer": {
+            "id": s["id"],
+            "username": uname,
+            "display_name": s.get("display_name") or uname,
+            "avatar_url": s.get("avatar_url") or "",
+            "follower_count": s.get("follower_count") or 0,
+            "current_viewers": s.get("current_viewers") or 0,
+            "is_live": bool(s.get("is_live")),
+            "is_tracking_active": monitor_manager.is_tracking(uname),
+        },
+        "summary": detail.get("summary", {}),
+        "gift_breakdown": detail.get("gift_breakdown", []),
+        "top_gifters": detail.get("top_gifters", []),
+        "sessions": detail.get("sessions", []),
+    }
 
 
 # =====================================================================

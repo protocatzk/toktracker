@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>toktracker – Live Earnings &amp; Streamer Analytics</title>
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <script>
+        (function () {
+            try {
+                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
+                document.documentElement.setAttribute("data-theme", savedTheme);
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- Kopfbereich: toktracker Brand & Live-Indikatoren -->
+<header class="app-header">
+    <div class="header-inner">
+        <a href="/public" class="brand-block">
+            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <div class="brand-text">
+                <div class="brand-title-row">
+                    <h1 class="brand-title">toktracker</h1>
+                    <span class="brand-mode-tag public">PUBLIC PANEL</span>
+                </div>
+                <span class="brand-subtitle">LIVE EARNINGS · ANALYTICS</span>
+            </div>
+        </a>
+        <div class="status-strip">
+            <span class="pill"><span class="live-dot"></span>LIVE STREAMER: <strong id="pubLiveCount">0</strong></span>
+            <span class="pill">ÜBERWACHT: <strong id="pubTotalStreamers">0</strong></span>
+            <span class="pill">LETZTES UPDATE: <strong id="pubLastUpdate">--:--:--</strong></span>
+            {% if telegram_bot_username %}
+            <a class="btn-link primary sm" href="https://t.me/{{ telegram_bot_username.lstrip('@') }}" target="_blank" rel="noopener">
+                Telegram Bot ({{ telegram_bot_username }}) →
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+<!-- Navigationsleiste & Zeitraum-Auswahl -->
+<nav class="nav-bar">
+    <div class="nav-inner">
+        <div class="tab-list" role="tablist">
+            <button type="button" class="tab-btn active" data-tab="pub-tab-leaderboard">
+                Streamer-Leaderboard <span class="tab-badge" id="pubBadgeStreamers">0</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="pub-tab-gifts">
+                Live Gift-Ticker <span class="tab-badge" id="pubBadgeGifts">0</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="pub-tab-bot">
+                Telegram-Bot &amp; Info
+            </button>
+        </div>
+
+        <div class="toolbar-controls">
+            <label for="pubPeriodSelect" class="mono muted">Zeitraum:</label>
+            <select id="pubPeriodSelect">
+                <option value="24h" selected>Letzte 24 Stunden</option>
+                <option value="today">Heute</option>
+                <option value="7d">Letzte 7 Tage</option>
+                <option value="30d">Letzte 30 Tage</option>
+                <option value="all">Gesamt (All-Time)</option>
+            </select>
+            <button type="button" id="pubBtnRefresh">Aktualisieren</button>
+            <button type="button" id="btnThemeToggle" class="mono" title="Zwischen Dark Mode und Light Mode wechseln">Theme: DARK</button>
+        </div>
+    </div>
+</nav>
+
+<main class="container">
+    <!-- Globale KPI-Leiste -->
+    <div class="summary-bar">
+        <div class="summary-box">
+            <div class="label">Geschätzte Creator-Auszahlung (Netto)</div>
+            <div class="val" id="pubSumNetEur">0,00 €</div>
+            <div class="sub" id="pubSumNetUsd">$0.00 USD</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Erfasste Coins / Diamonds</div>
+            <div class="val" id="pubSumCoins">0</div>
+            <div class="sub" id="pubSumStreamersSub">0 Streamer (0 LIVE)</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Zuschauer-Kaufwert (Brutto)</div>
+            <div class="val" id="pubSumGrossEur">0,00 €</div>
+            <div class="sub" id="pubSumGrossUsd">$0.00 USD</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Gesendete Geschenke</div>
+            <div class="val" id="pubSumGiftsSent">0</div>
+            <div class="sub" id="pubSumGiftEvents">0 Transaktionen</div>
+        </div>
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- TAB 1: STREAMER-LEADERBOARD & DETAIL-AUSWERTUNG           -->
+    <!-- ========================================================= -->
+    <section class="tab-panel active" id="pub-tab-leaderboard">
+        <!-- Detail-Ansicht für ausgewählten Streamer (wird bei Klick eingeblendet) -->
+        <div class="box" id="pubStreamerDetailBox" style="display:none;">
+            <div class="box-header">
+                <div>
+                    <h2 id="pubDetailTitle">Streamer Auswertung</h2>
+                    <div class="section-hint mono" id="pubDetailSubtitle"></div>
+                </div>
+                <div class="action-group">
+                    <a id="pubDetailTikTokLink" class="btn-link sm" href="#" target="_blank" rel="noopener">TikTok-Profil öffnen ↗</a>
+                    <button type="button" id="pubBtnCloseDetail">Schließen</button>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div>
+                    <strong class="mono">GESCHENKE-AUFSCHLÜSSELUNG</strong>
+                    <div class="table-wrap" style="margin-top:6px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Geschenk</th>
+                                    <th class="num-col">Anzahl</th>
+                                    <th class="num-col">Coins</th>
+                                    <th class="num-col">Netto EUR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pubDetailGiftsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <strong class="mono">TOP SPENDER (GIFTER)</strong>
+                    <div class="table-wrap" style="margin-top:6px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Spender</th>
+                                    <th class="num-col">Gifts</th>
+                                    <th class="num-col">Coins</th>
+                                    <th class="num-col">Netto EUR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pubDetailGiftersBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <strong class="mono">AUFGEZEICHNETE STREAM-SESSIONS</strong>
+                        <div id="pubDetailSessionsList" class="log-box mono" style="margin-top:6px; max-height:140px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Haupttabelle Leaderboard -->
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Streamer-Leaderboard &amp; Live-Übersicht</h2>
+                    <div class="section-hint">Sortiert nach erfassten Coins/Diamonds im gewählten Zeitraum. Klicke auf einen Streamer für die Detail-Auswertung.</div>
+                </div>
+                <div class="inline-form">
+                    <label class="checkbox-label mono">
+                        <input type="checkbox" id="pubCheckOnlyLive" />
+                        Nur LIVE anzeigen
+                    </label>
+                    <input type="text" id="pubInputStreamerFilter" placeholder="Streamer suchen..." style="width:200px;" />
+                    <span class="mono muted" id="pubStreamerTableMeta">0 Einträge</span>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:54px;">Rang</th>
+                            <th>Streamer</th>
+                            <th>Status</th>
+                            <th class="num-col">Zuschauer</th>
+                            <th class="num-col">Coins</th>
+                            <th class="num-col">Netto (EUR)</th>
+                            <th class="num-col">Netto (USD)</th>
+                            <th class="num-col">Brutto (EUR)</th>
+                            <th>Top Gift / Top Spender</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pubStreamerTableBody">
+                        <tr><td colspan="10">Lade Live-Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB 2: LIVE GIFT-TICKER                                   -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="pub-tab-gifts">
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>Live Gift-Ticker (Echtzeit-Feed)</h2>
+                    <div class="section-hint">Zuletzt erfasste TikTokLive-Geschenke aller überwachten Streamer.</div>
+                </div>
+                <div class="inline-form">
+                    <input type="text" id="pubInputGiftFilter" placeholder="Geschenke oder Streamer filtern..." style="width:240px;" />
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Zeitpunkt</th>
+                            <th>Streamer</th>
+                            <th>Spender (Gifter)</th>
+                            <th>Geschenk</th>
+                            <th class="num-col">Coins</th>
+                            <th class="num-col">Netto (EUR)</th>
+                            <th class="num-col">Netto (USD)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pubGiftLogBody">
+                        <tr><td colspan="7">Keine Geschenke geladen.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB 3: TELEGRAM-BOT & BERECHNUNGSHINWEISE                 -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="pub-tab-bot">
+        <div class="brand-banner-card">
+            <img src="/pictures/welcome_banner.jpg" alt="toktracker Live Earnings Analytics" class="brand-banner-img" />
+            <div>
+                <h2>toktracker Telegram-Bot</h2>
+                <div class="section-hint" style="margin-bottom:10px;">
+                    Alle Live-Einnahmen, 24h-Reports und Einzelauswertungen lassen sich direkt über den offiziellen <strong>toktracker</strong> Telegram-Bot abrufen.
+                </div>
+                <div class="inline-form">
+                    {% if telegram_bot_username %}
+                    <a class="btn-link primary" href="https://t.me/{{ telegram_bot_username.lstrip('@') }}" target="_blank" rel="noopener">
+                        Telegram-Bot öffnen ({{ telegram_bot_username }})
+                    </a>
+                    {% else %}
+                    <span class="pill">Telegram-Bot Status: <strong>{{ telegram_state | upper }}</strong></span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Verfügbare Bot-Befehle für Nutzer</h2>
+                        <div class="section-hint">Befehle im Telegram-Chat oder in verbundenen Gruppen.</div>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Befehl</th>
+                            <th>Funktion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="mono"><code>/report</code></td>
+                            <td>Kompletter 24h-Einnahmenbericht über alle überwachten Streamer</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><code>/report 48</code></td>
+                            <td>Gesamtbericht für einen frei wählbaren Zeitraum in Stunden</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><code>/streamer &lt;name&gt;</code></td>
+                            <td>Detail-Auswertung eines Streamers (Coins, Netto EUR/USD, Top Gift, Top Spender)</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><code>/list</code></td>
+                            <td>Übersicht aller überwachten Streamer inklusive aktuellem Live-Status</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><code>/status</code></td>
+                            <td>Aktueller Verbindungsstatus der Live-Aufzeichnung</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="box">
+                <div class="box-header">
+                    <div>
+                        <h2>Berechnungsgrundlage (Coins &amp; Auszahlung)</h2>
+                        <div class="section-hint">Transparente Umrechnung der TikTokLive Gift-Events.</div>
+                    </div>
+                </div>
+                <table>
+                    <tbody>
+                        <tr>
+                            <td class="mono"><strong>Coins / Diamonds</strong></td>
+                            <td>Entspricht dem exakten TikTok-Geschenkwert (<code>diamond_count × repeat_count</code>)</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><strong>Netto Creator-Auszahlung</strong></td>
+                            <td id="pubRateNetInfo">Geschätzter Creator-Anteil nach TikTok-Abzug (~50 %)</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><strong>Brutto Zuschauer-Kaufwert</strong></td>
+                            <td id="pubRateGrossInfo">Geschätzter Kaufpreis der Coins für Zuschauer</td>
+                        </tr>
+                        <tr>
+                            <td class="mono"><strong>Wechselkurs USD → EUR</strong></td>
+                            <td class="mono" id="pubRateFxInfo">0.920</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</main>
+
+<footer class="app-footer">
+    <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
+    <div>
+        <a href="/public">Public Panel</a> · <a href="/">Admin Console</a>
+    </div>
+</footer>
+
+<script src="/static/public.js"></script>
+</body>
+</html>

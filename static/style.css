@@ -1,24 +1,25 @@
 :root,
 [data-theme="dark"] {
     --bg-body: #0d1117;
-    --bg-surface: #161b22;
-    --bg-subtle: #1c2128;
-    --bg-row-even: #13181f;
-    --bg-row-hover: #21262d;
+    --bg-surface: #12171f;
+    --bg-subtle: #161b22;
+    --bg-row-even: #0f141b;
+    --bg-row-hover: #1c222b;
     --bg-input: #0d1117;
-    --border-color: #30363d;
-    --border-subtle: #21262d;
+    --border-color: #2a313c;
+    --border-strong: #f0f6fc;
+    --border-subtle: #1e242d;
     --border-input: #3d444d;
-    --border-focus: #58a6ff;
+    --border-focus: #f0f6fc;
     --text-main: #e6edf3;
     --text-strong: #f0f6fc;
     --text-muted: #8b949e;
-    --link-color: #58a6ff;
+    --link-color: #f0f6fc;
 
-    --btn-bg: #21262d;
-    --btn-bg-hover: #30363d;
-    --btn-border: #3d444d;
-    --btn-text: #c9d1d9;
+    --btn-bg: #161b22;
+    --btn-bg-hover: #21262d;
+    --btn-border: #30363d;
+    --btn-text: #e6edf3;
 
     --btn-primary-bg: #f0f6fc;
     --btn-primary-bg-hover: #ffffff;
@@ -30,13 +31,13 @@
     --btn-danger-border: rgba(248, 81, 73, 0.45);
     --btn-danger-text: #ff7b72;
 
-    --tag-live-bg: rgba(46, 160, 67, 0.18);
-    --tag-live-border: #2ea043;
-    --tag-live-text: #3fb950;
+    --tag-live-bg: #f0f6fc;
+    --tag-live-border: #f0f6fc;
+    --tag-live-text: #0d1117;
 
-    --tag-poll-bg: rgba(187, 128, 9, 0.18);
-    --tag-poll-border: #d29922;
-    --tag-poll-text: #e3b341;
+    --tag-poll-bg: rgba(240, 246, 252, 0.08);
+    --tag-poll-border: #8b949e;
+    --tag-poll-text: #f0f6fc;
 
     --tag-danger-bg: rgba(248, 81, 73, 0.18);
     --tag-danger-border: #f85149;
@@ -46,43 +47,44 @@
 }
 
 [data-theme="light"] {
-    --bg-body: #f4f5f7;
+    --bg-body: #f0f6fc;
     --bg-surface: #ffffff;
-    --bg-subtle: #f6f8fa;
-    --bg-row-even: #fbfcfd;
-    --bg-row-hover: #f3f4f6;
+    --bg-subtle: #e6edf3;
+    --bg-row-even: #f7f9fc;
+    --bg-row-hover: #eaeef2;
     --bg-input: #ffffff;
-    --border-color: #d0d7de;
-    --border-subtle: #eaeef2;
-    --border-input: #afb8c1;
-    --border-focus: #111827;
+    --border-color: #c8d1da;
+    --border-strong: #0d1117;
+    --border-subtle: #dde4ec;
+    --border-input: #8b949e;
+    --border-focus: #0d1117;
     --text-main: #1f2328;
-    --text-strong: #111827;
+    --text-strong: #0d1117;
     --text-muted: #57606a;
-    --link-color: #0969da;
+    --link-color: #0d1117;
 
-    --btn-bg: #f6f8fa;
-    --btn-bg-hover: #eaeef2;
+    --btn-bg: #f0f6fc;
+    --btn-bg-hover: #e1e8f0;
     --btn-border: #afb8c1;
-    --btn-text: #24292f;
+    --btn-text: #0d1117;
 
-    --btn-primary-bg: #1f2328;
-    --btn-primary-bg-hover: #32383f;
-    --btn-primary-border: #1f2328;
-    --btn-primary-text: #ffffff;
+    --btn-primary-bg: #0d1117;
+    --btn-primary-bg-hover: #24292f;
+    --btn-primary-border: #0d1117;
+    --btn-primary-text: #f0f6fc;
 
     --btn-danger-bg: #fff5f5;
     --btn-danger-bg-hover: #f8d7da;
     --btn-danger-border: #f1aeb5;
     --btn-danger-text: #a40e26;
 
-    --tag-live-bg: #dafbe1;
-    --tag-live-border: #1a7f37;
-    --tag-live-text: #116329;
+    --tag-live-bg: #0d1117;
+    --tag-live-border: #0d1117;
+    --tag-live-text: #f0f6fc;
 
-    --tag-poll-bg: #fff8c5;
-    --tag-poll-border: #9a6700;
-    --tag-poll-text: #7d4e00;
+    --tag-poll-bg: #e6edf3;
+    --tag-poll-border: #57606a;
+    --tag-poll-text: #0d1117;
 
     --tag-danger-bg: #ffebe9;
     --tag-danger-border: #cf222e;
@@ -93,16 +95,18 @@
 
 * {
     box-sizing: border-box;
+    border-radius: 0;
 }
 
 body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     background: var(--bg-body);
     color: var(--text-main);
     margin: 0;
     padding: 0;
     font-size: 13.5px;
     line-height: 1.45;
+    border-top: 2px solid var(--border-strong);
 }
 
 a {
@@ -115,17 +119,21 @@ a:hover {
 }
 
 code {
-    font-family: Consolas, Monaco, monospace;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
     background: var(--bg-subtle);
     border: 1px solid var(--border-color);
     padding: 1px 5px;
     font-size: 12px;
 }
 
+/* ========================================================= */
+/* BRAND HEADER (toktracker)                                 */
+/* ========================================================= */
+
 .app-header {
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-color);
-    padding: 12px 24px;
+    padding: 14px 24px;
 }
 
 .header-inner {
@@ -135,27 +143,74 @@ code {
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 14px;
 }
 
 .brand-block {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 12px;
-    flex-wrap: wrap;
+    text-decoration: none;
+}
+
+.brand-block:hover {
+    text-decoration: none;
+}
+
+.brand-logo {
+    width: 38px;
+    height: 38px;
+    object-fit: cover;
+    border: 1px solid var(--border-strong);
+    background: #0d1117;
+    display: block;
+    flex-shrink: 0;
+}
+
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.brand-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .brand-title {
-    font-size: 20px;
+    font-size: 21px;
     font-weight: 800;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.6px;
     margin: 0;
+    line-height: 1;
     color: var(--text-strong);
-    font-family: Consolas, Monaco, monospace;
+    text-transform: lowercase;
+}
+
+.brand-mode-tag {
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-strong);
+    background: transparent;
+}
+
+.brand-mode-tag.public {
+    background: var(--text-strong);
+    color: var(--bg-body);
 }
 
 .brand-subtitle {
-    font-size: 12px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    font-size: 10.5px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
     color: var(--text-muted);
 }
 
@@ -170,9 +225,10 @@ code {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 8px;
-    font-size: 11.5px;
-    font-family: Consolas, Monaco, monospace;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    letter-spacing: 0.3px;
     border: 1px solid var(--border-color);
     background: var(--bg-subtle);
     color: var(--text-main);
@@ -182,6 +238,18 @@ code {
     font-weight: 700;
     color: var(--text-strong);
 }
+
+.live-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    background: var(--text-strong);
+    margin-right: 4px;
+}
+
+/* ========================================================= */
+/* NAVIGATION & TOOLBAR                                      */
+/* ========================================================= */
 
 .nav-bar {
     background: var(--bg-surface);
@@ -206,13 +274,14 @@ code {
 }
 
 .tab-btn {
-    padding: 10px 14px;
+    padding: 11px 14px;
     border: none;
     border-bottom: 2px solid transparent;
     background: transparent;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
+    letter-spacing: 0.2px;
     cursor: pointer;
     height: auto;
 }
@@ -225,7 +294,7 @@ code {
 
 .tab-btn.active {
     color: var(--text-strong);
-    border-bottom-color: var(--text-strong);
+    border-bottom-color: var(--border-strong);
 }
 
 .tab-badge {
@@ -233,7 +302,7 @@ code {
     margin-left: 5px;
     padding: 1px 5px;
     font-size: 11px;
-    font-family: Consolas, Monaco, monospace;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
     background: var(--bg-subtle);
     border: 1px solid var(--border-color);
     color: var(--text-main);
@@ -250,10 +319,13 @@ code {
 .container {
     max-width: 1360px;
     margin: 0 auto;
-    padding: 18px 24px 36px 24px;
+    padding: 18px 24px 40px 24px;
 }
 
-/* KPI Leiste */
+/* ========================================================= */
+/* KPI SUMMARY BAR                                           */
+/* ========================================================= */
+
 .summary-bar {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -276,33 +348,39 @@ code {
 .summary-box {
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
-    padding: 12px 14px;
+    border-top: 2px solid var(--border-strong);
+    padding: 13px 15px;
 }
 
 .summary-box .label {
-    font-size: 11.5px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    font-size: 10.5px;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 1px;
     color: var(--text-muted);
     font-weight: 600;
 }
 
 .summary-box .val {
-    font-size: 18px;
-    font-weight: 700;
-    margin-top: 4px;
-    font-family: Consolas, Monaco, monospace;
+    font-size: 20px;
+    font-weight: 800;
+    margin-top: 5px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
     color: var(--text-strong);
+    letter-spacing: -0.4px;
 }
 
 .summary-box .sub {
     font-size: 11.5px;
     color: var(--text-muted);
-    margin-top: 2px;
-    font-family: Consolas, Monaco, monospace;
+    margin-top: 3px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
 }
 
-/* Panels & Boxen */
+/* ========================================================= */
+/* PANELS, BOXES & BRAND BANNERS                             */
+/* ========================================================= */
+
 .tab-panel {
     display: none;
 }
@@ -314,7 +392,7 @@ code {
 .box {
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
-    padding: 14px 16px;
+    padding: 15px 16px;
     margin-bottom: 16px;
 }
 
@@ -330,8 +408,11 @@ code {
 }
 
 h2 {
-    font-size: 14.5px;
+    font-size: 14px;
     font-weight: 700;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
     margin: 0;
     color: var(--text-strong);
 }
@@ -339,10 +420,39 @@ h2 {
 .section-hint {
     font-size: 12px;
     color: var(--text-muted);
-    margin-top: 2px;
+    margin-top: 3px;
 }
 
-/* Formulare & Buttons */
+.brand-banner-card {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 16px;
+    align-items: center;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+
+@media (max-width: 780px) {
+    .brand-banner-card {
+        grid-template-columns: 1fr;
+    }
+}
+
+.brand-banner-img {
+    width: 100%;
+    height: 110px;
+    object-fit: cover;
+    border: 1px solid var(--border-color);
+    background: #0d1117;
+    display: block;
+}
+
+/* ========================================================= */
+/* FORMS & BUTTONS                                           */
+/* ========================================================= */
+
 .inline-form {
     display: flex;
     flex-wrap: wrap;
@@ -364,7 +474,10 @@ h2 {
 }
 
 .field-group label {
-    font-size: 11.5px;
+    font-size: 11px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
     font-weight: 600;
     color: var(--text-muted);
 }
@@ -407,13 +520,14 @@ button,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 5px 10px;
+    padding: 5px 11px;
     height: 31px;
     border: 1px solid var(--btn-border);
     background: var(--btn-bg);
     color: var(--btn-text);
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: 12px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    font-weight: 600;
     cursor: pointer;
     text-decoration: none;
     white-space: nowrap;
@@ -422,25 +536,27 @@ button,
 button:hover,
 .btn-link:hover {
     background: var(--btn-bg-hover);
-    border-color: var(--text-muted);
+    border-color: var(--border-strong);
     text-decoration: none;
 }
 
 button.sm,
 .btn-link.sm {
     height: 25px;
-    padding: 2px 7px;
-    font-size: 11.5px;
+    padding: 2px 8px;
+    font-size: 11px;
 }
 
-button.primary {
+button.primary,
+.btn-link.primary {
     background: var(--btn-primary-bg);
     color: var(--btn-primary-text);
     border-color: var(--btn-primary-border);
-    font-weight: 600;
+    font-weight: 700;
 }
 
-button.primary:hover {
+button.primary:hover,
+.btn-link.primary:hover {
     background: var(--btn-primary-bg-hover);
 }
 
@@ -461,7 +577,10 @@ button.danger:hover {
     gap: 4px;
 }
 
-/* Tabellen */
+/* ========================================================= */
+/* TABLES & RANKING                                          */
+/* ========================================================= */
+
 .table-wrap {
     overflow-x: auto;
 }
@@ -475,15 +594,18 @@ table {
 th,
 td {
     border: 1px solid var(--border-color);
-    padding: 7px 10px;
+    padding: 8px 10px;
     text-align: left;
     vertical-align: middle;
 }
 
 th {
     background: var(--bg-subtle);
-    font-weight: 600;
-    font-size: 12px;
+    font-weight: 700;
+    font-size: 11px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
     color: var(--text-strong);
     white-space: nowrap;
 }
@@ -498,11 +620,11 @@ tbody tr:hover {
 
 .num-col {
     text-align: right;
-    font-family: Consolas, Monaco, monospace;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
 }
 
 .mono {
-    font-family: Consolas, Monaco, monospace;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
     font-size: 12px;
 }
 
@@ -514,13 +636,39 @@ tbody tr:hover {
     color: var(--tag-danger-text);
 }
 
-/* Status-Badges */
+.rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 22px;
+    padding: 0 5px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid var(--border-color);
+    background: var(--bg-subtle);
+    color: var(--text-muted);
+}
+
+.rank-badge.top-rank {
+    border-color: var(--border-strong);
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+}
+
+/* ========================================================= */
+/* STATUS TAGS & GRIDS                                       */
+/* ========================================================= */
+
 .status-tag {
     display: inline-block;
     padding: 2px 6px;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
-    font-family: Consolas, Monaco, monospace;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
     border: 1px solid var(--border-input);
     background: var(--bg-subtle);
     color: var(--text-muted);
@@ -544,7 +692,6 @@ tbody tr:hover {
     color: var(--tag-danger-text);
 }
 
-/* Grid Layouts */
 .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -565,4 +712,19 @@ tbody tr:hover {
     background: var(--bg-input);
     color: var(--text-main);
     line-height: 1.55;
+}
+
+.app-footer {
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 16px 24px 28px 24px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
 }
