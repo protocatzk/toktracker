@@ -1,3 +1,4 @@
+import hashlib
 import os
 from dataclasses import dataclass
 from typing import List, Optional, Set
@@ -49,8 +50,10 @@ class AppConfig:
     mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
     mysql_database: str = os.getenv("MYSQL_DATABASE", "toktracker").strip()
 
-    # API-Sicherheit für externe Zugriffe / Telegram-Bot
+    # API-Sicherheit & Admin-Session-Signierung
     api_key: str = os.getenv("TIKTOK_API_KEY", "").strip()
+    session_secret: str = os.getenv("SESSION_SECRET", "").strip()
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "").strip()
 
     # TikTokLive Session & Authentifizierung (für altersbeschränkte Streams / höhere Rate-Limits)
     tiktok_session_id: str = os.getenv("TIKTOK_SESSION_ID", "").strip()
@@ -86,6 +89,10 @@ class AppConfig:
                 self.mysql_password = parsed.password
             if parsed.path and parsed.path.strip("/"):
                 self.mysql_database = parsed.path.strip("/")
+
+        if not self.session_secret:
+            seed = f"toktracker-session-{self.telegram_bot_token}-{self.api_key}-{BASE_DIR}"
+            self.session_secret = hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
     @property
     def is_mysql(self) -> bool:

@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from config import config
 from database import (
@@ -39,7 +40,12 @@ from schemas import (
     TelegramUserPermissionRequest,
     TrackActionRequest,
 )
-from telegram_service import generate_full_report_data, telegram_bot_service
+from telegram_service import (
+    AdminAuthManager,
+    admin_auth_manager,
+    generate_full_report_data,
+    telegram_bot_service,
+)
 from tiktok_service import TIKTOKLIVE_AVAILABLE, fetch_tiktok_user_info, monitor_manager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +66,15 @@ TIKTOK_GIFT_CATALOG = [
     {"id": 5997, "name": "Lion", "diamonds": 29999},
     {"id": 9999, "name": "TikTok Universe", "diamonds": 44999},
 ]
+
+
+class TelegramLoginRequestPayload(BaseModel):
+    identifier: Optional[str] = None
+
+
+class TelegramLoginVerifyPayload(BaseModel):
+    code: str
+    challenge_id: Optional[str] = None
 
 
 @asynccontextmanager
@@ -92,9 +107,9 @@ app = FastAPI(
     title="toktracker – Streamer Earnings & Bot API",
     description=(
         "toktracker Backend-Service zur Echtzeit-Erfassung von TikTokLive-Geschenken (Coins/Diamonds) "
-        "mit fertigen 24h-Report- und Einzelabfrage-Endpoints, öffentlichem User-Panel sowie integriertem Telegram-Bot."
+        "mit öffentlichem User-Panel (/), Telegram-geschütztem Admin-Panel (/admin) und integriertem Telegram-Bot."
     ),
-    version="2.4.0",
+    version="2.5.0",
     lifespan=lifespan,
 )
 
@@ -104,16 +119,41 @@ if os.path.isdir(os.path.join(BASE_DIR, "pictures")):
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
-def verify_api_key(
+def verify_admin_or_api_key(
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
-) -> None:
+) -> Dict[str, Any]:
+    """
+    Schützt alle Admin- und Verwaltungs-Endpunkte:
+    1. Prüft zuerst auf ein gültiges, signiertes Admin-Session-Cookie (Telegram-Login).
+    2. Prüft alternativ auf einen konfigurierten X-API-Key (für externe Skripte/Automationen).
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if session_payload:
+        return session_payload
+
     configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    if not configured_key:
-        return
     provided = (x_api_key or api_key or "").strip()
-    if provided != configured_key:
-        raise HTTPException(status_code=401, detail="Ungültiger oder fehlender API-Key (X-API-Key).")
+    if configured_key and provided and provided == configured_key:
+        return {"sub": "api_key"}
+
+    raise HTTPException(
+        status_code=401,
+        detail="Nicht autorisiert. Bitte unter /login per Telegram authentifizieren oder gültigen X-API-Key übergeben.",
+    )
+
+
+def _set_admin_session_cookie(response: Response, admin_label: str) -> None:
+    token = admin_auth_manager.create_session_token(admin_label=admin_label)
+    response.set_cookie(
+        key=AdminAuthManager.COOKIE_NAME,
+        value=token,
+        max_age=AdminAuthManager.SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
 
 
 def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerReportCard:
@@ -131,29 +171,16 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 
 
 # =====================================================================
-# 1. TOKTRACKER WEB-INTERFACE (ADMIN CONSOLE & PUBLIC USER PANEL)
+# 1. TOKTRACKER WEB-INTERFACE: PUBLIC PANEL (/), LOGIN (/login) & ADMIN (/admin)
 # =====================================================================
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-async def index(request: Request):
-    init_db()
-    monitor_manager.autostart_from_db()
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={
-            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
-            "gift_catalog": TIKTOK_GIFT_CATALOG,
-            "env_summary": config.public_summary(),
-            "telegram_diag": telegram_bot_service.get_diagnostics(),
-        },
-    )
-
-
 @app.get("/public", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/panel", response_class=HTMLResponse, include_in_schema=False)
 async def public_panel(request: Request):
+    """
+    Startseite (/): Öffentliches User-Panel für Zuschauer (Read-Only).
+    """
     init_db()
     monitor_manager.autostart_from_db()
     tg_diag = telegram_bot_service.get_diagnostics()
@@ -167,8 +194,133 @@ async def public_panel(request: Request):
     )
 
 
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+async def admin_login_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Login-Seite (/login) für die Telegram-basierte Admin-Authentifizierung.
+    """
+    if admin_auth_manager.verify_session_token(toktracker_admin_session):
+        return RedirectResponse(url="/admin", status_code=302)
+
+    tg_diag = telegram_bot_service.get_diagnostics()
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={
+            "telegram_bot_username": tg_diag.get("bot_username") or "",
+            "telegram_state": tg_diag.get("state") or "offline",
+        },
+    )
+
+
+@app.get("/logout", include_in_schema=False)
+async def admin_logout():
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(key=AdminAuthManager.COOKIE_NAME, path="/")
+    return response
+
+
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+async def admin_console(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Geschütztes Admin-Panel (/admin). Leitet ohne gültige Telegram-Session auf /login weiter.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login", status_code=302)
+
+    init_db()
+    monitor_manager.autostart_from_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+        },
+    )
+
+
 # =====================================================================
-# 1b. PUBLIC READ-ONLY API (FÜR DAS ÖFFENTLICHE USER-PANEL)
+# 1b. TELEGRAM ADMIN-AUTH ENDPOINTS (/api/auth/telegram/*)
+# =====================================================================
+
+@app.post(
+    "/api/auth/telegram/request",
+    tags=["Admin Authentication"],
+    summary="Fordert einen 6-stelligen Einmal-Code & 1-Klick-Freigabe über den Telegram-Bot an",
+)
+async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequestPayload):
+    init_db()
+    client_host = request.client.host if request.client else "unbekannt"
+    ua = (request.headers.get("user-agent") or "")[:48]
+    client_info = f"{client_host} ({ua})" if ua else client_host
+
+    res = await telegram_bot_service.send_admin_login_challenge(
+        identifier_hint=payload.identifier,
+        client_info=client_info,
+    )
+    return res
+
+
+@app.get(
+    "/api/auth/telegram/poll",
+    tags=["Admin Authentication"],
+    summary="Prüft, ob die Login-Anfrage in Telegram per 1-Klick-Button freigegeben wurde",
+)
+async def api_auth_telegram_poll(challenge_id: str = Query(..., min_length=8)):
+    poll_res = admin_auth_manager.poll_challenge(challenge_id)
+    if poll_res.get("status") == "approved":
+        resp = JSONResponse(
+            content={
+                "ok": True,
+                "status": "approved",
+                "redirect": "/admin",
+            }
+        )
+        _set_admin_session_cookie(resp, admin_label=poll_res.get("admin_label", "telegram_admin"))
+        return resp
+    return {"ok": True, "status": poll_res.get("status", "pending")}
+
+
+@app.post(
+    "/api/auth/telegram/verify",
+    tags=["Admin Authentication"],
+    summary="Prüft den 6-stelligen Telegram Einmal-Code und setzt das Admin-Session-Cookie",
+)
+async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
+    admin_label = admin_auth_manager.verify_code(
+        code=payload.code,
+        challenge_id=payload.challenge_id,
+    )
+    if not admin_label:
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiger oder abgelaufener Einmal-Code. Bitte fordere einen neuen Code per Telegram (/login) an.",
+        )
+
+    resp = JSONResponse(
+        content={
+            "ok": True,
+            "admin": admin_label,
+            "redirect": "/admin",
+        }
+    )
+    _set_admin_session_cookie(resp, admin_label=admin_label)
+    return resp
+
+
+# =====================================================================
+# 1c. PUBLIC READ-ONLY API (FÜR DAS ÖFFENTLICHE USER-PANEL)
 # =====================================================================
 
 @app.get(
@@ -258,7 +410,7 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
 
 
 # =====================================================================
-# 2. TELEGRAM-BOT SPEZIAL-ENDPOINTS (v1) – 24h Report, Einzelabfragen & Zugriffskontrolle
+# 2. TELEGRAM-BOT SPEZIAL-ENDPOINTS (v1) – GESCHÜTZT DURCH ADMIN-AUTH ODER API-KEY
 # =====================================================================
 
 @app.get(
@@ -266,7 +418,7 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
     response_model=DailyBotReportResponse,
     tags=["Telegram Bot API"],
     summary="24h-Gesamtbericht über alle Streamer (für täglichen Telegram-Cronjob)",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_v1_daily_report(
     hours: int = Query(24, ge=1, le=720, description="Auswertungszeitraum in Stunden (Standard: 24h)"),
@@ -281,7 +433,7 @@ async def api_v1_daily_report(
     "/api/v1/telegram/send-report",
     tags=["Telegram Bot API"],
     summary="Sendet den 24h-Bericht sofort über den integrierten Telegram-Bot",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_v1_telegram_send_report(
     hours: int = Query(24, ge=1, le=720),
@@ -298,13 +450,13 @@ async def api_v1_telegram_send_report(
     "/api/telegram/users",
     tags=["Telegram Bot API"],
     summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 @app.get(
     "/api/v1/telegram/users",
     tags=["Telegram Bot API"],
     summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_get_telegram_users():
     init_db()
@@ -318,13 +470,13 @@ async def api_get_telegram_users():
     "/api/telegram/users",
     tags=["Telegram Bot API"],
     summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 @app.post(
     "/api/v1/telegram/users",
     tags=["Telegram Bot API"],
     summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
     init_db()
@@ -345,13 +497,13 @@ async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
     "/api/telegram/users/{record_id}",
     tags=["Telegram Bot API"],
     summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 @app.delete(
     "/api/v1/telegram/users/{record_id}",
     tags=["Telegram Bot API"],
     summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_delete_telegram_user(record_id: int):
     init_db()
@@ -366,7 +518,7 @@ async def api_delete_telegram_user(record_id: int):
     response_model=StreamerReportCard,
     tags=["Telegram Bot API"],
     summary="Einzelabfrage für einen bestimmten Streamer per @username oder ID",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_v1_streamer_single_report(
     identifier: str,
@@ -383,11 +535,11 @@ async def api_v1_streamer_single_report(
 
 
 # =====================================================================
-# 3. ALLGEMEINE BACKEND- & MANAGEMENT-ENDPOINTS (auch unter /api/v1/...)
+# 3. ADMIN BACKEND- & MANAGEMENT-ENDPOINTS (GESCHÜTZT)
 # =====================================================================
 
-@app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
     init_db()
     monitor_manager.autostart_from_db()
@@ -404,16 +556,16 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
     return data
 
 
-@app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(verify_api_key)])
-@app.get("/api/v1/system/status", tags=["System & Workers"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/system/status", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_system_status():
     diag = monitor_manager.get_all_diagnostics()
     diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
     return diag
 
 
-@app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.get("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_streamer_detail(identifier: str, period: str = Query("all")):
     init_db()
     s_row = get_streamer_by_id_or_username(identifier)
@@ -431,8 +583,8 @@ async def api_streamer_detail(identifier: str, period: str = Query("all")):
     return detail
 
 
-@app.post("/api/streamers", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.post("/api/v1/streamers", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/streamers", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/v1/streamers", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_add_streamer(payload: StreamerCreateRequest):
     init_db()
     username = payload.username.strip().lstrip("@").lower()
@@ -466,8 +618,8 @@ async def api_add_streamer(payload: StreamerCreateRequest):
     }
 
 
-@app.post("/api/streamers/{identifier}/refresh", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.post("/api/v1/streamers/{identifier}/refresh", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/streamers/{identifier}/refresh", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/v1/streamers/{identifier}/refresh", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_refresh_streamer(identifier: str):
     init_db()
     row = get_streamer_by_id_or_username(identifier)
@@ -486,8 +638,8 @@ async def api_refresh_streamer(identifier: str):
     return {"ok": True, "streamer": updated, "profile": profile}
 
 
-@app.post("/api/streamers/{identifier}/track", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.post("/api/v1/streamers/{identifier}/track", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/streamers/{identifier}/track", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/v1/streamers/{identifier}/track", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequest] = None):
     init_db()
     req = payload or TrackActionRequest()
@@ -505,8 +657,8 @@ async def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequ
     )
 
 
-@app.delete("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.delete("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.delete("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.delete("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_delete_streamer(identifier: str):
     init_db()
     row = get_streamer_by_id_or_username(identifier)
@@ -518,8 +670,8 @@ async def api_delete_streamer(identifier: str):
     return {"ok": True, "deleted_username": row["username"]}
 
 
-@app.post("/api/gifts", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
-@app.post("/api/v1/gifts", tags=["Telegram Bot API"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/gifts", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/v1/gifts", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_record_gift(payload: GiftCreateRequest):
     init_db()
     streamer_id = payload.streamer_id
@@ -545,7 +697,7 @@ async def api_record_gift(payload: GiftCreateRequest):
     return {"ok": True, "created": created, "event": event}
 
 
-@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
     init_db()
     with get_db() as conn:
@@ -623,27 +775,27 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
     )
 
 
-@app.get("/api/settings", tags=["System & Workers"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/settings", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_get_settings():
     init_db()
     return get_settings()
 
 
-@app.post("/api/settings", tags=["System & Workers"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/settings", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_update_settings(payload: SettingsUpdateRequest):
     init_db()
     updated = update_settings(payload.model_dump(exclude_none=True))
     return {"ok": True, "settings": updated}
 
 
-@app.post("/api/demo/seed", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/demo/seed", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_seed_demo():
     init_db()
     seed_demo_data()
     return {"ok": True, "message": "Demo-Daten geladen."}
 
 
-@app.post("/api/demo/clear", tags=["Dashboard & Data"], dependencies=[Depends(verify_api_key)])
+@app.post("/api/demo/clear", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_clear_demo():
     init_db()
     removed = clear_demo_data()

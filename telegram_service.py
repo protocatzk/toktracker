@@ -1,10 +1,16 @@
 import asyncio
+import base64
+import hashlib
+import hmac
 import html
+import json
 import logging
 import os
+import secrets
+import time
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Set
 
 try:
     from telegram import (
@@ -12,11 +18,14 @@ try:
         BotCommandScopeAllGroupChats,
         BotCommandScopeAllPrivateChats,
         BotCommandScopeDefault,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
         Update,
     )
     from telegram.constants import ChatType, ParseMode
     from telegram.ext import (
         Application,
+        CallbackQueryHandler,
         CommandHandler,
         ContextTypes,
         MessageHandler,
@@ -27,6 +36,8 @@ except ImportError:
     PTB_AVAILABLE = False
     Update = Any  # type: ignore
     ContextTypes = Any  # type: ignore
+    InlineKeyboardButton = Any  # type: ignore
+    InlineKeyboardMarkup = Any  # type: ignore
 
 from config import BASE_DIR, config
 from database import (
@@ -56,6 +67,167 @@ if not logger.handlers:
     )
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+
+class AdminAuthManager:
+    """
+    Verwaltet Telegram-basierte Admin-Logins (6-stelliger Einmal-Code / OTP sowie
+    1-Klick-Freigabe per Telegram Inline-Button) und signierte Admin-Session-Cookies.
+    """
+
+    COOKIE_NAME = "toktracker_admin_session"
+    CHALLENGE_TTL_SECONDS = 600  # 10 Minuten Gültigkeit für Einmal-Codes
+    SESSION_TTL_SECONDS = 86400 * 7  # 7 Tage Session-Dauer
+
+    def __init__(self) -> None:
+        self._challenges: Dict[str, Dict[str, Any]] = {}
+
+    def _cleanup_expired(self) -> None:
+        now = time.time()
+        expired = [
+            cid
+            for cid, ch in self._challenges.items()
+            if ch.get("expires_at", 0) < now
+        ]
+        for cid in expired:
+            self._challenges.pop(cid, None)
+
+    def create_challenge(
+        self,
+        client_info: str = "Web-Browser",
+        admin_label: str = "telegram_admin",
+    ) -> Dict[str, Any]:
+        self._cleanup_expired()
+        challenge_id = secrets.token_hex(16)
+        code = f"{secrets.randbelow(900000) + 100000}"
+        now = time.time()
+        challenge = {
+            "challenge_id": challenge_id,
+            "code": code,
+            "created_at": now,
+            "expires_at": now + self.CHALLENGE_TTL_SECONDS,
+            "status": "pending",  # pending | approved | rejected | consumed
+            "admin_label": admin_label,
+            "client_info": client_info,
+        }
+        self._challenges[challenge_id] = challenge
+        return challenge
+
+    def get_latest_pending_challenge(self) -> Optional[Dict[str, Any]]:
+        self._cleanup_expired()
+        pending = [
+            ch
+            for ch in self._challenges.values()
+            if ch.get("status") == "pending"
+        ]
+        if not pending:
+            return None
+        pending.sort(key=lambda c: c.get("created_at", 0), reverse=True)
+        return pending[0]
+
+    def approve_challenge(self, challenge_id: str, admin_label: str) -> Optional[Dict[str, Any]]:
+        self._cleanup_expired()
+        ch = self._challenges.get(challenge_id)
+        if not ch or ch.get("status") not in ("pending", "approved"):
+            return None
+        ch["status"] = "approved"
+        ch["admin_label"] = admin_label
+        return ch
+
+    def reject_challenge(self, challenge_id: str, admin_label: str) -> Optional[Dict[str, Any]]:
+        self._cleanup_expired()
+        ch = self._challenges.get(challenge_id)
+        if not ch:
+            return None
+        ch["status"] = "rejected"
+        ch["admin_label"] = admin_label
+        return ch
+
+    def poll_challenge(self, challenge_id: str) -> Dict[str, Any]:
+        self._cleanup_expired()
+        ch = self._challenges.get(challenge_id)
+        if not ch:
+            return {"status": "expired"}
+        status = ch.get("status", "pending")
+        if status == "approved":
+            ch["status"] = "consumed"
+            return {
+                "status": "approved",
+                "admin_label": ch.get("admin_label") or "telegram_admin",
+            }
+        return {"status": status}
+
+    def verify_code(self, code: str, challenge_id: Optional[str] = None) -> Optional[str]:
+        """
+        Prüft einen 6-stelligen Einmal-Code (oder optionales Admin-Notfallpasswort aus .env).
+        Gibt bei Erfolg das `admin_label` zurück, sonst `None`.
+        """
+        self._cleanup_expired()
+        clean_code = (code or "").strip().replace(" ", "")
+        if not clean_code:
+            return None
+
+        # Optionaler Fallback auf ADMIN_PASSWORD aus .env, falls vom Betreiber gesetzt
+        if config.admin_password and hmac.compare_digest(clean_code, config.admin_password):
+            return "env_admin"
+
+        if challenge_id and challenge_id in self._challenges:
+            ch = self._challenges[challenge_id]
+            if ch.get("status") in ("pending", "approved") and hmac.compare_digest(
+                str(ch.get("code", "")), clean_code
+            ):
+                ch["status"] = "consumed"
+                return str(ch.get("admin_label") or "telegram_admin")
+
+        # Suche über alle aktiven Challenges (z. B. wenn der Code direkt per /login im Bot erzeugt wurde)
+        for ch in list(self._challenges.values()):
+            if ch.get("status") in ("pending", "approved") and hmac.compare_digest(
+                str(ch.get("code", "")), clean_code
+            ):
+                ch["status"] = "consumed"
+                return str(ch.get("admin_label") or "telegram_admin")
+
+        return None
+
+    def create_session_token(self, admin_label: str = "telegram_admin") -> str:
+        payload = {
+            "sub": admin_label,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + self.SESSION_TTL_SECONDS,
+            "nonce": secrets.token_hex(8),
+        }
+        raw_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        b64_payload = base64.urlsafe_b64encode(raw_bytes).decode("ascii").rstrip("=")
+        sig = hmac.new(
+            config.session_secret.encode("utf-8"),
+            b64_payload.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+        return f"{b64_payload}.{sig}"
+
+    def verify_session_token(self, token: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not token or "." not in token:
+            return None
+        try:
+            b64_payload, sig = token.rsplit(".", 1)
+            expected_sig = hmac.new(
+                config.session_secret.encode("utf-8"),
+                b64_payload.encode("ascii"),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(sig, expected_sig):
+                return None
+            padding = "=" * (-len(b64_payload) % 4)
+            raw_bytes = base64.urlsafe_b64decode(b64_payload + padding)
+            payload = json.loads(raw_bytes.decode("utf-8"))
+            if int(payload.get("exp", 0)) < int(time.time()):
+                return None
+            return payload
+        except Exception:
+            return None
+
+
+admin_auth_manager = AdminAuthManager()
 
 
 def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dict[str, Any]:
@@ -169,13 +341,9 @@ class TelegramBotService:
     """
     Vollständig entkoppelter Telegram-Bot-Service auf Basis des offiziellen
     `python-telegram-bot` (v22+) SDKs inkl. `JobQueue` für den automatischen 24h-Bericht,
-    Gruppen-Support (`/befehl@BotName` & `@BotName befehl`) sowie mehrstufiger
-    Zugriffskontrolle (`whitelist` per `[@]username` oder `id` vs. `public`).
-
-    WICHTIG (Fehlertoleranz):
-    - Wenn kein Token gesetzt ist, das Token ungültig ist oder Telegram nicht erreichbar ist,
-      fängt dieser Service alle Fehler intern ab.
-    - Die FastAPI-Anwendung und das Web-Interface starten und laufen IMMER unabhängig weiter!
+    Gruppen-Support (`/befehl@BotName` & `@BotName befehl`), mehrstufiger
+    Zugriffskontrolle (`whitelist` per `[@]username` oder `id` vs. `public`) sowie
+    Telegram-basierter Admin-Panel-Authentifizierung (`/login` & 1-Klick-Freigabe).
     """
 
     def __init__(self) -> None:
@@ -249,14 +417,15 @@ class TelegramBotService:
             builder = Application.builder().token(token)
             self._app = builder.build()
 
-            # Lese-Befehle (für Whitelist-Nutzer per @username/ID bzw. im Public-Modus für alle Nutzer; in Privatchats & Gruppen)
+            # Lese-Befehle
             self._app.add_handler(CommandHandler(["start", "help"], self._cmd_help))
             self._app.add_handler(CommandHandler(["id", "whoami"], self._cmd_whoami))
             self._app.add_handler(CommandHandler("report", self._cmd_report))
             self._app.add_handler(CommandHandler(["streamer", "stats"], self._cmd_streamer))
             self._app.add_handler(CommandHandler("status", self._cmd_status))
 
-            # Schreib- & Verwaltungs-Befehle (immer nur für Admins – funktioniert auch in Gruppen!)
+            # Schreib- & Verwaltungs-Befehle (immer nur für Admins)
+            self._app.add_handler(CommandHandler("login", self._cmd_admin_login))
             self._app.add_handler(CommandHandler("add", self._cmd_add_streamer))
             self._app.add_handler(CommandHandler("track", self._cmd_track_streamer))
             self._app.add_handler(CommandHandler("stop", self._cmd_stop_streamer))
@@ -265,7 +434,12 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler("users", self._cmd_list_users))
             self._app.add_handler(CommandHandler("mode", self._cmd_access_mode))
 
-            # Gruppen-Mention-Handler: Erlaubt Aufrufe wie "@DeinBot report" oder "@DeinBot streamer <username>" in Gruppen
+            # Callback-Handler für 1-Klick Admin-Login-Freigabe
+            self._app.add_handler(
+                CallbackQueryHandler(self._on_login_callback, pattern=r"^admin_login_(approve|reject):")
+            )
+
+            # Gruppen-Mention-Handler
             self._app.add_handler(
                 MessageHandler(
                     filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
@@ -278,7 +452,6 @@ class TelegramBotService:
             self._bot_username_raw = (bot_me.username or "").lower()
             self._bot_username = f"@{bot_me.username}" if bot_me.username else str(bot_me.id)
 
-            # Befehlsmenü automatisch bei Telegram für Privatchats UND Gruppen registrieren
             await self._register_bot_commands()
 
             await self._app.start()
@@ -304,7 +477,7 @@ class TelegramBotService:
             self._started_at = datetime.now().isoformat(timespec="seconds")
             self._log(
                 "INFO",
-                f"toktracker Telegram-Bot ({self._bot_username}) gestartet [Modus: {get_telegram_access_mode().upper()}, Gruppen-Support: AKTIV].",
+                f"toktracker Telegram-Bot ({self._bot_username}) gestartet [Modus: {get_telegram_access_mode().upper()}, Admin-Auth: AKTIV].",
             )
 
         except Exception as exc:
@@ -325,7 +498,7 @@ class TelegramBotService:
             BotCommand("streamer", "Einzelabfrage für einen Streamer"),
             BotCommand("status", "Laufzeit-Status aller aktiven TikTokLive-Worker prüfen"),
             BotCommand("id", "Eigene Telegram-ID, Gruppen-ID & Berechtigungsstatus anzeigen"),
-            BotCommand("help", "Hilfe & verfügbare Befehle anzeigen"),
+            BotCommand("login", "[Admin] Einmal-Code für das Web-Admin-Panel erzeugen"),
             BotCommand("add", "[Admin] Streamer hinzufügen & Live-Worker starten"),
             BotCommand("track", "[Admin] Live-Überwachung für einen Streamer starten"),
             BotCommand("stop", "[Admin] Live-Überwachung für einen Streamer stoppen"),
@@ -368,6 +541,229 @@ class TelegramBotService:
         self._app = None
 
     # =================================================================
+    # TELEGRAM ADMIN-PANEL AUTHENTIFIZIERUNG (OTP + 1-KLICK FREIGABE)
+    # =================================================================
+
+    def _resolve_admin_chat_ids(self, identifier_hint: Optional[str] = None) -> List[int]:
+        """
+        Ermittelt alle bekannten privaten Telegram-Chat-IDs von berechtigten Administratoren.
+        """
+        users = list_telegram_users()
+        hint = (identifier_hint or "").strip().lstrip("@").lower()
+        matched_ids: Set[int] = set()
+        all_admin_ids: Set[int] = set()
+
+        for cid in config.env_allowed_telegram_ids:
+            if cid > 0:
+                all_admin_ids.add(int(cid))
+                if hint and str(cid) == hint:
+                    matched_ids.add(int(cid))
+
+        for u in users:
+            if int(u.get("is_allowed", 0)) == 1 and u.get("role") == "admin":
+                tg_id = u.get("telegram_id")
+                uname = str(u.get("username") or "").strip().lstrip("@").lower()
+                if tg_id and int(tg_id) > 0:
+                    all_admin_ids.add(int(tg_id))
+                    if hint and (hint == uname or hint == str(tg_id)):
+                        matched_ids.add(int(tg_id))
+
+        if hint and matched_ids:
+            return sorted(matched_ids)
+        return sorted(all_admin_ids)
+
+    async def send_admin_login_challenge(
+        self,
+        identifier_hint: Optional[str] = None,
+        client_info: str = "Web-Browser",
+    ) -> Dict[str, Any]:
+        """
+        Erzeugt eine Login-Challenge und sendet den 6-stelligen Einmal-Code sowie
+        einen Inline-Freigabe-Button an die hinterlegten Admin-Telegram-Chats.
+        """
+        challenge = admin_auth_manager.create_challenge(client_info=client_info)
+        cid = challenge["challenge_id"]
+        code = challenge["code"]
+
+        if self._state != "running" or not self._app:
+            self._log(
+                "INFO",
+                f"[Admin-Login] Lokaler Einmal-Code erzeugt: {code} (Telegram-Bot Status: {self._state})",
+            )
+            return {
+                "ok": True,
+                "challenge_id": cid,
+                "delivered_count": 0,
+                "bot_running": False,
+                "bot_username": self._bot_username,
+                "expires_in": AdminAuthManager.CHALLENGE_TTL_SECONDS,
+                "message": (
+                    "Telegram-Bot ist aktuell nicht verbunden. "
+                    "Der Einmal-Code wurde im Server-Log ausgegeben (oder nutze das Admin-Passwort aus der .env)."
+                ),
+            }
+
+        target_ids = await asyncio.to_thread(self._resolve_admin_chat_ids, identifier_hint)
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ Login im Browser freigeben",
+                        callback_data=f"admin_login_approve:{cid}",
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Ablehnen",
+                        callback_data=f"admin_login_reject:{cid}",
+                    ),
+                ]
+            ]
+        )
+
+        msg_html = (
+            "<b>🔐 toktracker · Admin-Panel Login-Anfrage</b>\n\n"
+            f"• <b>Einmal-Code (OTP):</b> <code>{code}</code>\n"
+            f"• <b>Anfrage:</b> <code>{html.escape(client_info)}</code>\n"
+            "• <b>Gültigkeit:</b> 10 Minuten\n\n"
+            "<i>Gib den 6-stelligen Code im Web-Browser ein oder bestätige den Login direkt per Klick:</i>"
+        )
+
+        delivered = 0
+        for chat_id in target_ids:
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg_html,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
+                delivered += 1
+            except Exception as exc:
+                self._log("INFO", f"Login-Code konnte nicht an Admin-Chat {chat_id} gesendet werden: {exc}")
+
+        if delivered > 0:
+            self._log("INFO", f"Admin-Login-Code an {delivered} Admin-Chat(s) gesendet.")
+            return {
+                "ok": True,
+                "challenge_id": cid,
+                "delivered_count": delivered,
+                "bot_running": True,
+                "bot_username": self._bot_username,
+                "expires_in": AdminAuthManager.CHALLENGE_TTL_SECONDS,
+                "message": f"Einmal-Code & Freigabe-Anfrage an {delivered} Admin-Chat(s) gesendet.",
+            }
+
+        return {
+            "ok": True,
+            "challenge_id": cid,
+            "delivered_count": 0,
+            "bot_running": True,
+            "bot_username": self._bot_username,
+            "expires_in": AdminAuthManager.CHALLENGE_TTL_SECONDS,
+            "message": (
+                f"Öffne den Telegram-Bot {self._bot_username or ''} und sende den Befehl /login, "
+                "um deinen 6-stelligen Einmal-Code direkt im Chat zu erhalten."
+            ),
+        }
+
+    async def _cmd_admin_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Erlaubt einem Admin, direkt im Telegram-Chat mit `/login` einen frischen
+        6-stelligen Einmal-Code abzurufen oder eine offene Browser-Anfrage freizugeben.
+        """
+        if not update.effective_message or not update.effective_user:
+            return
+        access = await self._authorize(update, require_admin=True)
+        if not access:
+            return
+
+        tg_user = update.effective_user
+        admin_label = f"@{tg_user.username}" if tg_user.username else str(tg_user.id)
+
+        pending = admin_auth_manager.get_latest_pending_challenge()
+        if pending:
+            pending["admin_label"] = admin_label
+            challenge = pending
+        else:
+            challenge = admin_auth_manager.create_challenge(
+                client_info=f"Telegram /login ({admin_label})",
+                admin_label=admin_label,
+            )
+
+        cid = challenge["challenge_id"]
+        code = challenge["code"]
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ Aktuelle Browser-Sitzung sofort freigeben",
+                        callback_data=f"admin_login_approve:{cid}",
+                    )
+                ]
+            ]
+        )
+
+        await update.effective_message.reply_text(
+            "<b>🔐 toktracker · Admin-Panel Einmal-Code</b>\n\n"
+            f"Dein 6-stelliger Login-Code lautet:\n"
+            f"👉 <code>{code}</code>\n\n"
+            "<i>Gib diesen Code unter <code>/login</code> im Browser ein (gültig für 10 Minuten) "
+            "oder klicke unten auf Freigeben, falls du die Login-Seite bereits geöffnet hast.</i>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+
+    async def _on_login_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query or not query.data or not update.effective_user:
+            return
+
+        tg_user = update.effective_user
+        access = await asyncio.to_thread(
+            check_telegram_user_access,
+            int(tg_user.id),
+            tg_user.username or "",
+            tg_user.first_name or "",
+            int(update.effective_chat.id) if update.effective_chat else int(tg_user.id),
+            "",
+        )
+
+        if not access.get("is_admin"):
+            await query.answer("⛔ Nur Administratoren dürfen Logins freigeben.", show_alert=True)
+            return
+
+        action_part, cid = query.data.split(":", 1)
+        admin_label = f"@{tg_user.username}" if tg_user.username else (tg_user.first_name or str(tg_user.id))
+
+        if action_part == "admin_login_approve":
+            ch = admin_auth_manager.approve_challenge(cid, admin_label=admin_label)
+            if not ch:
+                await query.answer("Diese Login-Anfrage ist bereits abgelaufen oder wurde verwendet.", show_alert=True)
+                return
+            await query.answer("Admin-Login freigegeben!")
+            self._log("INFO", f"Admin-Panel Login per 1-Klick freigegeben von {admin_label}.")
+            try:
+                await query.edit_message_text(
+                    f"<b>✅ Admin-Panel Login freigegeben</b>\n\n"
+                    f"• <b>Bestätigt durch:</b> <code>{html.escape(admin_label)}</code>\n"
+                    f"• <b>Zeitpunkt:</b> <code>{datetime.now().strftime('%H:%M:%S')}</code>\n\n"
+                    "<i>Der Browser wird automatisch in die Admin-Konsole weitergeleitet.</i>",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+        else:
+            admin_auth_manager.reject_challenge(cid, admin_label=admin_label)
+            await query.answer("Login-Anfrage abgelehnt.")
+            self._log("INFO", f"Admin-Panel Login abgelehnt von {admin_label}.")
+            try:
+                await query.edit_message_text(
+                    f"<b>❌ Admin-Panel Login-Anfrage abgelehnt</b> von <code>{html.escape(admin_label)}</code>.",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+
+    # =================================================================
     # ZUGRIFFSKONTROLLE & AUTORISIERUNG (PRIVATCHAT & GRUPPEN)
     # =================================================================
 
@@ -380,15 +776,6 @@ class TelegramBotService:
     async def _authorize(
         self, update: Update, require_admin: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """
-        Prüft im Privatchat UND in Telegram-Gruppen, ob der aufrufende Nutzer (`effective_user`)
-        per `[@]username` oder `telegram_id` auf der Whitelist steht.
-        - Im 'whitelist'-Modus (Standard): Nur freigeschaltete Nutzer (`is_allowed == 1`).
-          Unbekannte Nutzer (auch aus Gruppen!) werden automatisch als offene Anfrage (`is_allowed = 0`)
-          in der Datenbank vermerkt und erhalten ihre ID/@username angezeigt.
-        - Im 'public'-Modus: Alle nicht-gesperrten Nutzer dürfen Abfrage-Befehle nutzen;
-          Verwaltungs-Befehle (`require_admin=True`) bleiben strikt auf Admins beschränkt.
-        """
         if not update.effective_user or not update.effective_message or not update.effective_chat:
             return None
 
@@ -455,11 +842,6 @@ class TelegramBotService:
         banner_path: str,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """
-        Sendet ein Banner-Bild aus /pictures zusammen mit dem Bericht (im Privatchat und in Gruppen).
-        Falls die Caption länger als 1024 Zeichen ist (Telegram-Limit für Foto-Captions),
-        wird erst das Banner und direkt darunter der vollständige Bericht gesendet.
-        """
         if os.path.exists(banner_path):
             with open(banner_path, "rb") as photo_file:
                 if len(html_text) <= 1000:
@@ -534,14 +916,10 @@ class TelegramBotService:
             self._log("ERROR", f"Fehler im 24h-Report-Job: {exc}")
 
     # =================================================================
-    # GRUPPEN-MENTION HANDLER ("@DeinBot report" oder "@DeinBot streamer <username>")
+    # GRUPPEN-MENTION HANDLER
     # =================================================================
 
     async def _on_group_mention(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Erlaubt es berechtigten Nutzern in Gruppen, den Bot auch direkt per @BotUsername
-        anzusprechen.
-        """
         if not update.effective_message or not update.effective_message.text:
             return
 
@@ -578,6 +956,8 @@ class TelegramBotService:
             await self._cmd_status(update, context)
         elif cmd in ("id", "whoami"):
             await self._cmd_whoami(update, context)
+        elif cmd == "login":
+            await self._cmd_admin_login(update, context)
         elif cmd == "allow":
             await self._cmd_allow_user(update, context)
         elif cmd == "revoke":
@@ -594,7 +974,6 @@ class TelegramBotService:
     # =================================================================
 
     async def _cmd_whoami(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Zeigt dem Nutzer seine eigene User-ID, seinen @username sowie (in Gruppen) die Gruppen-Chat-ID an."""
         if not update.effective_user or not update.effective_message or not update.effective_chat:
             return
         tg_user = update.effective_user
@@ -649,6 +1028,7 @@ class TelegramBotService:
         if access["is_admin"]:
             admin_section = (
                 "\n\n<b>🔐 Admin-Befehle:</b>\n"
+                "• <code>/login</code> – Einmal-Code für das Web-Admin-Panel (<code>/admin</code>)\n"
                 "• <code>/add &lt;username&gt;</code> – Streamer hinzufügen &amp; Worker starten\n"
                 "• <code>/track &lt;username&gt;</code> | <code>/stop &lt;username&gt;</code> – Worker steuern\n"
                 "• <code>/allow &lt;id|@user&gt; [admin|user]</code> – Nutzer freischalten (oder per Reply!)\n"
@@ -850,16 +1230,7 @@ class TelegramBotService:
             )
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
-    # =================================================================
-    # ADMIN COMMANDS ZUR NUTZER- & MODUS-VERWALTUNG (INKL. GRUPPEN-REPLY)
-    # =================================================================
-
     async def _cmd_allow_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Schaltet eine Person für den Bot frei:
-        1. Per Argument: `/allow @username [user|admin]` oder `/allow <telegram_id> [user|admin]`
-        2. Oder direkt in einer Gruppe per Reply auf eine Nachricht des Nutzers: `/allow [user|admin]`
-        """
         if not update.effective_message:
             return
         if not await self._authorize(update, require_admin=True):
@@ -913,10 +1284,6 @@ class TelegramBotService:
         )
 
     async def _cmd_revoke_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Entzieht einem Nutzer die Berechtigung per `/revoke @username`, `/revoke <telegram_id>`
-        oder in einer Gruppe per Reply auf dessen Nachricht mit `/revoke`.
-        """
         if not update.effective_message:
             return
         if not await self._authorize(update, require_admin=True):

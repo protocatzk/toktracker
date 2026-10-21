@@ -40,6 +40,10 @@ function switchTab(tabId) {
 async function loadOverview() {
     try {
         const res = await fetch(`/api/overview?period=${encodeURIComponent(currentPeriod)}`);
+        if (res.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
         const data = await res.json();
 
         const t = data.totals || {};

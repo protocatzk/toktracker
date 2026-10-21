@@ -20,7 +20,7 @@
 <!-- Kopfbereich: toktracker Brand & Systemstatus-Pills -->
 <header class="app-header">
     <div class="header-inner">
-        <a href="/" class="brand-block">
+        <a href="/admin" class="brand-block">
             <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
@@ -31,12 +31,14 @@
             </div>
         </a>
         <div class="status-strip">
+            <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
             <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
             <span class="pill">Session: <strong>{{ env_summary.tiktok_target_idc | upper if env_summary.has_tiktok_session else "ANONYM" }}</strong></span>
             <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
             <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
             <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
-            <a class="btn-link primary sm" href="/public">Öffentliches User-Panel →</a>
+            <a class="btn-link primary sm" href="/">Öffentliches User-Panel →</a>
+            <a class="btn-link sm" href="/logout">Abmelden</a>
         </div>
     </div>
 </header>
@@ -281,7 +283,7 @@
                 <h2>Telegram-Bot Steuerung &amp; Zugriffsmodus</h2>
                 <div class="section-hint" style="margin-bottom:10px;">
                     Im Modus <strong>WHITELIST</strong> können nur freigeschaltete Nutzer (im Privatchat und in Gruppen) Befehle ausführen.
-                    Im Modus <strong>PUBLIC</strong> sind Abfrage-Befehle für alle Telegram-Nutzer offen, während Verwaltungsbefehle auf Admins beschränkt bleiben.
+                    Im Modus <strong>PUBLIC</strong> sind Abfrage-Befehle für alle Telegram-Nutzer offen, während Verwaltungsbefehle &amp; der Web-Admin-Login (<code>/login</code>) auf Admins beschränkt bleiben.
                 </div>
                 <div class="inline-form" style="justify-content:space-between;">
                     <div class="inline-form">
@@ -294,7 +296,7 @@
                         <a class="btn-link" href="/api/v1/reports/daily?hours=24" target="_blank">24h-Report JSON</a>
                     </div>
                     <div class="mono muted">
-                        Admin-Befehle: <code>/allow</code>, <code>/revoke</code>, <code>/users</code>, <code>/mode</code>
+                        Admin-Befehle: <code>/login</code>, <code>/allow</code>, <code>/revoke</code>, <code>/users</code>, <code>/mode</code>
                     </div>
                 </div>
             </div>
@@ -304,7 +306,7 @@
             <div class="box-header">
                 <div>
                     <h2>Berechtigte Personen &amp; Offene Zugriffsanfragen</h2>
-                    <div class="section-hint">Personen können per Telegram User-ID oder @username freigeschaltet werden (gilt für Privatchats und Gruppen).</div>
+                    <div class="section-hint">Personen mit der Rolle <strong>Admin</strong> können sich auch über den Telegram-Bot im Web-Admin-Panel (<code>/admin</code>) anmelden.</div>
                 </div>
             </div>
 
@@ -313,7 +315,7 @@
                 <input type="text" id="inputTgName" placeholder="Name oder Notiz" style="width:190px;" />
                 <select id="selectTgRole">
                     <option value="user">Rolle: Nutzer (Abfragen)</option>
-                    <option value="admin">Rolle: Admin (Vollzugriff)</option>
+                    <option value="admin">Rolle: Admin (Vollzugriff &amp; Web-Login)</option>
                 </select>
                 <button type="submit" class="primary">Freischalten</button>
             </form>
@@ -428,7 +430,7 @@
 <footer class="app-footer">
     <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
     <div>
-        <a href="/public">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a>
+        <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
     </div>
 </footer>
 
