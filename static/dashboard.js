@@ -1184,24 +1184,29 @@ async function loadAnalytics(isBackground = false) {
 
         // KPI updates
         const t = data.totals || {};
-        document.getElementById("anNetEur").textContent = fmtEUR(t.eur_net);
-        document.getElementById("anNetUsd").textContent = `${fmtUSD(t.usd_net)} USD`;
-        document.getElementById("anGrossEur").textContent = fmtEUR(t.eur_gross);
-        document.getElementById("anCoins").textContent = fmtNum(t.total_coins);
-        document.getElementById("anAvgCoinsPerGift").textContent = `Ø ${fmtNum(t.avg_coins_per_gift)} Coins pro Gift`;
-        document.getElementById("anGiftsCount").textContent = `${fmtNum(t.total_gifts_sent)} Gifts`;
-        document.getElementById("anGiftEventsCount").textContent = `${fmtNum(t.gift_events_count)} Transaktionen`;
-        document.getElementById("anUniqueGifters").textContent = `${fmtNum(t.unique_gifters)} Spender`;
-        document.getElementById("anAvgPerGifter").textContent = `Ø ${fmtEUR(t.avg_eur_per_gifter)} pro Spender`;
+        const setText = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+        };
 
-        document.getElementById("anWhaleTop1").textContent = `${t.whale_share_top1_pct || 0.0}%`;
-        document.getElementById("anWhaleTop3").textContent = `${t.whale_share_top3_pct || 0.0}%`;
-        document.getElementById("anWhaleTop5").textContent = `${t.whale_share_top5_pct || 0.0}%`;
+        setText("anNetEur", fmtEUR(t.eur_net));
+        setText("anNetUsd", `${fmtUSD(t.usd_net)} USD`);
+        setText("anGrossEur", fmtEUR(t.eur_gross));
+        setText("anCoins", fmtNum(t.total_coins));
+        setText("anAvgCoinsPerGift", `Ø ${fmtNum(t.avg_coins_per_gift)} Coins pro Gift`);
+        setText("anGiftsCount", `${fmtNum(t.total_gifts_sent)} Gifts`);
+        setText("anGiftEventsCount", `${fmtNum(t.gift_events_count)} Transaktionen`);
+        setText("anUniqueGifters", `${fmtNum(t.unique_gifters)} Spender`);
+        setText("anAvgPerGifter", `Ø ${fmtEUR(t.avg_eur_per_gifter)} pro Spender`);
+
+        setText("anWhaleTop1", `${t.whale_share_top1_pct || 0.0}%`);
+        setText("anWhaleTop3", `${t.whale_share_top3_pct || 0.0}%`);
+        setText("anWhaleTop5", `${t.whale_share_top5_pct || 0.0}%`);
 
         const totalMins = t.total_stream_minutes || 0;
         const hoursStr = (totalMins / 60).toFixed(1);
-        document.getElementById("anSessionsCount").textContent = `${fmtNum(t.sessions_count || 0)} Sessions`;
-        document.getElementById("anStreamDuration").textContent = `${hoursStr} Std. Gesamtlaufzeit`;
+        setText("anSessionsCount", `${fmtNum(t.sessions_count || 0)} Sessions`);
+        setText("anStreamDuration", `${hoursStr} Std. Gesamtlaufzeit`);
 
         // Streamer Meta Banner
         const banner = document.getElementById("anStreamerMetaBanner");
