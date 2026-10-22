@@ -101,6 +101,13 @@ class MySQLConnectionWrapper:
         cur.execute(translated, tuple(params) if params is not None else None)
         return MySQLCursorWrapper(cur)
 
+    def executemany(self, sql: str, seq_of_params: Sequence[Sequence[Any]]) -> MySQLCursorWrapper:
+        translated = self._translate_sql(sql)
+        cur = self._conn.cursor()
+        cur.executemany(translated, [tuple(p) for p in seq_of_params])
+        return MySQLCursorWrapper(cur)
+
+
     def commit(self) -> None:
         self._conn.commit()
 
@@ -375,9 +382,29 @@ def _init_mysql_schema() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                streamer_id BIGINT NOT NULL,
+                session_id BIGINT NULL,
+                user_id VARCHAR(128) DEFAULT '',
+                username VARCHAR(191) NOT NULL,
+                nickname VARCHAR(255) DEFAULT '',
+                avatar_url TEXT,
+                comment TEXT NOT NULL,
+                is_whale TINYINT DEFAULT 0,
+                whale_tier VARCHAR(32) DEFAULT '',
+                created_at VARCHAR(64) NOT NULL,
+                CONSTRAINT fk_chat_streamer FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
+                CONSTRAINT fk_chat_session FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
 
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
+        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_sender", "sender_username")
         _ensure_index_mysql(conn, "stream_sessions", "idx_stream_sessions_streamer", "streamer_id, started_at")
         _ensure_index_mysql(conn, "telegram_users", "idx_telegram_users_username", "username")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_streamer", "streamer_id, created_at")
@@ -389,6 +416,10 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "page_views", "idx_page_views_visitor", "visitor_hash, created_at")
         _ensure_index_mysql(conn, "bot_sessions", "idx_bot_sessions_type", "session_type, created_at")
         _ensure_index_mysql(conn, "bot_sessions", "idx_bot_sessions_telegram_id", "telegram_id")
+        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_streamer_created", "streamer_id, created_at")
+        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_created", "created_at")
+        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_username", "username")
+        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_whale", "is_whale, streamer_id")
 
         _ensure_column_mysql(conn, "tiktok_battles", "battle_mode", "VARCHAR(32) DEFAULT '1v1'")
         _ensure_column_mysql(conn, "tiktok_battles", "teammate_user_id", "VARCHAR(128) DEFAULT ''")
@@ -545,6 +576,21 @@ def _init_sqlite_schema() -> None:
                 created_at TEXT NOT NULL,
                 last_active_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                streamer_id INTEGER NOT NULL,
+                session_id INTEGER,
+                user_id TEXT DEFAULT '',
+                username TEXT NOT NULL COLLATE NOCASE,
+                nickname TEXT DEFAULT '',
+                avatar_url TEXT,
+                comment TEXT NOT NULL,
+                is_whale INTEGER DEFAULT 0,
+                whale_tier TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
+                FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
+            );
             """
         )
 
@@ -584,6 +630,8 @@ def _init_sqlite_schema() -> None:
                 ON gift_events(streamer_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_gift_events_session
                 ON gift_events(session_id);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_sender
+                ON gift_events(sender_username);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_events_uid
                 ON gift_events(event_uid) WHERE event_uid IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_stream_sessions_streamer
@@ -608,6 +656,14 @@ def _init_sqlite_schema() -> None:
                 ON bot_sessions(session_type, created_at);
             CREATE INDEX IF NOT EXISTS idx_bot_sessions_telegram_id
                 ON bot_sessions(telegram_id);
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_streamer_created
+                ON chat_messages(streamer_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_created
+                ON chat_messages(created_at);
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_username
+                ON chat_messages(username);
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_whale
+                ON chat_messages(is_whale, streamer_id);
             """
         )
 
@@ -3662,4 +3718,467 @@ def get_site_analytics_overview(period: str = "today") -> Dict[str, Any]:
             "bot_sessions": bot_sessions,
             "telegram_users": tg_users,
         }
+
+
+# ==============================================================================
+# SPENDERRADAR & CHATLOG SYSTEM
+# ==============================================================================
+
+WHALE_TIER_WHALE = "whale"       # >= 10,000 Coins / Diamonds (~50 € Netto)
+WHALE_TIER_SHARK = "shark"       # >= 2,500 Coins / Diamonds (~12.50 € Netto)
+WHALE_TIER_DOLPHIN = "dolphin"   # >= 500 Coins / Diamonds (~2.50 € Netto)
+
+
+def get_donor_tier(coins: int) -> str:
+    """
+    Klassifiziert einen Spender anhand der gespendeten Gesamtmünzen.
+    - Whale (Wal): >= 10.000 Coins
+    - Shark (Hai): >= 2.500 Coins
+    - Dolphin (Delfin): >= 500 Coins
+    """
+    if coins >= 10000:
+        return WHALE_TIER_WHALE
+    elif coins >= 2500:
+        return WHALE_TIER_SHARK
+    elif coins >= 500:
+        return WHALE_TIER_DOLPHIN
+    return ""
+
+
+def get_known_donor_tiers() -> Dict[str, str]:
+    """
+    Gibt ein schnelles Mapping {username_lower: tier} aller Spender zurück, die
+    mindestens 500 Münzen (Dolphin, Shark oder Whale) gespendet haben.
+    Wird vom StreamerWorker als In-Memory-Cache genutzt, um eingehende Chatnachrichten
+    ohne Datenbankverzögerung sofort mit dem Spender-Tier zu kennzeichnen.
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT LOWER(sender_username) AS uname, SUM(total_coins) AS coins
+            FROM gift_events
+            GROUP BY LOWER(sender_username)
+            HAVING coins >= 500
+            """
+        ).fetchall()
+        result: Dict[str, str] = {}
+        for r in rows:
+            u = str(r["uname"]).strip().lower()
+            c = int(r["coins"] or 0)
+            t = get_donor_tier(c)
+            if t:
+                result[u] = t
+        return result
+
+
+def batch_record_chat_messages(messages: List[Dict[str, Any]]) -> int:
+    """
+    Fügt einen Batch von Chatnachrichten mit einer einzigen Query performant ein.
+    Wird vom StreamerWorker periodisch (alle 2s) aufgerufen.
+    """
+    if not messages:
+        return 0
+
+    now_default = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows = []
+    for m in messages:
+        u_name = str(m.get("username") or "viewer").strip().lstrip("@")
+        nick = str(m.get("nickname") or u_name).strip()
+        c_text = str(m.get("comment") or "").strip()
+        if not c_text:
+            continue
+        tier = str(m.get("whale_tier") or "")
+        is_w = 1 if (m.get("is_whale") or tier) else 0
+        rows.append((
+            int(m["streamer_id"]),
+            m.get("session_id"),
+            str(m.get("user_id") or ""),
+            u_name,
+            nick,
+            str(m.get("avatar_url") or ""),
+            c_text,
+            is_w,
+            tier,
+            m.get("created_at") or now_default,
+        ))
+
+    if not rows:
+        return 0
+
+    sql = """
+    INSERT INTO chat_messages (
+        streamer_id, session_id, user_id, username, nickname,
+        avatar_url, comment, is_whale, whale_tier, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    with get_db() as conn:
+        conn.executemany(sql, rows)
+    return len(rows)
+
+
+def cleanup_old_chat_messages(days: int = 7) -> int:
+    """
+    Rolling Retention: Löscht Chat-Nachrichten, die älter als `days` Tage sind (Standard: 7 Tage).
+    Die aggregierten Spenderprofile und Geschenk-Events (gift_events) bleiben dauerhaft erhalten!
+    """
+    cutoff_dt = datetime.now() - timedelta(days=days)
+    cutoff_iso = cutoff_dt.isoformat(timespec="seconds")
+    cutoff_space = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM chat_messages WHERE created_at < ? OR created_at < ?",
+            (cutoff_iso, cutoff_space),
+        )
+        return getattr(cur, "rowcount", 0) or 0
+
+
+def get_chat_messages(
+    streamer_id: Optional[int] = None,
+    limit: int = 100,
+    search: Optional[str] = None,
+    min_tier: Optional[str] = None,
+    only_whales: bool = False,
+    before_id: Optional[int] = None,
+    after_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Liefert gefilterte Chat-Nachrichten pro Streamer oder global über alle Kanäle.
+    Unterstützt Live-Streaming über `after_id` und historische Paginierung via `before_id`.
+    """
+    where_clauses = ["1=1"]
+    params: List[Any] = []
+
+    if streamer_id:
+        where_clauses.append("c.streamer_id = ?")
+        params.append(streamer_id)
+
+    if search:
+        search_pattern = f"%{search.strip()}%"
+        where_clauses.append("(c.comment LIKE ? OR c.username LIKE ? OR c.nickname LIKE ?)")
+        params.extend([search_pattern, search_pattern, search_pattern])
+
+    if min_tier == "whale":
+        where_clauses.append("c.whale_tier = 'whale'")
+    elif min_tier == "shark":
+        where_clauses.append("c.whale_tier IN ('whale', 'shark')")
+    elif min_tier == "dolphin" or only_whales:
+        where_clauses.append("(c.is_whale = 1 OR c.whale_tier != '')")
+
+    order_dir = "DESC"
+    if after_id:
+        where_clauses.append("c.id > ?")
+        params.append(after_id)
+        order_dir = "ASC"
+    elif before_id:
+        where_clauses.append("c.id < ?")
+        params.append(before_id)
+        order_dir = "DESC"
+
+    where_sql = " AND ".join(where_clauses)
+    query = f"""
+    SELECT 
+        c.id, c.streamer_id, c.session_id, c.user_id, c.username, c.nickname,
+        c.avatar_url, c.comment, c.is_whale, c.whale_tier, c.created_at,
+        s.username AS streamer_username, s.display_name AS streamer_display_name,
+        s.avatar_url AS streamer_avatar_url
+    FROM chat_messages c
+    JOIN streamers s ON s.id = c.streamer_id
+    WHERE {where_sql}
+    ORDER BY c.id {order_dir}
+    LIMIT ?
+    """
+    params.append(max(1, min(limit, 500)))
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+        result = []
+        for r in rows:
+            rd = dict(r)
+            rd["is_whale"] = bool(rd["is_whale"])
+            result.append(rd)
+        return result
+
+
+def get_donor_radar_data(
+    period: str = "all",
+    min_tier: Optional[str] = None,
+    streamer_id: Optional[int] = None,
+    cross_streamer_only: bool = False,
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """
+    Aggregiert Spender und Wale über alle getrackten Streamer.
+    Liefert KPI-Karten, Cross-Streamer-Erkennung und Top-Spender-Rangliste.
+    """
+    cutoff = _get_period_cutoff(period)
+
+    where_clauses = ["1=1"]
+    params: List[Any] = []
+
+    if cutoff:
+        where_clauses.append("created_at >= ?")
+        params.append(cutoff)
+
+    if streamer_id:
+        where_clauses.append("streamer_id = ?")
+        params.append(streamer_id)
+
+    if search:
+        search_pattern = f"%{search.strip().lower()}%"
+        where_clauses.append("(LOWER(sender_username) LIKE ? OR LOWER(sender_nickname) LIKE ?)")
+        params.extend([search_pattern, search_pattern])
+
+    where_sql = " AND ".join(where_clauses)
+
+    having_clauses = []
+    if min_tier == "whale":
+        having_clauses.append("SUM(total_coins) >= 10000")
+    elif min_tier == "shark":
+        having_clauses.append("SUM(total_coins) >= 2500")
+    elif min_tier == "dolphin":
+        having_clauses.append("SUM(total_coins) >= 500")
+
+    if cross_streamer_only:
+        having_clauses.append("COUNT(DISTINCT streamer_id) >= 2")
+
+    having_sql = f"HAVING {' AND '.join(having_clauses)}" if having_clauses else ""
+
+    query = f"""
+    SELECT 
+        LOWER(sender_username) AS uname_key,
+        MAX(sender_username) AS username,
+        MAX(sender_nickname) AS display_name,
+        SUM(total_coins) AS total_coins,
+        SUM(eur_net) AS total_eur_net,
+        SUM(usd_net) AS total_usd_net,
+        SUM(eur_gross) AS total_eur_gross,
+        SUM(usd_gross) AS total_usd_gross,
+        COUNT(id) AS total_gifts,
+        COUNT(DISTINCT streamer_id) AS streamer_count,
+        MIN(created_at) AS first_seen,
+        MAX(created_at) AS last_seen
+    FROM gift_events
+    WHERE {where_sql}
+    GROUP BY LOWER(sender_username)
+    {having_sql}
+    ORDER BY total_coins DESC
+    LIMIT ? OFFSET ?
+    """
+    exec_params = list(params) + [max(1, min(limit, 500)), max(0, offset)]
+
+    with get_db() as conn:
+        rows = conn.execute(query, exec_params).fetchall()
+        donors = []
+        for r in rows:
+            d = dict(r)
+            coins = int(d["total_coins"] or 0)
+            d["tier"] = get_donor_tier(coins)
+            d["is_cross_streamer"] = int(d["streamer_count"] or 0) >= 2
+            d["total_eur_net"] = round(float(d["total_eur_net"] or 0.0), 2)
+            d["total_usd_net"] = round(float(d["total_usd_net"] or 0.0), 2)
+            d["total_eur_gross"] = round(float(d["total_eur_gross"] or 0.0), 2)
+            d["total_usd_gross"] = round(float(d["total_usd_gross"] or 0.0), 2)
+            donors.append(d)
+
+        # KPIs über alle Spender im Zeitraum
+        kpis_query = f"""
+        SELECT 
+            COUNT(DISTINCT uname) as all_donors,
+            SUM(CASE WHEN coins >= 10000 THEN 1 ELSE 0 END) as count_whales,
+            SUM(CASE WHEN coins >= 2500 AND coins < 10000 THEN 1 ELSE 0 END) as count_sharks,
+            SUM(CASE WHEN coins >= 500 AND coins < 2500 THEN 1 ELSE 0 END) as count_dolphins,
+            SUM(CASE WHEN s_count >= 2 AND coins >= 500 THEN 1 ELSE 0 END) as count_cross,
+            SUM(CASE WHEN coins >= 500 THEN coins ELSE 0 END) as sum_whale_coins,
+            SUM(CASE WHEN coins >= 500 THEN eur_net ELSE 0 END) as sum_whale_eur_net
+        FROM (
+            SELECT 
+                LOWER(sender_username) as uname,
+                SUM(total_coins) as coins,
+                SUM(eur_net) as eur_net,
+                COUNT(DISTINCT streamer_id) as s_count
+            FROM gift_events
+            WHERE {where_sql}
+            GROUP BY LOWER(sender_username)
+        ) sub
+        """
+        kpi_row = conn.execute(kpis_query, params).fetchone()
+
+        chat_count_row = conn.execute(
+            "SELECT COUNT(*) as total_chat FROM chat_messages"
+        ).fetchone()
+        total_chat = int(chat_count_row["total_chat"] or 0) if chat_count_row else 0
+
+        w_count = int(kpi_row["count_whales"] or 0) if kpi_row else 0
+        s_count = int(kpi_row["count_sharks"] or 0) if kpi_row else 0
+        d_count = int(kpi_row["count_dolphins"] or 0) if kpi_row else 0
+
+        kpis = {
+            "whales": w_count,
+            "sharks": s_count,
+            "dolphins": d_count,
+            "cross_streamer_whales": int(kpi_row["count_cross"] or 0) if kpi_row else 0,
+            "total_tracked_whales": w_count + s_count + d_count,
+            "whale_coins": int(kpi_row["sum_whale_coins"] or 0) if kpi_row else 0,
+            "whale_eur_net": round(float(kpi_row["sum_whale_eur_net"] or 0.0), 2) if kpi_row else 0.0,
+            "total_chat_messages": total_chat,
+        }
+
+        streamers = conn.execute(
+            "SELECT id, username, display_name, avatar_url, is_live FROM streamers ORDER BY display_name ASC"
+        ).fetchall()
+
+        return {
+            "period": period,
+            "kpis": kpis,
+            "donors": donors,
+            "streamers": [dict(s) for s in streamers],
+        }
+
+
+def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Liefert ein umfassendes Spender-Dossier:
+    - Gesamtausgaben (Coins, EUR/USD Netto & Brutto, Geschenke-Anzahl)
+    - Verteilung über alle beschenkten Streamer
+    - Top Lieblingsgeschenke
+    - Letzte Chat-Nachrichten über alle Kanäle
+    """
+    clean_uname = username.strip().lstrip("@").lower()
+    with get_db() as conn:
+        main_row = conn.execute(
+            """
+            SELECT 
+                MAX(sender_username) as username,
+                MAX(sender_nickname) as display_name,
+                SUM(total_coins) as total_coins,
+                SUM(eur_net) as total_eur_net,
+                SUM(usd_net) as total_usd_net,
+                SUM(eur_gross) as total_eur_gross,
+                SUM(usd_gross) as total_usd_gross,
+                COUNT(id) as total_gifts,
+                COUNT(DISTINCT streamer_id) as streamer_count,
+                MIN(created_at) as first_seen,
+                MAX(created_at) as last_seen
+            FROM gift_events
+            WHERE LOWER(sender_username) = ?
+            """,
+            (clean_uname,),
+        ).fetchone()
+
+        if not main_row or not main_row["total_coins"]:
+            chat_user_row = conn.execute(
+                "SELECT username, nickname, avatar_url FROM chat_messages WHERE LOWER(username) = ? LIMIT 1",
+                (clean_uname,),
+            ).fetchone()
+            if not chat_user_row:
+                return None
+            profile = {
+                "username": chat_user_row["username"],
+                "display_name": chat_user_row["nickname"] or chat_user_row["username"],
+                "avatar_url": chat_user_row["avatar_url"],
+                "total_coins": 0,
+                "total_eur_net": 0.0,
+                "total_usd_net": 0.0,
+                "total_eur_gross": 0.0,
+                "total_usd_gross": 0.0,
+                "total_gifts": 0,
+                "streamer_count": 0,
+                "first_seen": "-",
+                "last_seen": "-",
+                "tier": "",
+                "is_cross_streamer": False,
+            }
+        else:
+            coins = int(main_row["total_coins"] or 0)
+            avatar_row = conn.execute(
+                "SELECT avatar_url FROM chat_messages WHERE LOWER(username) = ? AND avatar_url != '' ORDER BY id DESC LIMIT 1",
+                (clean_uname,),
+            ).fetchone()
+            avatar_url = avatar_row["avatar_url"] if avatar_row else ""
+            profile = {
+                "username": main_row["username"],
+                "display_name": main_row["display_name"] or main_row["username"],
+                "avatar_url": avatar_url,
+                "total_coins": coins,
+                "total_eur_net": round(float(main_row["total_eur_net"] or 0.0), 2),
+                "total_usd_net": round(float(main_row["total_usd_net"] or 0.0), 2),
+                "total_eur_gross": round(float(main_row["total_eur_gross"] or 0.0), 2),
+                "total_usd_gross": round(float(main_row["total_usd_gross"] or 0.0), 2),
+                "total_gifts": int(main_row["total_gifts"] or 0),
+                "streamer_count": int(main_row["streamer_count"] or 0),
+                "first_seen": main_row["first_seen"],
+                "last_seen": main_row["last_seen"],
+                "tier": get_donor_tier(coins),
+                "is_cross_streamer": int(main_row["streamer_count"] or 0) >= 2,
+            }
+
+        # Streamer Breakdown
+        streamer_rows = conn.execute(
+            """
+            SELECT 
+                g.streamer_id,
+                s.username as streamer_username,
+                s.display_name as streamer_display_name,
+                s.avatar_url as streamer_avatar_url,
+                SUM(g.total_coins) as coins_given,
+                SUM(g.eur_net) as eur_net,
+                COUNT(g.id) as gift_count,
+                MAX(g.created_at) as last_gift_at
+            FROM gift_events g
+            JOIN streamers s ON s.id = g.streamer_id
+            WHERE LOWER(g.sender_username) = ?
+            GROUP BY g.streamer_id, s.username, s.display_name, s.avatar_url
+            ORDER BY coins_given DESC
+            """,
+            (clean_uname,),
+        ).fetchall()
+        streamers_breakdown = []
+        for sr in streamer_rows:
+            sd = dict(sr)
+            sd["eur_net"] = round(float(sd["eur_net"] or 0.0), 2)
+            streamers_breakdown.append(sd)
+
+        # Top 6 Lieblingsgeschenke
+        gift_rows = conn.execute(
+            """
+            SELECT 
+                gift_name,
+                gift_icon_url,
+                SUM(repeat_count) as total_sent,
+                SUM(total_coins) as total_coins
+            FROM gift_events
+            WHERE LOWER(sender_username) = ?
+            GROUP BY gift_name, gift_icon_url
+            ORDER BY total_coins DESC
+            LIMIT 6
+            """,
+            (clean_uname,),
+        ).fetchall()
+        top_gifts = [dict(gr) for gr in gift_rows]
+
+        # Letzte 25 Chatnachrichten
+        chat_rows = conn.execute(
+            """
+            SELECT 
+                c.id, c.streamer_id, c.comment, c.created_at,
+                s.username as streamer_username, s.display_name as streamer_display_name
+            FROM chat_messages c
+            JOIN streamers s ON s.id = c.streamer_id
+            WHERE LOWER(c.username) = ?
+            ORDER BY c.id DESC
+            LIMIT 25
+            """,
+            (clean_uname,),
+        ).fetchall()
+        recent_chats = [dict(cr) for cr in chat_rows]
+
+        return {
+            "profile": profile,
+            "streamers": streamers_breakdown,
+            "top_gifts": top_gifts,
+            "recent_chats": recent_chats,
+        }
+
 

@@ -24,8 +24,11 @@ from database import (
     get_battles_list,
     get_battle_stats,
     get_battle_details,
+    get_chat_messages,
     get_dashboard_overview,
     get_db,
+    get_donor_details,
+    get_donor_radar_data,
     get_settings,
     get_site_analytics_overview,
     get_streamer_by_id_or_username,
@@ -373,6 +376,33 @@ async def site_analytics_page(
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
         },
     )
+
+
+@app.get("/donor-radar", response_class=HTMLResponse, include_in_schema=False)
+async def donor_radar_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Geschützte Spender-Radar & Chatlog-Seite (/donor-radar). Leitet ohne gültige Telegram-Session auf /login weiter.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login", status_code=302)
+
+    init_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="donor_radar.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+        },
+    )
+
 
 
 # =====================================================================
@@ -1156,6 +1186,96 @@ async def api_site_analytics(
     data["recent_challenges"] = admin_auth_manager.get_recent_challenges(limit=25)
     data["telegram_diagnostics"] = telegram_bot_service.get_diagnostics()
     return data
+
+
+
+@app.get(
+    "/api/donor-radar",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert aggregierte Daten für das Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/donor-radar",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert aggregierte Daten für das Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_donor_radar(
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+    min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
+    streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
+    cross_streamer_only: bool = Query(False, description="Nur Spender mit >= 2 Streamern anzeigen"),
+    search: Optional[str] = Query(None, description="Suchbegriff für Username / Nickname"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    init_db()
+    data = get_donor_radar_data(
+        period=period,
+        min_tier=min_tier,
+        streamer_id=streamer_id,
+        cross_streamer_only=cross_streamer_only,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    return {"ok": True, "data": data}
+
+
+@app.get(
+    "/api/donor-radar/donors/{username}",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert ein detailliertes Spender-Dossier inkl. Streamer-Verteilung, Top-Gifts und Chat-Historie",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/donor-radar/donors/{username}",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert ein detailliertes Spender-Dossier inkl. Streamer-Verteilung, Top-Gifts und Chat-Historie",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_donor_detail(username: str):
+    init_db()
+    details = get_donor_details(username)
+    if not details:
+        raise HTTPException(status_code=404, detail="Spender nicht gefunden")
+    return {"ok": True, "data": details}
+
+
+@app.get(
+    "/api/chat-logs",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Live- und historische Chatlogs pro Streamer oder global",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/chat-logs",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Live- und historische Chatlogs pro Streamer oder global",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_chat_logs(
+    streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
+    search: Optional[str] = Query(None, description="Textsuche in Chat-Nachrichten"),
+    min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
+    only_whales: bool = Query(False, description="Nur Spender-Nachrichten anzeigen"),
+    before_id: Optional[int] = Query(None, description="Ältere Nachrichten abrufen (Paginierung)"),
+    after_id: Optional[int] = Query(None, description="Neuere Nachrichten abrufen (Live-Polling)"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    init_db()
+    messages = get_chat_messages(
+        streamer_id=streamer_id,
+        limit=limit,
+        search=search,
+        min_tier=min_tier,
+        only_whales=only_whales,
+        before_id=before_id,
+        after_id=after_id,
+    )
+    return {"ok": True, "messages": messages, "count": len(messages)}
+
 
 
 @app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])

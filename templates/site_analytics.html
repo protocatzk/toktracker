@@ -167,8 +167,10 @@
             <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
             <span class="pill">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
             <a class="btn-link sm" href="/admin">← Admin-Dashboard</a>
+            <a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>
             <a class="btn-link primary sm" href="/">Öffentliches Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
+
         </div>
     </div>
 </header>
@@ -472,8 +474,9 @@
 <footer class="app-footer">
     <div>toktracker · WEBSITE &amp; BOT ANALYTICS</div>
     <div>
-        <a href="/admin">← Zurück zum Admin-Dashboard</a> · <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
+        <a href="/admin">← Zurück zum Admin-Dashboard</a> · <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
     </div>
+
 </footer>
 
 <script src="/static/site_analytics.js?v=1.0.2"></script>
