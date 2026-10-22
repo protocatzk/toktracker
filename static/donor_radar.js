@@ -303,7 +303,7 @@
             html += `
                 <tr>
                     <td class="mono muted">${idx + 1}</td>
-                    <td>${tierBadge}</td>
+                    <td class="hide-sm">${tierBadge}</td>
                     <td>
                         <div style="display:flex; flex-direction:column;">
                             <div style="display:flex; align-items:center; gap:6px;">
@@ -315,9 +315,9 @@
                     </td>
                     <td class="num-col mono" style="font-weight:700; color:#38bdf8;">${formatNumber(d.total_coins)}</td>
                     <td class="num-col mono" style="font-weight:700; color:#4ade80;">${formatCurrency(d.total_eur_net, "EUR")}</td>
-                    <td class="num-col mono muted">${formatCurrency(d.total_usd_net, "USD")}</td>
-                    <td class="num-col mono">${formatNumber(d.streamer_count)}</td>
-                    <td class="mono muted" style="font-size:11.5px;">${escapeHtml(d.last_seen || "-")}</td>
+                    <td class="num-col mono muted hide-sm">${formatCurrency(d.total_usd_net, "USD")}</td>
+                    <td class="num-col mono hide-md">${formatNumber(d.streamer_count)}</td>
+                    <td class="mono muted hide-sm" style="font-size:11.5px;">${escapeHtml(d.last_seen || "-")}</td>
                     <td style="text-align: right;">
                         <button type="button" class="btn-link sm" onclick="window.tokRadar.openDossier('${uname}')" style="font-size:11.5px; padding:3px 8px;">
                             Dossier →

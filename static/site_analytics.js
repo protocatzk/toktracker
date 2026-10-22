@@ -323,8 +323,8 @@
                 <tr>
                     <td style="font-weight: 700; color: #38bdf8;">${escapeHtml(p.path)}</td>
                     <td style="font-family: var(--font-mono); font-weight: 700;">${formatNumber(v)}</td>
-                    <td style="font-family: var(--font-mono); color: #10b981;">${formatNumber(p.visitors || 0)}</td>
-                    <td style="font-family: var(--font-mono); color: var(--text-muted);">${p.avg_ms || 0} ms</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono); color: #10b981;">${formatNumber(p.visitors || 0)}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono); color: var(--text-muted);">${p.avg_ms || 0} ms</td>
                     <td>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <div style="flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
@@ -353,11 +353,11 @@
                 <tr>
                     <td style="font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted);">${escapeHtml(v.created_at || "")}</td>
                     <td style="font-weight: 700;">${escapeHtml(v.path || "")}</td>
-                    <td>${getDeviceIcon(v.device_type)}</td>
+                    <td class="hide-sm">${getDeviceIcon(v.device_type)}</td>
                     <td>${getStatusBadge(v.status_code)}</td>
-                    <td style="font-family: var(--font-mono);">${v.response_time_ms || 0} ms</td>
-                    <td><span class="ip-hash-badge">${escapeHtml((v.visitor_hash || "").substring(0, 12))}…</span></td>
-                    <td style="font-size: 11px; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(v.referrer || "-")}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono);">${v.response_time_ms || 0} ms</td>
+                    <td class="hide-md"><span class="ip-hash-badge">${escapeHtml((v.visitor_hash || "").substring(0, 12))}…</span></td>
+                    <td class="hide-sm" style="font-size: 11px; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(v.referrer || "-")}</td>
                 </tr>
             `;
         }).join("");
@@ -386,9 +386,9 @@
                     <td style="font-weight: 700;">${typeLabel}</td>
                     <td><strong style="color: #38bdf8;">${userLabel}</strong> ${s.telegram_id ? `<span style="font-size:10.5px; color:var(--text-muted);">(${s.telegram_id})</span>` : ""}</td>
                     <td><span class="${statusClass}">${escapeHtml((s.status || "active").toUpperCase())}</span></td>
-                    <td><span class="ip-hash-badge">${escapeHtml((s.client_ip_hash || "").substring(0, 10))}…</span></td>
-                    <td style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(s.created_at || "-")}</td>
-                    <td style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(s.last_active_at || "-")}</td>
+                    <td class="hide-sm"><span class="ip-hash-badge">${escapeHtml((s.client_ip_hash || "").substring(0, 10))}…</span></td>
+                    <td class="hide-md" style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(s.created_at || "-")}</td>
+                    <td class="hide-sm" style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(s.last_active_at || "-")}</td>
                 </tr>
             `;
         }).join("");
@@ -411,12 +411,12 @@
 
             return `
                 <tr>
-                    <td style="font-family: var(--font-mono); font-size: 11px;">${escapeHtml(c.id || "")}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono); font-size: 11px;">${escapeHtml(c.id || "")}</td>
                     <td style="font-family: var(--font-mono); font-weight: 800; font-size: 14px; letter-spacing: 2px; color: #f59e0b;">${escapeHtml(c.code || "******")}</td>
                     <td><span class="${badgeClass}">${st.toUpperCase()}</span></td>
-                    <td style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(c.client_info || "-")}</td>
+                    <td class="hide-sm" style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(c.client_info || "-")}</td>
                     <td style="color: #10b981; font-weight: 700;">${escapeHtml(c.admin_label || "-")}</td>
-                    <td style="font-size: 11.5px; color: var(--text-muted);">${relTime}</td>
+                    <td class="hide-sm" style="font-size: 11.5px; color: var(--text-muted);">${relTime}</td>
                 </tr>
             `;
         }).join("");
@@ -449,10 +449,10 @@
                         </div>
                     </td>
                     <td><span class="${statusClass}">${statusLabel}</span></td>
-                    <td style="font-family: var(--font-mono); font-size: 11px;">${escapeHtml(w.last_seen_live || "Nie")}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono); font-size: 11px;">${escapeHtml(w.last_seen_live || "Nie")}</td>
                     <td style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">${formatNumber(w.total_diamonds || 0)}</td>
-                    <td style="font-family: var(--font-mono);">${w.reconnect_count || 0}</td>
-                    <td style="font-size: 11px; color: var(--text-muted);">${escapeHtml(w.last_error || "Bereit")}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono);">${w.reconnect_count || 0}</td>
+                    <td class="hide-md" style="font-size: 11px; color: var(--text-muted);">${escapeHtml(w.last_error || "Bereit")}</td>
                 </tr>
             `;
         }).join("");
@@ -482,13 +482,13 @@
 
             return `
                 <tr>
-                    <td style="font-family: var(--font-mono); font-size: 11.5px;">${escapeHtml(String(u.telegram_id || u.id || ""))}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono); font-size: 11.5px;">${escapeHtml(String(u.telegram_id || u.id || ""))}</td>
                     <td style="font-weight: 700; color: #38bdf8;">@${escapeHtml(u.username || "anonym")}</td>
-                    <td>${escapeHtml(u.first_name || "-")}</td>
+                    <td class="hide-sm">${escapeHtml(u.first_name || "-")}</td>
                     <td>${roleBadge}</td>
                     <td>${allowBadge}</td>
-                    <td style="font-size: 11px; color: var(--text-muted);">${escapeHtml(u.last_seen_at || "-")}</td>
-                    <td style="font-size: 11px; color: var(--text-muted);">${escapeHtml(u.created_at || "-")}</td>
+                    <td class="hide-md" style="font-size: 11px; color: var(--text-muted);">${escapeHtml(u.last_seen_at || "-")}</td>
+                    <td class="hide-sm" style="font-size: 11px; color: var(--text-muted);">${escapeHtml(u.created_at || "-")}</td>
                 </tr>
             `;
         }).join("");

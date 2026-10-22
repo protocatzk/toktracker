@@ -291,7 +291,7 @@
     </div>
 
     <!-- Data Tables & Audits Navigation Tabs -->
-    <div style="margin-top: 28px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); display: flex; gap: 8px;">
+    <div class="tab-list" style="margin-top: 28px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color);">
         <button type="button" class="tab-btn active" id="tabBtnPaths" onclick="switchSection('sectionPaths')">
             📑 Seiten-Statistik
         </button>
@@ -322,8 +322,8 @@
                         <tr>
                             <th>Pfad (URL)</th>
                             <th>Aufrufe (Views)</th>
-                            <th>Eindeutige Besucher</th>
-                            <th>Ø Latenz</th>
+                            <th class="hide-sm">Eindeutige Besucher</th>
+                            <th class="hide-sm">Ø Latenz</th>
                             <th>Anteil am Traffic</th>
                         </tr>
                     </thead>
@@ -348,11 +348,11 @@
                         <tr>
                             <th>Zeitpunkt</th>
                             <th>Pfad</th>
-                            <th>Gerät / Typ</th>
+                            <th class="hide-sm">Gerät / Typ</th>
                             <th>Status</th>
-                            <th>Antwortzeit</th>
-                            <th>Besucher-Hash (Anonym)</th>
-                            <th>Referrer</th>
+                            <th class="hide-sm">Antwortzeit</th>
+                            <th class="hide-md">Besucher-Hash</th>
+                            <th class="hide-sm">Referrer</th>
                         </tr>
                     </thead>
                     <tbody id="tbodyRecentViews">
@@ -377,9 +377,9 @@
                             <th>Session-Typ</th>
                             <th>Telegram-ID / Benutzer</th>
                             <th>Status</th>
-                            <th>IP-Hash (Client)</th>
-                            <th>Erstellt am</th>
-                            <th>Letzte Aktivität</th>
+                            <th class="hide-sm">IP-Hash (Client)</th>
+                            <th class="hide-md">Erstellt am</th>
+                            <th class="hide-sm">Letzte Aktivität</th>
                         </tr>
                     </thead>
                     <tbody id="tbodyBotSessions">
@@ -398,12 +398,12 @@
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Challenge-ID</th>
+                            <th class="hide-sm">Challenge-ID</th>
                             <th>Code</th>
                             <th>Status</th>
-                            <th>Client Info</th>
+                            <th class="hide-sm">Client Info</th>
                             <th>Freigegeben durch</th>
-                            <th>Erstellt</th>
+                            <th class="hide-sm">Erstellt</th>
                         </tr>
                     </thead>
                     <tbody id="tbodyChallenges">
@@ -427,10 +427,10 @@
                         <tr>
                             <th>Streamer</th>
                             <th>Status</th>
-                            <th>Laufzeit / Start</th>
-                            <th>Empfangene Geschenke</th>
-                            <th>Reconnects</th>
-                            <th>Letzter Fehler / Hinweis</th>
+                            <th class="hide-sm">Laufzeit / Start</th>
+                            <th>Geschenke</th>
+                            <th class="hide-sm">Reconnects</th>
+                            <th class="hide-md">Letzter Fehler / Hinweis</th>
                         </tr>
                     </thead>
                     <tbody id="tbodyWorkers">
@@ -452,13 +452,13 @@
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Telegram ID</th>
+                            <th class="hide-sm">Telegram ID</th>
                             <th>Benutzername</th>
-                            <th>Vorname</th>
+                            <th class="hide-sm">Vorname</th>
                             <th>Rolle</th>
                             <th>Freigabe</th>
-                            <th>Zuletzt gesehen</th>
-                            <th>Registriert am</th>
+                            <th class="hide-md">Zuletzt gesehen</th>
+                            <th class="hide-sm">Registriert am</th>
                         </tr>
                     </thead>
                     <tbody id="tbodyUsers">

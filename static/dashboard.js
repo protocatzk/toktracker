@@ -238,12 +238,12 @@ function renderStreamerTable() {
 
             return `
                 <tr>
-                    <td class="mono muted">#${s.id}</td>
+                    <td class="mono muted hide-sm">#${s.id}</td>
                     <td>
                         <strong><a href="#" onclick="showStreamerDetail(${s.id}); return false;">${s.display_name || s.username}</a></strong>
                         <div class="mono muted">@${s.username}${s.room_id ? ` · Room ${s.room_id}` : ""}</div>
                     </td>
-                    <td>
+                    <td class="hide-sm">
                         <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
                             <span class="status-tag ${tagClass}">${state.toUpperCase()}</span>
                             ${autoBadge}
@@ -251,7 +251,7 @@ function renderStreamerTable() {
                         <div class="mono muted" style="margin-top:3px;">${s.monitor_status || ""}</div>
                         ${s.last_error ? `<div class="mono err-text">${s.last_error}</div>` : ""}
                     </td>
-                    <td class="num-col">
+                    <td class="num-col hide-md">
                         <strong>${fmtNum(s.current_viewers || 0)}</strong>
                         <div class="muted">${fmtNum(s.follower_count || 0)} Follower</div>
                     </td>
@@ -260,9 +260,9 @@ function renderStreamerTable() {
                         <div class="muted">${fmtNum(s.total_gifts_sent)} Gifts / ${s.unique_gifters} Gifter</div>
                     </td>
                     <td class="num-col"><strong>${fmtEUR(s.eur_net)}</strong></td>
-                    <td class="num-col">${fmtUSD(s.usd_net)}</td>
-                    <td class="num-col">${fmtEUR(s.eur_gross)}</td>
-                    <td class="mono">
+                    <td class="num-col hide-sm">${fmtUSD(s.usd_net)}</td>
+                    <td class="num-col hide-md">${fmtEUR(s.eur_gross)}</td>
+                    <td class="mono hide-sm">
                         <div>Gift: ${topGift}</div>
                         <div class="muted">Spender: ${topGifter}</div>
                     </td>
@@ -272,7 +272,7 @@ function renderStreamerTable() {
                             <button type="button" class="sm" onclick="toggleWorker(${s.id})">${trackBtnText}</button>
                             <button type="button" class="sm" onclick="showStreamerDetail(${s.id})">Details</button>
                             <button type="button" class="sm" onclick="refreshStreamer(${s.id})" title="TikTok Profil aktualisieren">Sync</button>
-                            <a class="btn-link sm mono" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
+                            <a class="btn-link sm mono hide-sm" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
                             <button type="button" class="sm danger" onclick="deleteStreamer(${s.id}, '${s.username}')">X</button>
                         </div>
                     </td>
@@ -310,14 +310,14 @@ function renderGiftLog() {
                     <td class="mono"><strong>@${g.streamer_username}</strong></td>
                     <td>
                         ${g.sender_nickname || g.sender_username}
-                        <span class="mono muted">(@${g.sender_username})</span>
+                        <span class="mono muted hide-sm">(@${g.sender_username})</span>
                         ${g.is_super_fan ? `<span class="status-tag polling">SUPERFAN</span>` : ""}
                     </td>
-                    <td><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
+                    <td class="hide-sm"><strong>${g.repeat_count}x</strong> ${g.gift_name}</td>
                     <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                     <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                    <td class="num-col">${fmtUSD(g.usd_net)}</td>
-                    <td class="mono muted">${g.source}</td>
+                    <td class="num-col hide-sm">${fmtUSD(g.usd_net)}</td>
+                    <td class="mono muted hide-sm">${g.source}</td>
                 </tr>
             `;
         })
@@ -355,12 +355,12 @@ function renderTelegramUsers(users, accessMode) {
 
             return `
                 <tr>
-                    <td class="mono">${u.telegram_id || `<span class="muted">wird bei Nachricht verknüpft</span>`}</td>
+                    <td class="mono hide-sm">${u.telegram_id || `<span class="muted">wird bei Nachricht verknüpft</span>`}</td>
                     <td><strong>${unameStr}</strong>${fnameStr}</td>
                     <td class="mono">${roleBadge}</td>
                     <td>${statusHtml}</td>
-                    <td class="mono muted">${u.note || "-"}</td>
-                    <td class="mono muted">${lastSeen}</td>
+                    <td class="mono muted hide-sm">${u.note || "-"}</td>
+                    <td class="mono muted hide-md">${lastSeen}</td>
                     <td>
                         <div class="action-group">
                             ${
@@ -1165,10 +1165,10 @@ function renderAnalyticsTables(data) {
                             <strong>@${g.sender_username}</strong> ${sfBadge}
                             ${g.sender_nickname && g.sender_nickname !== g.sender_username ? `<div class="mono muted" style="font-size:11px;">${g.sender_nickname}</div>` : ""}
                         </td>
-                        <td class="num-col">${fmtNum(g.gifts_sent)} (${fmtNum(g.transactions)})</td>
+                        <td class="num-col hide-sm">${fmtNum(g.gifts_sent)} (${fmtNum(g.transactions)})</td>
                         <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                         <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                        <td class="num-col">
+                        <td class="num-col hide-sm">
                             <div class="pct-bar-wrapper">
                                 <span class="pct-pill">${g.pct_of_total}%</span>
                                 <span class="pct-bar-fill" style="width:${Math.max(2, Math.min(60, g.pct_of_total * 0.6))}px;"></span>
@@ -1197,11 +1197,11 @@ function renderAnalyticsTables(data) {
                             <strong>${g.gift_name}</strong>
                             ${g.gift_id ? `<span class="mono muted" style="font-size:10.5px;">(#${g.gift_id})</span>` : ""}
                         </td>
-                        <td class="num-col">${fmtNum(g.diamond_count)}</td>
-                        <td class="num-col">${fmtNum(g.total_quantity)}x</td>
+                        <td class="num-col hide-sm">${fmtNum(g.diamond_count)}</td>
+                        <td class="num-col hide-sm">${fmtNum(g.total_quantity)}x</td>
                         <td class="num-col"><strong>${fmtNum(g.total_coins)}</strong></td>
                         <td class="num-col"><strong>${fmtEUR(g.eur_net)}</strong></td>
-                        <td class="num-col">
+                        <td class="num-col hide-sm">
                             <div class="pct-bar-wrapper">
                                 <span class="pct-pill">${g.pct_of_total}%</span>
                                 <span class="pct-bar-fill" style="width:${Math.max(2, Math.min(60, g.pct_of_total * 0.6))}px;"></span>
@@ -1232,18 +1232,18 @@ function renderAnalyticsTables(data) {
 
                 return `
                     <tr>
-                        <td class="mono muted">#${ss.id}</td>
+                        <td class="mono muted hide-sm">#${ss.id}</td>
                         <td>
                             <strong>${ss.streamer_display_name}</strong>
                             <div class="mono muted" style="font-size:11px;">@${ss.streamer_username}</div>
                         </td>
                         <td class="mono">${(ss.started_at || "").replace("T", " ")}</td>
                         <td class="num-col">${durStr}</td>
-                        <td class="num-col"><strong>${fmtNum(ss.peak_viewers)}</strong></td>
-                        <td>${statusTag}</td>
+                        <td class="num-col hide-sm"><strong>${fmtNum(ss.peak_viewers)}</strong></td>
+                        <td class="hide-sm">${statusTag}</td>
                         <td class="num-col"><strong>${fmtNum(ss.session_coins)}</strong></td>
                         <td class="num-col"><strong>${fmtEUR(ss.eur_net)}</strong></td>
-                        <td class="num-col mono"><strong>${fmtNum(ss.coins_per_hour)}</strong> <span class="muted">/h</span></td>
+                        <td class="num-col mono hide-md"><strong>${fmtNum(ss.coins_per_hour)}</strong> <span class="muted">/h</span></td>
                     </tr>
                 `;
             }).join("");
@@ -1948,11 +1948,11 @@ function renderBattleRivals(rivals) {
                     </div>
                 </td>
                 <td class="num-col"><strong>${r.matches_count}</strong></td>
-                <td class="num-col mono">${r.wins}S - ${r.losses}N - ${r.draws}U</td>
+                <td class="num-col mono hide-sm">${r.wins}S - ${r.losses}N - ${r.draws}U</td>
                 <td class="num-col mono" style="font-weight:700; color:${winrateColor};">${winrate} %</td>
-                <td class="num-col mono">${(r.avg_streamer_score || 0).toLocaleString("de-DE")}</td>
-                <td class="num-col mono">${(r.avg_opponent_score || 0).toLocaleString("de-DE")}</td>
-                <td class="num-col mono" style="color:#f59e0b; font-weight:700;">${fmtNum(r.total_coins || 0)}</td>
+                <td class="num-col mono hide-md">${(r.avg_streamer_score || 0).toLocaleString("de-DE")}</td>
+                <td class="num-col mono hide-md">${(r.avg_opponent_score || 0).toLocaleString("de-DE")}</td>
+                <td class="num-col mono hide-sm" style="color:#f59e0b; font-weight:700;">${fmtNum(r.total_coins || 0)}</td>
                 <td class="num-col mono" style="color:#10b981; font-weight:700;">${fmtEUR(r.total_eur_net || 0)}</td>
             </tr>
         `;

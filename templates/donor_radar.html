@@ -132,6 +132,11 @@
                 grid-template-columns: 1fr;
             }
         }
+        @media (max-width: 768px) {
+            .chatlog-box {
+                height: 460px;
+            }
+        }
 
         /* Chatlog Container */
         .chatlog-box {
@@ -447,13 +452,13 @@
                     <thead>
                         <tr>
                             <th style="width: 40px;">#</th>
-                            <th>Tier</th>
+                            <th class="hide-sm">Tier</th>
                             <th>Spender</th>
                             <th class="num-col">Coins</th>
                             <th class="num-col">Netto (EUR)</th>
-                            <th class="num-col">Netto (USD)</th>
-                            <th class="num-col">Kanäle</th>
-                            <th>Zuletzt gesehen</th>
+                            <th class="num-col hide-sm">Netto (USD)</th>
+                            <th class="num-col hide-md">Kanäle</th>
+                            <th class="hide-sm">Zuletzt gesehen</th>
                             <th style="text-align: right;">Aktion</th>
                         </tr>
                     </thead>
