@@ -245,6 +245,10 @@
                         <option value="30d">Letzte 30 Tage</option>
                     </select>
                     <button type="button" id="btnRefreshAnalytics" class="primary">Aktualisieren</button>
+                    <label class="checkbox-inline mono muted" style="margin-left:6px; display:inline-flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;" title="Alle 30 Sekunden automatisch im Hintergrund aktualisieren">
+                        <input type="checkbox" id="chkAnalyticsAutoRefresh"> Auto-Refresh (30s)
+                    </label>
+                    <span id="anLastUpdated" class="mono muted" style="font-size:11px; margin-left:8px;"></span>
                 </div>
             </div>
             <div id="anStreamerMetaBanner" class="mono muted" style="display:none; font-size:12px; margin-top:2px;">
@@ -922,6 +926,6 @@
     </div>
 </footer>
 
-<script src="/static/dashboard.js?v=2.8.1"></script>
+<script src="/static/dashboard.js?v=2.8.2"></script>
 </body>
 </html>

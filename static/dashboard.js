@@ -15,6 +15,19 @@ let chartTimeOfDayInstance = null;
 let chartGiftDistInstance = null;
 let chartTopGiftersInstance = null;
 
+let analyticsLoadedOnce = false;
+let lastAnalyticsFingerprint = null;
+let analyticsAutoRefreshTimer = null;
+
+function updateAnalyticsTimestamp() {
+    const el = document.getElementById("anLastUpdated");
+    if (el) {
+        const d = new Date();
+        const timeStr = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        el.textContent = `Stand: ${timeStr}`;
+    }
+}
+
 function fmtEUR(v) {
     return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(v || 0);
 }
@@ -72,6 +85,11 @@ function applyTheme(theme) {
         btn.textContent = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
     }
     if (cachedAnalyticsData) {
+        if (chartTimelineInstance) { chartTimelineInstance.destroy(); chartTimelineInstance = null; }
+        if (chartCompareInstance) { chartCompareInstance.destroy(); chartCompareInstance = null; }
+        if (chartTimeOfDayInstance) { chartTimeOfDayInstance.destroy(); chartTimeOfDayInstance = null; }
+        if (chartGiftDistInstance) { chartGiftDistInstance.destroy(); chartGiftDistInstance = null; }
+        if (chartTopGiftersInstance) { chartTopGiftersInstance.destroy(); chartTopGiftersInstance = null; }
         renderTimelineChart(cachedAnalyticsData);
         renderCompareChart(cachedAnalyticsData);
         renderTimeOfDayChart(cachedAnalyticsData);
@@ -88,9 +106,12 @@ function switchTab(tabId) {
         panel.classList.toggle("active", panel.id === tabId);
     });
     if (tabId === "tab-analytics") {
-        setTimeout(() => {
-            loadAnalytics();
-        }, 50);
+        if (!analyticsLoadedOnce) {
+            analyticsLoadedOnce = true;
+            setTimeout(() => {
+                loadAnalytics();
+            }, 50);
+        }
     } else if (tabId === "tab-battles") {
         setTimeout(() => {
             loadBattles();
@@ -518,7 +539,10 @@ function openStreamerAnalytics(streamerId) {
     if (sel) {
         sel.value = String(streamerId);
     }
+    lastAnalyticsFingerprint = null;
+    analyticsLoadedOnce = true;
     switchTab("tab-analytics");
+    loadAnalytics();
 }
 
 function setChartEmptyState(canvasId, msg = "Keine Daten im gewählten Zeitraum vorhanden") {
@@ -694,6 +718,19 @@ function renderTimelineChart(data) {
         ];
     }
 
+    if (chartTimelineInstance && chartTimelineInstance.config.type === chartType) {
+        chartTimelineInstance.data.labels = labels;
+        chartTimelineInstance.data.datasets = datasets;
+        chartTimelineInstance.options.scales = scales;
+        chartTimelineInstance.update("none");
+        return;
+    }
+
+    if (chartTimelineInstance) {
+        chartTimelineInstance.destroy();
+        chartTimelineInstance = null;
+    }
+
     chartTimelineInstance = new Chart(canvas, {
         type: chartType,
         data: { labels, datasets },
@@ -724,11 +761,6 @@ function renderCompareChart(data) {
     const canvas = document.getElementById("chartCompare");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartCompareInstance) {
-        chartCompareInstance.destroy();
-        chartCompareInstance = null;
-    }
-
     const colors = getChartThemeColors();
     const titleEl = document.getElementById("compareChartTitle");
     const subEl = document.getElementById("compareChartSubtitle");
@@ -739,6 +771,10 @@ function renderCompareChart(data) {
 
         const topStreamers = (data.streamers_ranking || []).slice(0, 10);
         if (topStreamers.length === 0) {
+            if (chartCompareInstance) {
+                chartCompareInstance.destroy();
+                chartCompareInstance = null;
+            }
             setChartEmptyState("chartCompare", "Keine Streamer-Daten vorhanden.");
             return;
         }
@@ -747,6 +783,18 @@ function renderCompareChart(data) {
         const labels = topStreamers.map(s => `@${s.username}`);
         const coinsData = topStreamers.map(s => s.total_coins);
         const eurData = topStreamers.map(s => s.eur_net);
+
+        if (chartCompareInstance && chartCompareInstance.options.indexAxis === "y") {
+            chartCompareInstance.data.labels = labels;
+            chartCompareInstance.data.datasets[0].data = coinsData;
+            chartCompareInstance.update("none");
+            return;
+        }
+
+        if (chartCompareInstance) {
+            chartCompareInstance.destroy();
+            chartCompareInstance = null;
+        }
 
         chartCompareInstance = new Chart(canvas, {
             type: "bar",
@@ -794,6 +842,10 @@ function renderCompareChart(data) {
 
         const sess = (data.sessions || []).slice(0, 10).reverse();
         if (sess.length === 0) {
+            if (chartCompareInstance) {
+                chartCompareInstance.destroy();
+                chartCompareInstance = null;
+            }
             setChartEmptyState("chartCompare", "Keine aufgezeichneten Sessions für diesen Streamer.");
             return;
         }
@@ -802,6 +854,19 @@ function renderCompareChart(data) {
         const labels = sess.map(s => `#${s.id} (${(s.started_at || "").slice(5, 10)})`);
         const coinsData = sess.map(s => s.session_coins);
         const viewersData = sess.map(s => s.peak_viewers);
+
+        if (chartCompareInstance && chartCompareInstance.options.indexAxis !== "y" && chartCompareInstance.data.datasets.length === 2) {
+            chartCompareInstance.data.labels = labels;
+            chartCompareInstance.data.datasets[0].data = coinsData;
+            chartCompareInstance.data.datasets[1].data = viewersData;
+            chartCompareInstance.update("none");
+            return;
+        }
+
+        if (chartCompareInstance) {
+            chartCompareInstance.destroy();
+            chartCompareInstance = null;
+        }
 
         chartCompareInstance = new Chart(canvas, {
             type: "bar",
@@ -866,11 +931,6 @@ function renderTimeOfDayChart(data) {
     const canvas = document.getElementById("chartTimeOfDay");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartTimeOfDayInstance) {
-        chartTimeOfDayInstance.destroy();
-        chartTimeOfDayInstance = null;
-    }
-
     const tod = data.time_of_day || [];
     clearChartEmptyState("chartTimeOfDay");
 
@@ -884,6 +944,14 @@ function renderTimeOfDayChart(data) {
         if (c === maxCoins && c > 0) return colors.accentGold;
         return colors.accentPurple + "bb";
     });
+
+    if (chartTimeOfDayInstance) {
+        chartTimeOfDayInstance.data.labels = labels;
+        chartTimeOfDayInstance.data.datasets[0].data = coinsData;
+        chartTimeOfDayInstance.data.datasets[0].backgroundColor = bgColors;
+        chartTimeOfDayInstance.update("none");
+        return;
+    }
 
     chartTimeOfDayInstance = new Chart(canvas, {
         type: "bar",
@@ -935,13 +1003,12 @@ function renderGiftDistChart(data) {
     const canvas = document.getElementById("chartGiftDist");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartGiftDistInstance) {
-        chartGiftDistInstance.destroy();
-        chartGiftDistInstance = null;
-    }
-
     const gifts = data.top_gifts || [];
     if (gifts.length === 0) {
+        if (chartGiftDistInstance) {
+            chartGiftDistInstance.destroy();
+            chartGiftDistInstance = null;
+        }
         setChartEmptyState("chartGiftDist", "Keine Geschenke im gewählten Zeitraum aufgezeichnet.");
         return;
     }
@@ -959,6 +1026,14 @@ function renderGiftDistChart(data) {
         labels.push("Andere Geschenke");
         values.push(otherCoins);
         bgColors.push(colors.mutedColor);
+    }
+
+    if (chartGiftDistInstance) {
+        chartGiftDistInstance.data.labels = labels;
+        chartGiftDistInstance.data.datasets[0].data = values;
+        chartGiftDistInstance.data.datasets[0].backgroundColor = bgColors;
+        chartGiftDistInstance.update("none");
+        return;
     }
 
     chartGiftDistInstance = new Chart(canvas, {
@@ -1004,13 +1079,12 @@ function renderTopGiftersChart(data) {
     const canvas = document.getElementById("chartTopGifters");
     if (!canvas || typeof Chart === "undefined") return;
 
-    if (chartTopGiftersInstance) {
-        chartTopGiftersInstance.destroy();
-        chartTopGiftersInstance = null;
-    }
-
     const gifters = (data.top_gifters || []).slice(0, 10);
     if (gifters.length === 0) {
+        if (chartTopGiftersInstance) {
+            chartTopGiftersInstance.destroy();
+            chartTopGiftersInstance = null;
+        }
         setChartEmptyState("chartTopGifters", "Keine Spenderdaten im gewählten Zeitraum vorhanden.");
         return;
     }
@@ -1020,6 +1094,13 @@ function renderTopGiftersChart(data) {
     const labels = gifters.map(g => `@${g.sender_username}`);
     const coinsData = gifters.map(g => g.total_coins);
     const eurData = gifters.map(g => g.eur_net);
+
+    if (chartTopGiftersInstance) {
+        chartTopGiftersInstance.data.labels = labels;
+        chartTopGiftersInstance.data.datasets[0].data = coinsData;
+        chartTopGiftersInstance.update("none");
+        return;
+    }
 
     chartTopGiftersInstance = new Chart(canvas, {
         type: "bar",
@@ -1182,8 +1263,15 @@ async function loadAnalytics(isBackground = false) {
         const data = await res.json();
         cachedAnalyticsData = data;
 
-        // KPI updates
         const t = data.totals || {};
+        const fingerprint = `${t.total_coins}_${t.gift_events_count}_${t.sessions_count}_${(data.timeline || []).length}_${(data.top_gifters || []).length}_${analyticsPeriod}_${analyticsStreamerId}_${analyticsTimelineMode}`;
+        if (isBackground && lastAnalyticsFingerprint === fingerprint) {
+            updateAnalyticsTimestamp();
+            return;
+        }
+        lastAnalyticsFingerprint = fingerprint;
+
+        // KPI updates
         const setText = (id, val) => {
             const el = document.getElementById(id);
             if (el) el.textContent = val;
@@ -1226,6 +1314,8 @@ async function loadAnalytics(isBackground = false) {
         try { renderGiftDistChart(data); } catch (e) { console.error("Fehler renderGiftDistChart:", e); }
         try { renderTopGiftersChart(data); } catch (e) { console.error("Fehler renderTopGiftersChart:", e); }
         try { renderAnalyticsTables(data); } catch (e) { console.error("Fehler renderAnalyticsTables:", e); }
+
+        updateAnalyticsTimestamp();
     } catch (e) {
         console.error("Fehler beim Laden der Analytics:", e);
     }
@@ -2512,9 +2602,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadOverview();
     setInterval(() => {
         loadOverview();
-        if (document.getElementById("tab-analytics")?.classList.contains("active")) {
-            loadAnalytics(true);
-        } else if (document.getElementById("tab-battles")?.classList.contains("active")) {
+        if (document.getElementById("tab-battles")?.classList.contains("active")) {
             loadBattles(true);
             loadBattleStats();
         }
@@ -2527,21 +2615,46 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("selectAnalyticsStreamer")?.addEventListener("change", (e) => {
         analyticsStreamerId = e.target.value;
+        lastAnalyticsFingerprint = null;
         loadAnalytics();
     });
 
     document.getElementById("selectAnalyticsPeriod")?.addEventListener("change", (e) => {
         analyticsPeriod = e.target.value;
+        lastAnalyticsFingerprint = null;
         loadAnalytics();
     });
 
     document.getElementById("btnRefreshAnalytics")?.addEventListener("click", () => {
+        lastAnalyticsFingerprint = null;
         loadAnalytics();
     });
 
     document.getElementById("btnTimelineToggleMetric")?.addEventListener("click", () => {
+        lastAnalyticsFingerprint = null;
         toggleTimelineMetric();
     });
+
+    // Auto-Refresh (30s) Steuerung
+    const chkAutoRefresh = document.getElementById("chkAnalyticsAutoRefresh");
+    if (chkAutoRefresh) {
+        chkAutoRefresh.addEventListener("change", () => {
+            if (chkAutoRefresh.checked) {
+                if (analyticsAutoRefreshTimer) clearInterval(analyticsAutoRefreshTimer);
+                analyticsAutoRefreshTimer = setInterval(() => {
+                    if (document.getElementById("tab-analytics")?.classList.contains("active") && chkAutoRefresh.checked) {
+                        loadAnalytics(true);
+                    }
+                }, 30000);
+                loadAnalytics(true);
+            } else {
+                if (analyticsAutoRefreshTimer) {
+                    clearInterval(analyticsAutoRefreshTimer);
+                    analyticsAutoRefreshTimer = null;
+                }
+            }
+        });
+    }
 
     document.getElementById("btnRefresh").addEventListener("click", loadOverview);
 
