@@ -36,6 +36,8 @@
     let analyticsMetric = "both";
     let analyticsChartType = "line";
     let cachedAnalyticsData = null;
+    let analyticsLoadedOnce = false;
+    let lastAnalyticsFingerprint = null;
 
     // Chart.js Instances
     let chartTimelineInstance = null;
@@ -373,7 +375,9 @@
 
         // Update active tab data if needed
         if (activeTab === "tab-analytics") {
-            fetchAnalyticsData();
+            if (analyticsLoadedOnce) {
+                fetchAnalyticsData(true);
+            }
         } else if (activeTab === "tab-admin" && isAdmin) {
             renderAdminStreamers(streamers);
         }
@@ -614,7 +618,16 @@
     // =====================================================================
     // 4. PUBLIC ANALYTICS & CHARTS
     // =====================================================================
-    async function fetchAnalyticsData() {
+    function updateAnalyticsTimestamp() {
+        const el = document.getElementById("maAnalyticsTimestamp");
+        if (el) {
+            const d = new Date();
+            const timeStr = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            el.textContent = `Stand: ${timeStr}`;
+        }
+    }
+
+    async function fetchAnalyticsData(isBackground = false) {
         try {
             const sid = selectedAnalyticsStreamer !== "all" ? `&streamer_id=${encodeURIComponent(selectedAnalyticsStreamer)}` : "";
             const res = await fetch(`/api/miniapp/analytics?period=${encodeURIComponent(currentPeriod)}${sid}`, {
@@ -622,22 +635,30 @@
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            renderAnalytics(data);
+            renderAnalytics(data, isBackground);
         } catch (err) {
             console.error("Analytics Fetch Fehler:", err);
         }
     }
 
-    function renderAnalytics(data) {
+    function renderAnalytics(data, isBackground = false) {
         if (typeof Chart === "undefined") {
             console.warn("Chart.js noch nicht geladen");
             return;
         }
 
+        const totals = data.totals || {};
+        const fingerprint = `${totals.total_coins}_${totals.gift_events_count}_${totals.unique_gifters}_${(data.timeline || []).length}_${currentPeriod}_${selectedAnalyticsStreamer}_${analyticsMetric}_${analyticsChartType}`;
+        if (isBackground && lastAnalyticsFingerprint === fingerprint) {
+            updateAnalyticsTimestamp();
+            return;
+        }
+        lastAnalyticsFingerprint = fingerprint;
+
         cachedAnalyticsData = data;
+        updateAnalyticsTimestamp();
 
         // 1. Render Mini KPIs (4-Card 2x2 Grid)
-        const totals = data.totals || {};
         if (elements.kpiUniqueGifters) elements.kpiUniqueGifters.textContent = formatNumber(totals.unique_gifters || 0);
         if (elements.kpiAvgPerGifter) elements.kpiAvgPerGifter.textContent = `Ø ${formatCurrency(totals.avg_eur_per_gifter)} / Spender`;
         if (elements.kpiAvgCoinsGift) elements.kpiAvgCoinsGift.textContent = `${formatNumber(totals.avg_coins_per_gift)} Coins`;
@@ -726,11 +747,6 @@
         if (!elements.chartTimeline || !cachedAnalyticsData) return;
         const ctx = elements.chartTimeline.getContext("2d");
 
-        if (chartTimelineInstance) {
-            chartTimelineInstance.destroy();
-            chartTimelineInstance = null;
-        }
-
         const data = cachedAnalyticsData;
         const timeline = data.timeline || [];
         const isSingleStreamer = Boolean(data.selected_streamer);
@@ -747,6 +763,10 @@
         }
 
         if (timeline.length === 0) {
+            if (chartTimelineInstance) {
+                chartTimelineInstance.destroy();
+                chartTimelineInstance = null;
+            }
             if (elements.timelineTitle) elements.timelineTitle.textContent = "Keine Daten im Zeitfenster";
             if (elements.timelineSub) elements.timelineSub.textContent = "Im gewählten Zeitraum wurden keine Geschenke verzeichnet.";
             if (elements.statPeak) elements.statPeak.textContent = "-";
@@ -1071,6 +1091,20 @@
             updateChartStats(eurVals, labels, v => formatCurrency(v, "EUR"));
         }
 
+        if (chartTimelineInstance && chartTimelineInstance.config.type === baseType) {
+            chartTimelineInstance.data.labels = labels;
+            chartTimelineInstance.data.datasets = datasets;
+            chartTimelineInstance.options.scales = scales;
+            chartTimelineInstance.options.plugins.legend.display = datasets.length > 1;
+            chartTimelineInstance.update("none");
+            return;
+        }
+
+        if (chartTimelineInstance) {
+            chartTimelineInstance.destroy();
+            chartTimelineInstance = null;
+        }
+
         chartTimelineInstance = new Chart(ctx, {
             type: baseType,
             data: {
@@ -1106,21 +1140,31 @@
         if (!elements.chartStreamerCompare) return;
         const ctx = elements.chartStreamerCompare.getContext("2d");
 
-        if (chartStreamerCompareInstance) {
-            chartStreamerCompareInstance.destroy();
-            chartStreamerCompareInstance = null;
+        if (!ranking || ranking.length === 0) {
+            if (chartStreamerCompareInstance) {
+                chartStreamerCompareInstance.destroy();
+                chartStreamerCompareInstance = null;
+            }
+            return;
         }
-
-        if (!ranking || ranking.length === 0) return;
         const top = ranking.slice(0, 6);
+        const labels = top.map(s => s.display_name || s.username);
+        const dataVals = top.map(s => s.eur_net || 0);
+
+        if (chartStreamerCompareInstance) {
+            chartStreamerCompareInstance.data.labels = labels;
+            chartStreamerCompareInstance.data.datasets[0].data = dataVals;
+            chartStreamerCompareInstance.update("none");
+            return;
+        }
 
         chartStreamerCompareInstance = new Chart(ctx, {
             type: "bar",
             data: {
-                labels: top.map(s => s.display_name || s.username),
+                labels: labels,
                 datasets: [{
                     label: "Netto EUR (€)",
-                    data: top.map(s => s.eur_net || 0),
+                    data: dataVals,
                     backgroundColor: [
                         "#38bdf8", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#64748b"
                     ],
@@ -1183,11 +1227,11 @@
         if (!elements.chartGiftDist) return;
         const ctx = elements.chartGiftDist.getContext("2d");
 
-        if (chartGiftDistInstance) {
-            chartGiftDistInstance.destroy();
-        }
-
         if (!topGifts || topGifts.length === 0) {
+            if (chartGiftDistInstance) {
+                chartGiftDistInstance.destroy();
+                chartGiftDistInstance = null;
+            }
             if (elements.topGiftsList) elements.topGiftsList.innerHTML = '<div class="ma-empty-state">Keine Geschenke.</div>';
             return;
         }
@@ -1196,27 +1240,33 @@
         const dataVals = topGifts.slice(0, 6).map(g => g.total_coins);
         const palette = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#39c5cf"];
 
-        chartGiftDistInstance = new Chart(ctx, {
-            type: "doughnut",
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: dataVals,
-                    backgroundColor: palette,
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: "right",
-                        labels: { color: "#8b949e", font: { family: "monospace", size: 10 } }
+        if (chartGiftDistInstance) {
+            chartGiftDistInstance.data.labels = labels;
+            chartGiftDistInstance.data.datasets[0].data = dataVals;
+            chartGiftDistInstance.update("none");
+        } else {
+            chartGiftDistInstance = new Chart(ctx, {
+                type: "doughnut",
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: dataVals,
+                        backgroundColor: palette,
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: "right",
+                            labels: { color: "#8b949e", font: { family: "monospace", size: 10 } }
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
 
         if (elements.topGiftsList) {
             let listHtml = "";
@@ -1236,10 +1286,6 @@
         if (!elements.chartTimeOfDay) return;
         const ctx = elements.chartTimeOfDay.getContext("2d");
 
-        if (chartTimeOfDayInstance) {
-            chartTimeOfDayInstance.destroy();
-        }
-
         const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
         const values = new Array(24).fill(0);
 
@@ -1250,6 +1296,13 @@
                     values[hour] = item.coins || item.total_coins || 0;
                 }
             });
+        }
+
+        if (chartTimeOfDayInstance) {
+            chartTimeOfDayInstance.data.labels = labels;
+            chartTimeOfDayInstance.data.datasets[0].data = values;
+            chartTimeOfDayInstance.update("none");
+            return;
         }
 
         chartTimeOfDayInstance = new Chart(ctx, {
@@ -1733,6 +1786,7 @@
             currentPeriod = period;
             elements.periodPills.forEach(p => p.classList.remove("active"));
             pill.classList.add("active");
+            lastAnalyticsFingerprint = null;
             fetchMiniAppData();
             if (activeTab === "tab-analytics") {
                 fetchAnalyticsData();
@@ -1760,7 +1814,14 @@
             });
 
             if (targetTab === "tab-analytics") {
-                fetchAnalyticsData();
+                if (!analyticsLoadedOnce) {
+                    analyticsLoadedOnce = true;
+                    setTimeout(() => {
+                        fetchAnalyticsData();
+                    }, 50);
+                } else {
+                    fetchAnalyticsData();
+                }
             } else if (targetTab === "tab-admin") {
                 updateAdminUI();
             }
@@ -1772,6 +1833,7 @@
         elements.analyticsStreamerSelect.addEventListener("change", () => {
             selectedAnalyticsStreamer = elements.analyticsStreamerSelect.value;
             triggerHaptic("light");
+            lastAnalyticsFingerprint = null;
             fetchAnalyticsData();
         });
     }
@@ -1849,6 +1911,7 @@
     if (elements.btnRefresh) {
         elements.btnRefresh.addEventListener("click", () => {
             triggerHaptic("light");
+            lastAnalyticsFingerprint = null;
             fetchMiniAppData();
             if (activeTab === "tab-analytics") fetchAnalyticsData();
             if (activeTab === "tab-admin" && isAdmin) loadAdminData();
