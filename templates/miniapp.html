@@ -81,27 +81,9 @@
     </div>
 
     <!-- ============================================================== -->
-    <!-- TAB 1: BATTLES & LIVE MATCHES                                  -->
+    <!-- TAB 1: STREAMER ÜBERSICHT                                      -->
     <!-- ============================================================== -->
-    <section class="ma-tab-view active" id="tab-matches">
-        <!-- Live Active Battles Area -->
-        <div id="maLiveBattlesContainer"></div>
-
-        <div class="section-head">
-            <div class="section-title">⚔️ Match-Historie (1v1, 2v2, 3er &amp; 4er)</div>
-        </div>
-        <div id="maRecentBattlesContainer">
-            <div class="ma-empty-state">
-                <div class="ma-empty-icon">⏳</div>
-                <div>Lade Matches &amp; Duelle...</div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ============================================================== -->
-    <!-- TAB 2: STREAMER ÜBERSICHT                                      -->
-    <!-- ============================================================== -->
-    <section class="ma-tab-view" id="tab-streamers">
+    <section class="ma-tab-view active" id="tab-streamers">
         <div class="section-head">
             <div class="section-title">👥 Streamer Monitor &amp; Ranking</div>
         </div>
@@ -383,18 +365,7 @@
 <!-- BOTTOM NAVIGATION BAR (5 TABS)                                 -->
 <!-- ============================================================== -->
 <nav class="ma-bottom-nav">
-    <button type="button" class="nav-tab-btn active" data-tab="tab-matches">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M14.5 17.5L3 6V3h3l11.5 11.5"/>
-            <path d="M13 19l6-6"/>
-            <path d="M16 16l4 4"/>
-            <path d="M19 21l2-2"/>
-            <path d="M9.5 6.5L18 15"/>
-        </svg>
-        <span>Matches</span>
-    </button>
-
-    <button type="button" class="nav-tab-btn" data-tab="tab-streamers">
+    <button type="button" class="nav-tab-btn active" data-tab="tab-streamers">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
             <circle cx="9" cy="7" r="4"/>
@@ -573,6 +544,6 @@
 <!-- Toast Container -->
 <div class="ma-toast-container" id="maToastContainer"></div>
 
-<script src="/static/miniapp.js?v=2.2.2"></script>
+<script src="/static/miniapp.js?v=2.3.0"></script>
 </body>
 </html>

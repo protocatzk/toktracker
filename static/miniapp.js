@@ -25,7 +25,7 @@
 
     // State
     let currentPeriod = "24h";
-    let activeTab = "tab-matches";
+    let activeTab = "tab-streamers";
     let pollInterval = null;
     let isFetching = false;
     let isAdmin = false;
@@ -354,10 +354,7 @@
 
         // 2. Live Banner Status
         if (elements.liveBanner && elements.liveBannerText) {
-            if (liveBattles.length > 0) {
-                elements.liveBanner.className = "ma-live-banner";
-                elements.liveBannerText.textContent = `⚡ JETZT: ${liveBattles.length} Battle(s) LIVE im Gange!`;
-            } else if (liveCount > 0) {
+            if (liveCount > 0) {
                 elements.liveBanner.className = "ma-live-banner";
                 elements.liveBannerText.textContent = `🟢 ${liveCount} Streamer aktiv LIVE auf Sendung`;
             } else {
