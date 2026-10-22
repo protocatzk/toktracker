@@ -118,20 +118,119 @@
     <!-- ============================================================== -->
     <section class="ma-tab-view" id="tab-analytics">
         <div class="section-head">
-            <div class="section-title">📊 Einnahmen &amp; Coin-Verlauf</div>
+            <div class="section-title">📊 Analytics &amp; Deep-Dive</div>
             <select id="maAnalyticsStreamerSelect" class="ma-select-mini">
                 <option value="all">Alle Streamer</option>
             </select>
         </div>
 
-        <!-- Timeline Chart Card -->
+        <!-- Analytics Mini-KPI Grid (4 Cards 2x2 on Mobile) -->
+        <div class="ma-analytics-kpi-row">
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">👤 Eindeutige Spender</div>
+                <div class="ma-mini-kpi-val" id="maKpiUniqueGifters">0</div>
+                <div class="ma-mini-kpi-sub" id="maKpiAvgPerGifter">Ø 0,00 € / Spender</div>
+            </div>
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">💎 Ø Coins / Gift</div>
+                <div class="ma-mini-kpi-val" id="maKpiAvgCoinsGift">0</div>
+                <div class="ma-mini-kpi-sub" id="maKpiWhaleShare">Top 5: 0% Anteil</div>
+            </div>
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">🛍️ Brutto Kaufwert</div>
+                <div class="ma-mini-kpi-val" id="maKpiGrossRevenue">0,00 €</div>
+                <div class="ma-mini-kpi-sub" id="maKpiNetQuote">Netto-Quote: 0%</div>
+            </div>
+            <div class="ma-mini-kpi-card">
+                <div class="ma-mini-kpi-label">⚡ Transaktionen</div>
+                <div class="ma-mini-kpi-val" id="maKpiTotalEvents">0</div>
+                <div class="ma-mini-kpi-sub" id="maKpiCadence">0 Geschenke gesamt</div>
+            </div>
+        </div>
+
+        <!-- Timeline Chart Card with Multi-Metric Selector -->
         <div class="ma-card ma-chart-card">
             <div class="chart-header-row">
-                <span class="chart-title" id="maTimelineTitle">Einnahmen-Verlauf</span>
-                <span class="chart-subtitle" id="maTimelineSub">Entwicklung über Zeit</span>
+                <div style="flex: 1; min-width: 0; padding-right: 8px;">
+                    <div class="chart-title" id="maTimelineTitle">Einnahmen- &amp; Metrik-Verlauf</div>
+                    <div class="chart-subtitle" id="maTimelineSub">Dynamische Analyse über Zeit</div>
+                </div>
+                <div class="chart-type-toggle">
+                    <button type="button" class="ma-chart-type-btn active" id="maBtnChartLine" title="Linien-Diagramm">📈</button>
+                    <button type="button" class="ma-chart-type-btn" id="maBtnChartBar" title="Balken-Diagramm">📊</button>
+                    <button type="button" class="ma-chart-type-btn" id="maBtnChartArea" title="Flächen-Diagramm">🌊</button>
+                </div>
             </div>
-            <div class="ma-chart-wrap" style="height: 220px;">
+
+            <!-- Categorized Dropdown Selector -->
+            <div class="ma-metric-dropdown-wrap">
+                <select id="maTimelineMetricSelect" class="ma-metric-dropdown">
+                    <optgroup label="💰 Finanzen &amp; Umsatz">
+                        <option value="both" selected>💰 Kombi: Coins &amp; Netto EUR (Dual-Achse)</option>
+                        <option value="eur">💶 Netto Creator-Auszahlung (€ EUR)</option>
+                        <option value="usd">💵 Netto Creator-Auszahlung ($ USD)</option>
+                        <option value="gross">🛍️ Brutto Zuschauer-Kaufwert (€ EUR)</option>
+                        <option value="gross_usd">🏷️ Brutto Zuschauer-Kaufwert ($ USD)</option>
+                        <option value="cumulative_eur">📈 Kumulativ Netto-Erlös (€ Aufsummiert)</option>
+                        <option value="cumulative_coins">📊 Kumulativ Coins (💎 Aufsummiert)</option>
+                    </optgroup>
+                    <optgroup label="💎 Volumen &amp; Frequenz">
+                        <option value="coins">💎 TikTok Diamanten &amp; Münzen</option>
+                        <option value="events">🎁 Gift-Events (Transaktionsanzahl)</option>
+                        <option value="gifters">👤 Aktive Spender (Unique Gifters)</option>
+                        <option value="multi">👥 Top-Streamer Vergleich (Coins über Zeit)</option>
+                    </optgroup>
+                    <optgroup label="🎯 Durchschnitte &amp; Intensität">
+                        <option value="avg_gifter">🎯 Ø Erlös pro Spender (€ / Gifter)</option>
+                        <option value="avg_gift">⚡ Ø Münzen pro Geschenk (Coins / Gift)</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <!-- Horizontal Fast-Filter Pills (Thumb Scroll on Mobile) -->
+            <div class="ma-metric-selector" id="maMetricSelector">
+                <button type="button" class="ma-metric-pill active" data-metric="both">💰 Kombi</button>
+                <button type="button" class="ma-metric-pill" data-metric="eur">💶 Netto EUR</button>
+                <button type="button" class="ma-metric-pill" data-metric="usd">💵 Netto USD</button>
+                <button type="button" class="ma-metric-pill" data-metric="gross">🛍️ Brutto EUR</button>
+                <button type="button" class="ma-metric-pill" data-metric="coins">💎 Coins</button>
+                <button type="button" class="ma-metric-pill" data-metric="cumulative_eur">📈 Kumulativ</button>
+                <button type="button" class="ma-metric-pill" data-metric="multi">👥 Streamer</button>
+                <button type="button" class="ma-metric-pill" data-metric="events">🎁 Events</button>
+                <button type="button" class="ma-metric-pill" data-metric="gifters">👤 Spender</button>
+                <button type="button" class="ma-metric-pill" data-metric="avg_gifter">🎯 Ø/Spender</button>
+                <button type="button" class="ma-metric-pill" data-metric="avg_gift">⚡ Ø/Gift</button>
+            </div>
+
+            <!-- Chart Canvas -->
+            <div class="ma-chart-wrap" style="height: 235px;">
                 <canvas id="maChartTimeline"></canvas>
+            </div>
+
+            <!-- Live Key Stats Strip -->
+            <div class="ma-chart-stats-strip" id="maChartStatsStrip">
+                <div class="ma-chart-stat-item">
+                    <span class="ma-stat-label">🔝 Peak</span>
+                    <strong class="ma-stat-val" id="maStatPeak">-</strong>
+                </div>
+                <div class="ma-chart-stat-item">
+                    <span class="ma-stat-label">📊 Ø Intervall</span>
+                    <strong class="ma-stat-val" id="maStatAvg">-</strong>
+                </div>
+                <div class="ma-chart-stat-item">
+                    <span class="ma-stat-label">➕ Summe</span>
+                    <strong class="ma-stat-val" id="maStatTotal">-</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Streamer Revenue Ranking Chart -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">👥 Streamer-Umsatzvergleich</div>
+        </div>
+        <div class="ma-card ma-chart-card">
+            <div class="ma-chart-wrap" style="height: 200px;">
+                <canvas id="maChartStreamerCompare"></canvas>
             </div>
         </div>
 

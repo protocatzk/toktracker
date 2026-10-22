@@ -33,9 +33,13 @@
     let sessionToken = localStorage.getItem("toktracker_admin_token") || "";
     let cachedStreamers = [];
     let selectedAnalyticsStreamer = "all";
+    let analyticsMetric = "both";
+    let analyticsChartType = "line";
+    let cachedAnalyticsData = null;
 
     // Chart.js Instances
     let chartTimelineInstance = null;
+    let chartStreamerCompareInstance = null;
     let chartGiftDistInstance = null;
     let chartTimeOfDayInstance = null;
 
@@ -64,7 +68,26 @@
 
         // Analytics Elements
         analyticsStreamerSelect: document.getElementById("maAnalyticsStreamerSelect"),
+        kpiUniqueGifters: document.getElementById("maKpiUniqueGifters"),
+        kpiAvgPerGifter: document.getElementById("maKpiAvgPerGifter"),
+        kpiAvgCoinsGift: document.getElementById("maKpiAvgCoinsGift"),
+        kpiWhaleShare: document.getElementById("maKpiWhaleShare"),
+        kpiGrossRevenue: document.getElementById("maKpiGrossRevenue"),
+        kpiNetQuote: document.getElementById("maKpiNetQuote"),
+        kpiTotalEvents: document.getElementById("maKpiTotalEvents"),
+        kpiCadence: document.getElementById("maKpiCadence"),
+        metricSelect: document.getElementById("maTimelineMetricSelect"),
+        metricPills: document.querySelectorAll(".ma-metric-pill"),
+        timelineTitle: document.getElementById("maTimelineTitle"),
+        timelineSub: document.getElementById("maTimelineSub"),
+        btnChartLine: document.getElementById("maBtnChartLine"),
+        btnChartBar: document.getElementById("maBtnChartBar"),
+        btnChartArea: document.getElementById("maBtnChartArea"),
+        statPeak: document.getElementById("maStatPeak"),
+        statAvg: document.getElementById("maStatAvg"),
+        statTotal: document.getElementById("maStatTotal"),
         chartTimeline: document.getElementById("maChartTimeline"),
+        chartStreamerCompare: document.getElementById("maChartStreamerCompare"),
         topGiftersContainer: document.getElementById("maTopGiftersContainer"),
         chartGiftDist: document.getElementById("maChartGiftDist"),
         topGiftsList: document.getElementById("maTopGiftsList"),
@@ -611,57 +634,448 @@
             return;
         }
 
-        // 1. Timeline Chart
-        renderTimelineChart(data.timeline || []);
+        cachedAnalyticsData = data;
 
-        // 2. Top Gifters Leaderboard
+        // 1. Render Mini KPIs (4-Card 2x2 Grid)
+        const totals = data.totals || {};
+        if (elements.kpiUniqueGifters) elements.kpiUniqueGifters.textContent = formatNumber(totals.unique_gifters || 0);
+        if (elements.kpiAvgPerGifter) elements.kpiAvgPerGifter.textContent = `Ø ${formatCurrency(totals.avg_eur_per_gifter)} / Spender`;
+        if (elements.kpiAvgCoinsGift) elements.kpiAvgCoinsGift.textContent = `${formatNumber(totals.avg_coins_per_gift)} Coins`;
+        if (elements.kpiWhaleShare) elements.kpiWhaleShare.textContent = `Top 5: ${totals.whale_share_top5_pct || 0}% Anteil`;
+        if (elements.kpiGrossRevenue) elements.kpiGrossRevenue.textContent = formatCurrency(totals.eur_gross || 0);
+        if (elements.kpiNetQuote) {
+            const netQuote = (totals.eur_gross && totals.eur_gross > 0)
+                ? (Math.round((totals.eur_net / totals.eur_gross) * 1000) / 10)
+                : 0;
+            elements.kpiNetQuote.textContent = `Netto-Quote: ${netQuote}%`;
+        }
+        if (elements.kpiTotalEvents) elements.kpiTotalEvents.textContent = formatNumber(totals.gift_events_count || 0);
+        if (elements.kpiCadence) elements.kpiCadence.textContent = `${formatNumber(totals.total_gifts_sent || 0)} Geschenke gesamt`;
+
+        // 2. Timeline Chart (Multi-Metric Deep-Dive)
+        renderTimelineChart();
+
+        // 3. Streamer Revenue Comparison
+        renderStreamerCompareChart(data.streamers_ranking || []);
+
+        // 4. Top Gifters Leaderboard
         renderTopGifters(data.top_gifters || []);
 
-        // 3. Top Gifts Distribution
+        // 5. Top Gifts Distribution
         renderGiftDistChart(data.top_gifts || []);
 
-        // 4. Time of Day Pattern
+        // 6. Time of Day Pattern
         renderTimeOfDayChart(data.time_of_day || []);
     }
 
-    function renderTimelineChart(timeline) {
-        if (!elements.chartTimeline) return;
+    function createChartGradient(ctx, hexColor) {
+        try {
+            const gradient = ctx.createLinearGradient(0, 0, 0, 240);
+            let r = 56, g = 189, b = 248;
+            if (hexColor && hexColor.startsWith("#") && hexColor.length === 7) {
+                r = parseInt(hexColor.slice(1, 3), 16);
+                g = parseInt(hexColor.slice(3, 5), 16);
+                b = parseInt(hexColor.slice(5, 7), 16);
+            }
+            gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.38)`);
+            gradient.addColorStop(0.7, `rgba(${r}, ${g}, ${b}, 0.08)`);
+            gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.0)`);
+            return gradient;
+        } catch (e) {
+            return "rgba(56, 189, 248, 0.15)";
+        }
+    }
+
+    function updateChartStats(dataArr, labels, formatFn, isCumulative = false) {
+        if (!elements.statPeak || !elements.statAvg || !elements.statTotal) return;
+        if (!dataArr || dataArr.length === 0) {
+            elements.statPeak.textContent = "-";
+            elements.statAvg.textContent = "-";
+            elements.statTotal.textContent = "-";
+            return;
+        }
+
+        let maxVal = -Infinity;
+        let maxIdx = 0;
+        let sum = 0;
+        for (let i = 0; i < dataArr.length; i++) {
+            const v = Number(dataArr[i]) || 0;
+            sum += v;
+            if (v > maxVal) {
+                maxVal = v;
+                maxIdx = i;
+            }
+        }
+        if (maxVal === -Infinity) maxVal = 0;
+        const avg = dataArr.length > 0 ? (sum / dataArr.length) : 0;
+        const peakLabel = (labels && labels[maxIdx]) ? ` (${labels[maxIdx]})` : "";
+
+        if (isCumulative) {
+            const endVal = dataArr[dataArr.length - 1] || 0;
+            elements.statPeak.textContent = `${formatFn(endVal)}${peakLabel}`;
+            elements.statAvg.textContent = `${formatFn(avg)} / Step`;
+            elements.statTotal.textContent = formatFn(endVal);
+        } else {
+            elements.statPeak.textContent = `${formatFn(maxVal)}${peakLabel}`;
+            elements.statAvg.textContent = formatFn(avg);
+            elements.statTotal.textContent = formatFn(sum);
+        }
+    }
+
+    function renderTimelineChart() {
+        if (!elements.chartTimeline || !cachedAnalyticsData) return;
         const ctx = elements.chartTimeline.getContext("2d");
 
         if (chartTimelineInstance) {
             chartTimelineInstance.destroy();
+            chartTimelineInstance = null;
+        }
+
+        const data = cachedAnalyticsData;
+        const timeline = data.timeline || [];
+        const isSingleStreamer = Boolean(data.selected_streamer);
+        const streamerName = isSingleStreamer ? (data.selected_streamer.display_name || data.selected_streamer.username) : "Alle Streamer";
+
+        // Sync dropdown & pills active state
+        if (elements.metricSelect && elements.metricSelect.value !== analyticsMetric) {
+            elements.metricSelect.value = analyticsMetric;
+        }
+        if (elements.metricPills) {
+            elements.metricPills.forEach(p => {
+                p.classList.toggle("active", p.getAttribute("data-metric") === analyticsMetric);
+            });
+        }
+
+        if (timeline.length === 0) {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = "Keine Daten im Zeitfenster";
+            if (elements.timelineSub) elements.timelineSub.textContent = "Im gewählten Zeitraum wurden keine Geschenke verzeichnet.";
+            if (elements.statPeak) elements.statPeak.textContent = "-";
+            if (elements.statAvg) elements.statAvg.textContent = "-";
+            if (elements.statTotal) elements.statTotal.textContent = "-";
+            return;
         }
 
         const labels = timeline.map(t => t.label || t.bucket);
-        const coinsData = timeline.map(t => t.coins || 0);
-        const eurData = timeline.map(t => t.eur_net || 0);
+        let chartType = analyticsChartType || "line";
+        let datasets = [];
+        let scales = {
+            x: {
+                grid: { color: "rgba(255, 255, 255, 0.05)" },
+                ticks: { color: "#8b949e", font: { family: "monospace", size: 9 }, maxTicksLimit: 7 }
+            },
+            y: {
+                position: "left",
+                grid: { color: "rgba(255, 255, 255, 0.05)" },
+                ticks: { color: "#8b949e", font: { family: "monospace", size: 9 } }
+            }
+        };
+
+        const isArea = chartType === "area";
+        const baseType = isArea ? "line" : chartType;
+
+        if (analyticsMetric === "multi" && !isSingleStreamer && data.multi_streamer_datasets && data.multi_streamer_datasets.length > 0) {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Top-Streamer Vergleich (Coins)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Chronologische Entwicklung der aktivsten Streamer`;
+            scales.y.ticks.color = "#38bdf8";
+            scales.y.ticks.callback = v => formatNumber(v);
+            const palette = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#39c5cf"];
+            datasets = data.multi_streamer_datasets.map((s, idx) => {
+                const col = palette[idx % palette.length];
+                return {
+                    label: `@${s.username}`,
+                    data: s.data,
+                    borderColor: col,
+                    backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                    borderWidth: 2,
+                    pointRadius: 2.5,
+                    tension: 0.35,
+                    fill: isArea,
+                };
+            });
+            // Total coins over time across timeline
+            const totalCoinsPerBucket = timeline.map(t => t.coins || 0);
+            updateChartStats(totalCoinsPerBucket, labels, v => `${formatNumber(v)} Coins`);
+        } else if (analyticsMetric === "eur") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Netto Creator-Auszahlung (€)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Netto-Erlöse in Euro · ${streamerName}`;
+            scales.y.ticks.color = "#10b981";
+            scales.y.ticks.callback = v => `€${formatNumber(v)}`;
+            const col = "#10b981";
+            const vals = timeline.map(t => t.eur_net || 0);
+            datasets = [{
+                type: baseType,
+                label: "Netto EUR",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => formatCurrency(v, "EUR"));
+        } else if (analyticsMetric === "usd") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Netto Creator-Auszahlung ($)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Netto-Erlöse in US-Dollar · ${streamerName}`;
+            scales.y.ticks.color = "#06b6d4";
+            scales.y.ticks.callback = v => `$${formatNumber(v)}`;
+            const col = "#06b6d4";
+            const vals = timeline.map(t => t.usd_net || 0);
+            datasets = [{
+                type: baseType,
+                label: "Netto USD",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => formatCurrency(v, "USD"));
+        } else if (analyticsMetric === "gross") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Brutto Zuschauer-Kaufwert (€)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Kaufwert aller TikTok-Münzen durch Zuschauer in EUR · ${streamerName}`;
+            scales.y.ticks.color = "#f59e0b";
+            scales.y.ticks.callback = v => `€${formatNumber(v)}`;
+            const col = "#f59e0b";
+            const vals = timeline.map(t => t.eur_gross || 0);
+            datasets = [{
+                type: baseType,
+                label: "Brutto EUR",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => formatCurrency(v, "EUR"));
+        } else if (analyticsMetric === "gross_usd") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Brutto Zuschauer-Kaufwert ($)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Kaufwert aller TikTok-Münzen durch Zuschauer in USD · ${streamerName}`;
+            scales.y.ticks.color = "#fbbf24";
+            scales.y.ticks.callback = v => `$${formatNumber(v)}`;
+            const col = "#fbbf24";
+            const vals = timeline.map(t => t.usd_gross || 0);
+            datasets = [{
+                type: baseType,
+                label: "Brutto USD",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => formatCurrency(v, "USD"));
+        } else if (analyticsMetric === "cumulative_eur") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Kumulierte Netto-Einnahmen (€)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Aufsummierte Gesamterlöse über die Zeit · ${streamerName}`;
+            scales.y.ticks.color = "#22c55e";
+            scales.y.ticks.callback = v => `€${formatNumber(v)}`;
+            const col = "#22c55e";
+            let runSum = 0;
+            const vals = timeline.map(t => {
+                runSum += (t.eur_net || 0);
+                return Math.round(runSum * 100) / 100;
+            });
+            datasets = [{
+                type: baseType,
+                label: "Kumulativ EUR",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2.5,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.25,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => formatCurrency(v, "EUR"), true);
+        } else if (analyticsMetric === "cumulative_coins") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Kumulierte TikTok-Münzen (💎)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Aufsummiertes Münzvolumen über die Zeit · ${streamerName}`;
+            scales.y.ticks.color = "#a855f7";
+            scales.y.ticks.callback = v => formatNumber(v);
+            const col = "#a855f7";
+            let runSum = 0;
+            const vals = timeline.map(t => {
+                runSum += (t.coins || 0);
+                return runSum;
+            });
+            datasets = [{
+                type: baseType,
+                label: "Kumulativ Coins",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2.5,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.25,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => `${formatNumber(v)} Coins`, true);
+        } else if (analyticsMetric === "coins") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `TikTok Diamanten & Münzen (💎)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Erhaltene TikTok-Münzen · ${streamerName}`;
+            scales.y.ticks.color = "#38bdf8";
+            scales.y.ticks.callback = v => formatNumber(v);
+            const col = "#38bdf8";
+            const vals = timeline.map(t => t.coins || 0);
+            datasets = [{
+                type: baseType,
+                label: "Coins",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => `${formatNumber(v)} Coins`);
+        } else if (analyticsMetric === "events") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Gift-Events & Transaktionen (🎁)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Anzahl Geschenk-Buchungen · ${streamerName}`;
+            scales.y.ticks.color = "#ec4899";
+            scales.y.ticks.callback = v => formatNumber(v);
+            const col = "#ec4899";
+            const vals = timeline.map(t => t.events_count || 0);
+            datasets = [{
+                type: baseType,
+                label: "Gift-Events",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => `${formatNumber(v)} Events`);
+        } else if (analyticsMetric === "gifters") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Aktive Spender (👤)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Eindeutige Gifter pro Zeitintervall · ${streamerName}`;
+            scales.y.ticks.color = "#8b5cf6";
+            scales.y.ticks.callback = v => formatNumber(v);
+            const col = "#8b5cf6";
+            const vals = timeline.map(t => t.unique_gifters || 0);
+            datasets = [{
+                type: baseType,
+                label: "Spender",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => `${formatNumber(v)} Spender`);
+        } else if (analyticsMetric === "avg_gifter") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Ø Netto-Wert pro Spender (€)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Durchschnittlicher Ertrag je Gifter · ${streamerName}`;
+            scales.y.ticks.color = "#eab308";
+            scales.y.ticks.callback = v => `€${v}`;
+            const col = "#eab308";
+            const vals = timeline.map(t => {
+                if (t.avg_eur_per_gifter !== undefined) return t.avg_eur_per_gifter;
+                return t.unique_gifters > 0 ? (Math.round((t.eur_net / t.unique_gifters) * 100) / 100) : 0;
+            });
+            datasets = [{
+                type: baseType,
+                label: "Ø € / Spender",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => formatCurrency(v, "EUR"));
+        } else if (analyticsMetric === "avg_gift") {
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Ø Münzen pro Geschenk (💎)`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Durchschnittliche Geschenkgröße · ${streamerName}`;
+            scales.y.ticks.color = "#14b8a6";
+            scales.y.ticks.callback = v => `${formatNumber(v)}`;
+            const col = "#14b8a6";
+            const vals = timeline.map(t => {
+                if (t.avg_coins_per_gift !== undefined) return t.avg_coins_per_gift;
+                return t.events_count > 0 ? (Math.round((t.coins / t.events_count) * 10) / 10) : 0;
+            });
+            datasets = [{
+                type: baseType,
+                label: "Ø Coins / Gift",
+                data: vals,
+                borderColor: col,
+                backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
+                borderWidth: 2,
+                borderRadius: baseType === "bar" ? 3 : 0,
+                fill: isArea,
+                tension: 0.35,
+                pointRadius: 2,
+            }];
+            updateChartStats(vals, labels, v => `${formatNumber(v)} Coins`);
+        } else {
+            // Mode "both" (default combo: Coins Bar + Netto EUR Line)
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Einnahmen- & Coin-Verlauf`;
+            if (elements.timelineSub) elements.timelineSub.textContent = `Balken: Coins (links) | Linie: Netto EUR (rechts) · ${streamerName}`;
+            scales.y.title = { display: true, text: "Coins", color: "#38bdf8", font: { family: "monospace", size: 9 } };
+            scales.y.ticks.color = "#38bdf8";
+            scales.y.ticks.callback = v => formatNumber(v);
+            scales.yEur = {
+                position: "right",
+                grid: { drawOnChartArea: false },
+                ticks: { color: "#10b981", font: { family: "monospace", size: 9 }, callback: v => `€${formatNumber(v)}` },
+                title: { display: true, text: "Netto EUR", color: "#10b981", font: { family: "monospace", size: 9 } }
+            };
+            const coinVals = timeline.map(t => t.coins || 0);
+            const eurVals = timeline.map(t => t.eur_net || 0);
+            datasets = [
+                {
+                    type: "bar",
+                    label: "Coins",
+                    data: coinVals,
+                    backgroundColor: "rgba(56, 189, 248, 0.65)",
+                    borderColor: "#38bdf8",
+                    borderWidth: 1,
+                    borderRadius: 2,
+                    yAxisID: "y",
+                },
+                {
+                    type: "line",
+                    label: "Netto EUR",
+                    data: eurVals,
+                    borderColor: "#10b981",
+                    backgroundColor: isArea ? createChartGradient(ctx, "#10b981") : "rgba(16, 185, 129, 0.1)",
+                    borderWidth: 2.2,
+                    pointRadius: 2.5,
+                    fill: isArea,
+                    tension: 0.35,
+                    yAxisID: "yEur",
+                }
+            ];
+            updateChartStats(eurVals, labels, v => formatCurrency(v, "EUR"));
+        }
 
         chartTimelineInstance = new Chart(ctx, {
-            type: "line",
+            type: baseType,
             data: {
                 labels: labels,
-                datasets: [
-                    {
-                        label: "Netto EUR (€)",
-                        data: eurData,
-                        borderColor: "#10b981",
-                        backgroundColor: "rgba(16, 185, 129, 0.15)",
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.3,
-                        yAxisID: "yEur",
-                    },
-                    {
-                        label: "Coins",
-                        data: coinsData,
-                        borderColor: "#38bdf8",
-                        backgroundColor: "transparent",
-                        borderWidth: 1.5,
-                        borderDash: [4, 4],
-                        tension: 0.3,
-                        yAxisID: "yCoins",
-                    }
-                ]
+                datasets: datasets
             },
             options: {
                 responsive: true,
@@ -669,23 +1083,65 @@
                 interaction: { mode: "index", intersect: false },
                 plugins: {
                     legend: {
+                        display: datasets.length > 1,
                         labels: { color: "#8b949e", font: { family: "monospace", size: 10 } }
+                    },
+                    tooltip: {
+                        backgroundColor: "#161b22",
+                        titleColor: "#c9d1d9",
+                        bodyColor: "#58a6ff",
+                        borderColor: "#30363d",
+                        borderWidth: 1,
+                        padding: 8,
+                        titleFont: { family: "monospace", size: 11 },
+                        bodyFont: { family: "monospace", size: 11 },
                     }
+                },
+                scales: scales
+            }
+        });
+    }
+
+    function renderStreamerCompareChart(ranking) {
+        if (!elements.chartStreamerCompare) return;
+        const ctx = elements.chartStreamerCompare.getContext("2d");
+
+        if (chartStreamerCompareInstance) {
+            chartStreamerCompareInstance.destroy();
+            chartStreamerCompareInstance = null;
+        }
+
+        if (!ranking || ranking.length === 0) return;
+        const top = ranking.slice(0, 6);
+
+        chartStreamerCompareInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: top.map(s => s.display_name || s.username),
+                datasets: [{
+                    label: "Netto EUR (€)",
+                    data: top.map(s => s.eur_net || 0),
+                    backgroundColor: [
+                        "#38bdf8", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#64748b"
+                    ],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: "y",
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
                 },
                 scales: {
                     x: {
                         grid: { color: "rgba(255, 255, 255, 0.05)" },
-                        ticks: { color: "#8b949e", font: { family: "monospace", size: 9 }, maxTicksLimit: 6 }
+                        ticks: { color: "#8b949e", font: { family: "monospace", size: 9 }, callback: v => `€${v}` }
                     },
-                    yEur: {
-                        position: "left",
-                        grid: { color: "rgba(255, 255, 255, 0.05)" },
-                        ticks: { color: "#10b981", font: { family: "monospace", size: 9 }, callback: v => `€${v}` }
-                    },
-                    yCoins: {
-                        position: "right",
-                        grid: { drawOnChartArea: false },
-                        ticks: { color: "#38bdf8", font: { family: "monospace", size: 9 } }
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: "#e6edf3", font: { family: "monospace", size: 10 } }
                     }
                 }
             }
@@ -1317,6 +1773,75 @@
             selectedAnalyticsStreamer = elements.analyticsStreamerSelect.value;
             triggerHaptic("light");
             fetchAnalyticsData();
+        });
+    }
+
+    // Analytics Metric Dropdown
+    if (elements.metricSelect) {
+        elements.metricSelect.addEventListener("change", () => {
+            const metric = elements.metricSelect.value;
+            if (metric === analyticsMetric) return;
+            triggerHaptic("light");
+            analyticsMetric = metric;
+            if (elements.metricPills) {
+                elements.metricPills.forEach(p => {
+                    p.classList.toggle("active", p.getAttribute("data-metric") === metric);
+                });
+            }
+            if (cachedAnalyticsData) renderTimelineChart();
+        });
+    }
+
+    // Analytics Metric Selector Pills
+    if (elements.metricPills) {
+        elements.metricPills.forEach(pill => {
+            pill.addEventListener("click", () => {
+                const metric = pill.getAttribute("data-metric");
+                if (metric === analyticsMetric) return;
+                triggerHaptic("light");
+                analyticsMetric = metric;
+                elements.metricPills.forEach(p => p.classList.remove("active"));
+                pill.classList.add("active");
+                if (elements.metricSelect) {
+                    elements.metricSelect.value = metric;
+                }
+                if (cachedAnalyticsData) renderTimelineChart();
+            });
+        });
+    }
+
+    // Analytics Chart Type Toggle (Line, Bar, Area)
+    if (elements.btnChartLine) {
+        elements.btnChartLine.addEventListener("click", () => {
+            if (analyticsChartType === "line") return;
+            triggerHaptic("light");
+            analyticsChartType = "line";
+            elements.btnChartLine.classList.add("active");
+            if (elements.btnChartBar) elements.btnChartBar.classList.remove("active");
+            if (elements.btnChartArea) elements.btnChartArea.classList.remove("active");
+            if (cachedAnalyticsData) renderTimelineChart();
+        });
+    }
+    if (elements.btnChartBar) {
+        elements.btnChartBar.addEventListener("click", () => {
+            if (analyticsChartType === "bar") return;
+            triggerHaptic("light");
+            analyticsChartType = "bar";
+            elements.btnChartBar.classList.add("active");
+            if (elements.btnChartLine) elements.btnChartLine.classList.remove("active");
+            if (elements.btnChartArea) elements.btnChartArea.classList.remove("active");
+            if (cachedAnalyticsData) renderTimelineChart();
+        });
+    }
+    if (elements.btnChartArea) {
+        elements.btnChartArea.addEventListener("click", () => {
+            if (analyticsChartType === "area") return;
+            triggerHaptic("light");
+            analyticsChartType = "area";
+            elements.btnChartArea.classList.add("active");
+            if (elements.btnChartLine) elements.btnChartLine.classList.remove("active");
+            if (elements.btnChartBar) elements.btnChartBar.classList.remove("active");
+            if (cachedAnalyticsData) renderTimelineChart();
         });
     }
 

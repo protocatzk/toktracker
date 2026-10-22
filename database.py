@@ -1751,6 +1751,13 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
             c = int(tr["coins"] or 0)
             u_net = round(c * cfg["usd_per_diamond"], 2)
             e_net = round(u_net * cfg["usd_to_eur_rate"], 2)
+            u_gross = round(c * cfg["gross_usd_per_coin"], 2)
+            e_gross = round(u_gross * cfg["usd_to_eur_rate"], 2)
+            ev = int(tr["events_count"] or 0)
+            ug = int(tr["unique_gifters"] or 0)
+            avg_coins = round(c / ev, 1) if ev > 0 else 0.0
+            avg_eur = round(e_net / ug, 2) if ug > 0 else 0.0
+
             if is_hourly:
                 parts = b.replace("T", " ").split(" ")
                 time_part = f"{parts[1]}:00" if len(parts) > 1 else b
@@ -1763,8 +1770,13 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 "label": label,
                 "coins": c,
                 "eur_net": e_net,
-                "events_count": int(tr["events_count"] or 0),
-                "unique_gifters": int(tr["unique_gifters"] or 0),
+                "usd_net": u_net,
+                "eur_gross": e_gross,
+                "usd_gross": u_gross,
+                "events_count": ev,
+                "unique_gifters": ug,
+                "avg_coins_per_gift": avg_coins,
+                "avg_eur_per_gifter": avg_eur,
             })
 
         # 7. Streamer Ranking & Vergleich
