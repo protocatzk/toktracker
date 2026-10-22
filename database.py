@@ -32,6 +32,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
 }
 
 _db_init_lock = threading.Lock()
+_db_initialized: bool = False
 
 
 class DBRow(dict):
@@ -542,8 +543,11 @@ def _init_sqlite_schema() -> None:
         )
 
 
-def init_db() -> None:
+def init_db(force: bool = False) -> None:
+    global _db_initialized
     with _db_init_lock:
+        if _db_initialized and not force:
+            return
         if config.is_mysql:
             _init_mysql_schema()
         else:
@@ -593,6 +597,7 @@ def init_db() -> None:
                         """,
                         (tg_uname.lower(), now, now),
                     )
+        _db_initialized = True
 
 
 def get_settings() -> Dict[str, Any]:
@@ -1252,13 +1257,13 @@ def delete_streamer(streamer_id: int) -> bool:
 def _get_period_cutoff(period: str) -> Optional[str]:
     now = datetime.now()
     if period == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
+        return now.replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
     if period == "24h":
-        return (now - timedelta(hours=24)).isoformat(timespec="seconds")
+        return (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     if period == "7d":
-        return (now - timedelta(days=7)).isoformat(timespec="seconds")
+        return (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     if period == "30d":
-        return (now - timedelta(days=30)).isoformat(timespec="seconds")
+        return (now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
     return None
 
 

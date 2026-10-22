@@ -137,8 +137,10 @@
         const recentGifts = data.recent_gifts || [];
 
         // 1. Render KPIs
-        if (elements.kpiNetEur) elements.kpiNetEur.textContent = formatCurrency(totals.total_eur_net, "EUR");
-        if (elements.kpiNetUsd) elements.kpiNetUsd.textContent = `$${formatNumber(totals.total_usd_net)} USD`;
+        const netEur = totals.eur_net !== undefined ? totals.eur_net : (totals.total_eur_net || 0);
+        const netUsd = totals.usd_net !== undefined ? totals.usd_net : (totals.total_usd_net || 0);
+        if (elements.kpiNetEur) elements.kpiNetEur.textContent = formatCurrency(netEur, "EUR");
+        if (elements.kpiNetUsd) elements.kpiNetUsd.textContent = `$${formatNumber(netUsd)} USD`;
         if (elements.kpiCoins) elements.kpiCoins.textContent = formatNumber(totals.total_coins);
         if (elements.kpiGifts) elements.kpiGifts.textContent = formatNumber(totals.total_gifts_sent || totals.gift_events_count);
 

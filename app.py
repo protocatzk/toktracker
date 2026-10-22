@@ -454,6 +454,8 @@ async def api_miniapp_data(period: str = Query("today", description="today | 24h
     # 1. Dashboard-Übersicht & Einnahmen
     overview = get_dashboard_overview(period=period)
     totals = overview.get("totals", {})
+    totals["total_eur_net"] = totals.get("eur_net", 0.0)
+    totals["total_usd_net"] = totals.get("usd_net", 0.0)
     cfg = overview.get("settings", {})
 
     # 2. Streamer-Liste
