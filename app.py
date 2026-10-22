@@ -1,6 +1,9 @@
 import csv
+import hashlib
 import io
+import json
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +27,7 @@ from database import (
     get_dashboard_overview,
     get_db,
     get_settings,
+    get_site_analytics_overview,
     get_streamer_by_id_or_username,
     get_streamer_detail,
     get_telegram_access_mode,
@@ -31,7 +35,9 @@ from database import (
     inspect_sqlite_database,
     import_from_sqlite_database,
     list_telegram_users,
+    record_bot_session,
     record_gift_event,
+    record_page_view,
     seed_demo_data,
     update_settings,
     upsert_streamer,
@@ -126,6 +132,62 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 if os.path.isdir(os.path.join(BASE_DIR, "pictures")):
     app.mount("/pictures", StaticFiles(directory=os.path.join(BASE_DIR, "pictures")), name="pictures")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+
+def _extract_client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    x_real = request.headers.get("x-real-ip")
+    if x_real:
+        return x_real.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
+
+def _detect_device_type(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    if any(b in ua for b in ["bot", "spider", "crawler", "crawl", "slurp", "googlebot", "bingbot", "yandex"]):
+        return "bot"
+    if "ipad" in ua or "tablet" in ua:
+        return "tablet"
+    if any(m in ua for m in ["mobile", "android", "iphone", "ipod", "windows phone"]):
+        return "mobile"
+    return "desktop"
+
+
+@app.middleware("http")
+async def track_page_views_middleware(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start_time) * 1000.0
+
+    path = request.url.path
+    if request.method == "GET" and not path.startswith((
+        "/static", "/pictures", "/api", "/docs", "/openapi", "/redoc", "/favicon.ico"
+    )):
+        try:
+            client_ip = _extract_client_ip(request)
+            salt = config.session_secret or "toktracker_salt_2026"
+            visitor_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
+            ua = request.headers.get("user-agent", "")
+            dev_type = _detect_device_type(ua)
+            ref = request.headers.get("referer", "")
+
+            record_page_view(
+                path=path,
+                visitor_hash=visitor_hash,
+                user_agent=ua,
+                device_type=dev_type,
+                referrer=ref,
+                status_code=response.status_code,
+                response_time_ms=duration_ms,
+            )
+        except Exception:
+            pass
+
+    return response
 
 
 def verify_admin_or_api_key(
@@ -287,6 +349,32 @@ async def admin_console(
     )
 
 
+@app.get("/site-analytics", response_class=HTMLResponse, include_in_schema=False)
+async def site_analytics_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Geschützte Analyse-Seite (/site-analytics). Leitet ohne gültige Telegram-Session auf /login weiter.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login", status_code=302)
+
+    init_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="site_analytics.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+        },
+    )
+
+
 # =====================================================================
 # 1b. TELEGRAM ADMIN-AUTH ENDPOINTS (/api/auth/telegram/*)
 # =====================================================================
@@ -306,6 +394,22 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
         identifier_hint=payload.identifier,
         client_info=client_info,
     )
+    if res.get("ok"):
+        try:
+            client_ip = _extract_client_ip(request)
+            salt = config.session_secret or "toktracker_salt_2026"
+            ip_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
+            record_bot_session(
+                session_type="telegram_login_challenge",
+                telegram_id=None,
+                username=payload.identifier or "",
+                first_name="",
+                client_ip_hash=ip_hash,
+                status="pending",
+                details_json=json.dumps({"challenge_id": res.get("challenge_id")}),
+            )
+        except Exception:
+            pass
     return res
 
 
@@ -317,6 +421,14 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
 async def api_auth_telegram_poll(challenge_id: str = Query(..., min_length=8)):
     poll_res = admin_auth_manager.poll_challenge(challenge_id)
     if poll_res.get("status") == "approved":
+        try:
+            record_bot_session(
+                session_type="telegram_login_challenge",
+                status="approved",
+                details_json=json.dumps({"challenge_id": challenge_id, "approved_by": poll_res.get("admin_label")}),
+            )
+        except Exception:
+            pass
         resp = JSONResponse(
             content={
                 "ok": True,
@@ -725,6 +837,18 @@ async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
         token = admin_auth_manager.create_session_token(admin_label=admin_label)
         _set_admin_session_cookie(response, admin_label=admin_label)
 
+    try:
+        record_bot_session(
+            session_type="miniapp",
+            telegram_id=tg_id,
+            username=username or "",
+            first_name=first_name or "",
+            status="admin" if is_admin else "user",
+            details_json=json.dumps({"is_admin": is_admin}),
+        )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "authenticated": True,
@@ -988,6 +1112,29 @@ async def api_analytics(
     init_db()
     monitor_manager.autostart_from_db()
     return get_analytics_data(streamer_id=streamer_id, period=period)
+
+
+@app.get(
+    "/api/site-analytics",
+    tags=["Site & Bot Analytics"],
+    summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/site-analytics",
+    tags=["Site & Bot Analytics"],
+    summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_site_analytics(
+    period: str = Query("today", description="all | today | 24h | 7d | 30d"),
+):
+    init_db()
+    data = get_site_analytics_overview(period=period)
+    data["tiktok_workers"] = monitor_manager.get_active_streamers()
+    data["recent_challenges"] = admin_auth_manager.get_recent_challenges(limit=25)
+    data["telegram_diagnostics"] = telegram_bot_service.get_diagnostics()
+    return data
 
 
 @app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])

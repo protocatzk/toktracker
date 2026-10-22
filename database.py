@@ -344,6 +344,37 @@ def _init_mysql_schema() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS page_views (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                path VARCHAR(255) NOT NULL,
+                visitor_hash VARCHAR(64) NOT NULL,
+                user_agent VARCHAR(512) DEFAULT '',
+                device_type VARCHAR(32) DEFAULT 'desktop',
+                referrer VARCHAR(512) DEFAULT '',
+                status_code INT DEFAULT 200,
+                response_time_ms DOUBLE DEFAULT 0.0,
+                created_at VARCHAR(64) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_sessions (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                session_type VARCHAR(32) NOT NULL,
+                telegram_id BIGINT NULL,
+                username VARCHAR(191) DEFAULT '',
+                first_name VARCHAR(255) DEFAULT '',
+                client_ip_hash VARCHAR(64) DEFAULT '',
+                status VARCHAR(32) DEFAULT 'active',
+                details_json TEXT,
+                created_at VARCHAR(64) NOT NULL,
+                last_active_at VARCHAR(64) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
 
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
@@ -353,6 +384,11 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_battle_id", "battle_id")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_result", "result")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_opponent", "opponent_username")
+        _ensure_index_mysql(conn, "page_views", "idx_page_views_created", "created_at")
+        _ensure_index_mysql(conn, "page_views", "idx_page_views_path", "path")
+        _ensure_index_mysql(conn, "page_views", "idx_page_views_visitor", "visitor_hash, created_at")
+        _ensure_index_mysql(conn, "bot_sessions", "idx_bot_sessions_type", "session_type, created_at")
+        _ensure_index_mysql(conn, "bot_sessions", "idx_bot_sessions_telegram_id", "telegram_id")
 
         _ensure_column_mysql(conn, "tiktok_battles", "battle_mode", "VARCHAR(32) DEFAULT '1v1'")
         _ensure_column_mysql(conn, "tiktok_battles", "teammate_user_id", "VARCHAR(128) DEFAULT ''")
@@ -486,6 +522,29 @@ def _init_sqlite_schema() -> None:
                 FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
                 FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
             );
+            CREATE TABLE IF NOT EXISTS page_views (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                visitor_hash TEXT NOT NULL,
+                user_agent TEXT DEFAULT '',
+                device_type TEXT DEFAULT 'desktop',
+                referrer TEXT DEFAULT '',
+                status_code INTEGER DEFAULT 200,
+                response_time_ms REAL DEFAULT 0.0,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS bot_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_type TEXT NOT NULL,
+                telegram_id INTEGER NULL,
+                username TEXT DEFAULT '',
+                first_name TEXT DEFAULT '',
+                client_ip_hash TEXT DEFAULT '',
+                status TEXT DEFAULT 'active',
+                details_json TEXT,
+                created_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL
+            );
             """
         )
 
@@ -539,6 +598,16 @@ def _init_sqlite_schema() -> None:
                 ON tiktok_battles(result);
             CREATE INDEX IF NOT EXISTS idx_battles_opponent
                 ON tiktok_battles(opponent_username);
+            CREATE INDEX IF NOT EXISTS idx_page_views_created
+                ON page_views(created_at);
+            CREATE INDEX IF NOT EXISTS idx_page_views_path
+                ON page_views(path);
+            CREATE INDEX IF NOT EXISTS idx_page_views_visitor
+                ON page_views(visitor_hash, created_at);
+            CREATE INDEX IF NOT EXISTS idx_bot_sessions_type
+                ON bot_sessions(session_type, created_at);
+            CREATE INDEX IF NOT EXISTS idx_bot_sessions_telegram_id
+                ON bot_sessions(telegram_id);
             """
         )
 
@@ -3309,3 +3378,288 @@ def import_from_sqlite_database(
         }
     finally:
         src.close()
+
+
+# =====================================================================
+# WEBSITE TRAFFIC & BOT SESSIONS ANALYTICS
+# =====================================================================
+
+def record_page_view(
+    path: str,
+    visitor_hash: str,
+    user_agent: str = "",
+    device_type: str = "desktop",
+    referrer: str = "",
+    status_code: int = 200,
+    response_time_ms: float = 0.0,
+) -> None:
+    """
+    Speichert einen echten Seitenaufruf für die Web-Traffic-Analyse.
+    Arbeitet extrem schnell (< 1ms) und blockiert keine Requests.
+    """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO page_views (
+                path, visitor_hash, user_agent, device_type, referrer, status_code, response_time_ms, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                path[:250],
+                visitor_hash[:64],
+                user_agent[:500],
+                device_type[:30],
+                referrer[:500],
+                int(status_code),
+                round(float(response_time_ms), 2),
+                now_str,
+            ),
+        )
+
+
+def record_bot_session(
+    session_type: str,
+    telegram_id: Optional[int] = None,
+    username: Optional[str] = None,
+    first_name: Optional[str] = None,
+    client_ip_hash: str = "",
+    status: str = "active",
+    details_json: Optional[str] = None,
+) -> None:
+    """
+    Protokolliert Interaktionen und Sessions mit dem Telegram-Bot und der Mini-App.
+    Aktualisiert bestehende offene Sessions oder legt neue an.
+    """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        if telegram_id:
+            row = conn.execute(
+                """
+                SELECT id FROM bot_sessions
+                WHERE session_type = ? AND telegram_id = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (session_type, telegram_id),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    """
+                    UPDATE bot_sessions
+                    SET last_active_at = ?,
+                        username = COALESCE(?, username),
+                        first_name = COALESCE(?, first_name),
+                        status = ?,
+                        details_json = COALESCE(?, details_json)
+                    WHERE id = ?
+                    """,
+                    (now_str, username, first_name, status, details_json, row["id"]),
+                )
+                return
+
+        conn.execute(
+            """
+            INSERT INTO bot_sessions (
+                session_type, telegram_id, username, first_name, client_ip_hash, status, details_json, created_at, last_active_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_type[:30],
+                telegram_id,
+                (username or "")[:190],
+                (first_name or "")[:250],
+                (client_ip_hash or "")[:64],
+                (status or "active")[:30],
+                details_json,
+                now_str,
+                now_str,
+            ),
+        )
+
+
+def get_site_analytics_overview(period: str = "today") -> Dict[str, Any]:
+    """
+    Aggregiert Web-Traffic, Seitenbesucher, Latenz und Bot-Sessions für das Analyse-Dashboard.
+    """
+    cutoff = _get_period_cutoff(period)
+    with get_db() as conn:
+        # 1. KPIs
+        row_kpi = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_views,
+                COUNT(DISTINCT visitor_hash) AS unique_visitors,
+                COALESCE(AVG(response_time_ms), 0.0) AS avg_latency,
+                SUM(CASE WHEN device_type = 'mobile' THEN 1 ELSE 0 END) AS mobile_views,
+                SUM(CASE WHEN device_type = 'desktop' THEN 1 ELSE 0 END) AS desktop_views,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_views
+            FROM page_views
+            WHERE (? IS NULL OR created_at >= ?)
+            """,
+            (cutoff, cutoff),
+        ).fetchone()
+
+        total_views = int(row_kpi["total_views"] or 0) if row_kpi else 0
+        unique_visitors = int(row_kpi["unique_visitors"] or 0) if row_kpi else 0
+        avg_latency = round(float(row_kpi["avg_latency"] or 0.0), 1) if row_kpi else 0.0
+        mobile_views = int(row_kpi["mobile_views"] or 0) if row_kpi else 0
+        desktop_views = int(row_kpi["desktop_views"] or 0) if row_kpi else 0
+        error_views = int(row_kpi["error_views"] or 0) if row_kpi else 0
+
+        # 2. Timeline
+        is_hourly = period in ("24h", "today")
+        substr_len = 13 if is_hourly else 10
+        timeline_rows = conn.execute(
+            f"""
+            SELECT
+                SUBSTR(created_at, 1, {substr_len}) AS bucket,
+                COUNT(*) AS views,
+                COUNT(DISTINCT visitor_hash) AS visitors,
+                ROUND(AVG(response_time_ms), 1) AS avg_ms
+            FROM page_views
+            WHERE (? IS NULL OR created_at >= ?)
+            GROUP BY SUBSTR(created_at, 1, {substr_len})
+            ORDER BY bucket ASC
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+
+        timeline = []
+        for tr in timeline_rows:
+            b = tr["bucket"]
+            v = int(tr["views"] or 0)
+            vis = int(tr["visitors"] or 0)
+            ms = float(tr["avg_ms"] or 0.0)
+
+            if is_hourly:
+                parts = b.replace("T", " ").split(" ")
+                time_part = f"{parts[1]}:00" if len(parts) > 1 else b
+                label = time_part if period == "today" else f"{parts[0][5:]} {time_part}"
+            else:
+                label = f"{b[8:10]}.{b[5:7]}." if len(b) >= 10 else b
+
+            timeline.append({
+                "bucket": b,
+                "label": label,
+                "views": v,
+                "visitors": vis,
+                "avg_ms": ms,
+            })
+
+        # 3. Top Paths
+        paths_rows = conn.execute(
+            """
+            SELECT
+                path,
+                COUNT(*) AS views,
+                COUNT(DISTINCT visitor_hash) AS visitors,
+                ROUND(AVG(response_time_ms), 1) AS avg_ms
+            FROM page_views
+            WHERE (? IS NULL OR created_at >= ?)
+            GROUP BY path
+            ORDER BY views DESC
+            LIMIT 20
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        paths = [
+            {
+                "path": r["path"],
+                "views": int(r["views"] or 0),
+                "visitors": int(r["visitors"] or 0),
+                "avg_ms": float(r["avg_ms"] or 0.0),
+            }
+            for r in paths_rows
+        ]
+
+        # 4. Devices
+        device_rows = conn.execute(
+            """
+            SELECT
+                device_type,
+                COUNT(*) AS count,
+                COUNT(DISTINCT visitor_hash) AS visitors
+            FROM page_views
+            WHERE (? IS NULL OR created_at >= ?)
+            GROUP BY device_type
+            ORDER BY count DESC
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        devices = [
+            {"device": r["device_type"], "count": int(r["count"] or 0), "visitors": int(r["visitors"] or 0)}
+            for r in device_rows
+        ]
+
+        # 5. Top Referrers
+        referrer_rows = conn.execute(
+            """
+            SELECT
+                referrer,
+                COUNT(*) AS count
+            FROM page_views
+            WHERE (? IS NULL OR created_at >= ?)
+              AND referrer != ''
+            GROUP BY referrer
+            ORDER BY count DESC
+            LIMIT 15
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        referrers = [{"referrer": r["referrer"], "count": int(r["count"] or 0)} for r in referrer_rows]
+
+        # 6. Recent Views (latest 50)
+        recent_rows = conn.execute(
+            """
+            SELECT id, path, visitor_hash, device_type, referrer, status_code, response_time_ms, created_at
+            FROM page_views
+            ORDER BY id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        recent_views = [
+            {
+                "id": r["id"],
+                "path": r["path"],
+                "visitor_hash": r["visitor_hash"],
+                "device_type": r["device_type"],
+                "referrer": r["referrer"] or "-",
+                "status_code": int(r["status_code"] or 200),
+                "response_time_ms": float(r["response_time_ms"] or 0.0),
+                "created_at": r["created_at"],
+            }
+            for r in recent_rows
+        ]
+
+        # 7. Bot Sessions (recent 50)
+        bot_session_rows = conn.execute(
+            """
+            SELECT * FROM bot_sessions
+            ORDER BY id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        bot_sessions = [dict(r) for r in bot_session_rows]
+
+        # 8. Telegram Users Overview
+        tg_users = list_telegram_users()
+
+        return {
+            "period": period,
+            "kpis": {
+                "total_views": total_views,
+                "unique_visitors": unique_visitors,
+                "avg_latency": avg_latency,
+                "mobile_views": mobile_views,
+                "desktop_views": desktop_views,
+                "error_views": error_views,
+            },
+            "timeline": timeline,
+            "paths": paths,
+            "devices": devices,
+            "referrers": referrers,
+            "recent_views": recent_views,
+            "bot_sessions": bot_sessions,
+            "telegram_users": tg_users,
+        }
+

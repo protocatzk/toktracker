@@ -146,6 +146,12 @@ class AdminAuthManager:
         ch["admin_label"] = admin_label
         return ch
 
+    def get_recent_challenges(self, limit: int = 25) -> List[Dict[str, Any]]:
+        self._cleanup_expired()
+        items = list(self._challenges.values())
+        items.sort(key=lambda c: c.get("created_at", 0), reverse=True)
+        return items[:limit]
+
     def poll_challenge(self, challenge_id: str) -> Dict[str, Any]:
         self._cleanup_expired()
         ch = self._challenges.get(challenge_id)

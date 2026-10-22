@@ -38,6 +38,7 @@
             <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
             <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
             <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
+            <a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>
             <a class="btn-link primary sm" href="/">Öffentliches User-Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
         </div>
@@ -922,7 +923,7 @@
 <footer class="app-footer">
     <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
     <div>
-        <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
+        <a href="/site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
     </div>
 </footer>
 
