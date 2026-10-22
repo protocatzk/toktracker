@@ -1322,8 +1322,8 @@ async def api_whale_alerts(
     dependencies=[Depends(verify_admin_or_api_key)],
 )
 async def api_loyalty_and_overlap(
-    min_coins: int = Query(250, ge=50, description="Mindestmünzen für Frontenwechsler"),
-    days_recent: int = Query(14, ge=3, le=90, description="Zeitfenster für die aktuelle Periode in Tagen"),
+    min_coins: int = Query(50, ge=1, description="Mindestmünzen für Frontenwechsler"),
+    days_recent: int = Query(14, ge=1, le=90, description="Zeitfenster für die aktuelle Periode in Tagen"),
 ):
     init_db()
     data = get_network_loyalty_and_overlap(min_coins=min_coins, days_recent=days_recent)

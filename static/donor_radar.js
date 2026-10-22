@@ -1256,7 +1256,7 @@
 
         try {
             const days = selLoyaltyDays ? selLoyaltyDays.value : loyaltyDaysRecent;
-            const res = await fetch(`/api/donor-radar/loyalty-and-overlap?days_recent=${days}&min_coins=500`);
+            const res = await fetch(`/api/donor-radar/loyalty-and-overlap?days_recent=${days}&min_coins=50`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             if (!json.ok || !json.data) throw new Error(json.error || "Fehler beim Laden");
@@ -1287,17 +1287,27 @@
                         const tierBadge = renderTierBadge(fw.tier);
                         const tagsHtml = renderDonorItemTags(crm.tags);
                         const shift = fw.frontenwechsel || {};
-                        const oldStreamer = escapeHtml(shift.old_streamer || "-");
-                        const newStreamer = escapeHtml(shift.new_streamer || "-");
-                        const oldCoins = formatNumber(shift.old_coins || 0);
-                        const newCoins = formatNumber(shift.new_coins || 0);
+                        const oldStreamer = escapeHtml(shift.old_streamer || (fw.from_streamer ? fw.from_streamer.username : "-"));
+                        const newStreamer = escapeHtml(shift.new_streamer || (fw.to_streamer ? fw.to_streamer.username : "-"));
+                        const oldAvatarUrl = shift.old_streamer_avatar || (fw.from_streamer ? fw.from_streamer.avatar_url : "");
+                        const newAvatarUrl = shift.new_streamer_avatar || (fw.to_streamer ? fw.to_streamer.avatar_url : "");
+
+                        const oldAvatar = oldAvatarUrl
+                            ? `<img src="${escapeHtml(oldAvatarUrl)}" class="chat-avatar" style="width:20px;height:20px;min-width:20px;min-height:20px;max-width:20px;max-height:20px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-color);" alt="" onerror="this.style.display='none'" />`
+                            : "";
+                        const newAvatar = newAvatarUrl
+                            ? `<img src="${escapeHtml(newAvatarUrl)}" class="chat-avatar" style="width:20px;height:20px;min-width:20px;min-height:20px;max-width:20px;max-height:20px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-color);" alt="" onerror="this.style.display='none'" />`
+                            : "";
+
+                        const oldCoins = formatNumber(shift.old_coins !== undefined ? shift.old_coins : (fw.from_streamer ? fw.from_streamer.coins : 0));
+                        const newCoins = formatNumber(shift.new_coins !== undefined ? shift.new_coins : (fw.to_streamer ? fw.to_streamer.coins : 0));
                         const score = fw.loyalty_score !== undefined ? fw.loyalty_score : 50;
                         const scoreColor = fw.color || "#eab308";
                         const scoreLabel = escapeHtml(fw.label || "Multi-Streamer");
 
                         const avatar = fw.avatar_url
-                            ? `<img src="${escapeHtml(fw.avatar_url)}" class="donor-avatar" alt="" onerror="this.style.display='none'" />`
-                            : `<div class="donor-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-muted);">${uname.charAt(0).toUpperCase()}</div>`;
+                            ? `<img src="${escapeHtml(fw.avatar_url)}" class="donor-avatar" style="width:32px;height:32px;min-width:32px;min-height:32px;max-width:32px;max-height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-color);" alt="" onerror="this.style.display='none'" />`
+                            : `<div class="donor-avatar" style="width:32px;height:32px;min-width:32px;min-height:32px;max-width:32px;max-height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-muted);background:var(--bg-surface);border:1px solid var(--border-color);flex-shrink:0;">${uname.charAt(0).toUpperCase()}</div>`;
 
                         html += `
                             <tr>
@@ -1319,12 +1329,14 @@
                                 </td>
                                 <td>
                                     <div style="display:flex; align-items:center; gap:6px;">
+                                        ${oldAvatar}
                                         <span class="mono muted" style="font-size:11px;">Früher:</span>
                                         <strong style="color:var(--text-strong);">@${oldStreamer}</strong>
                                     </div>
                                 </td>
                                 <td>
                                     <div style="display:flex; align-items:center; gap:6px;">
+                                        ${newAvatar}
                                         <span class="mono" style="font-size:11px; color:#4ade80;">➔ Neu:</span>
                                         <strong style="color:#4ade80;">@${newStreamer}</strong>
                                     </div>
@@ -1374,31 +1386,32 @@
                 } else {
                     let html = "";
                     overlapList.forEach(pair => {
-                        const sA = escapeHtml(pair.streamer_a_display_name || pair.streamer_a_username);
-                        const sB = escapeHtml(pair.streamer_b_display_name || pair.streamer_b_username);
-                        const uA = escapeHtml(pair.streamer_a_username);
-                        const uB = escapeHtml(pair.streamer_b_username);
+                        const sA = escapeHtml(pair.streamer_a_display_name || pair.s1_display_name || pair.streamer_a_username || pair.s1_username || "Streamer A");
+                        const sB = escapeHtml(pair.streamer_b_display_name || pair.s2_display_name || pair.streamer_b_username || pair.s2_username || "Streamer B");
+                        const uA = escapeHtml(pair.streamer_a_username || pair.s1_username || "");
+                        const uB = escapeHtml(pair.streamer_b_username || pair.s2_username || "");
                         const sharedCount = formatNumber(pair.shared_donors_count || 0);
-                        const totalCoins = formatNumber(pair.total_shared_coins || 0);
-                        const coinsA = formatNumber(pair.total_coins_a || 0);
-                        const coinsB = formatNumber(pair.total_coins_b || 0);
-                        const pctA = Math.round(pair.streamer_a_pct || 50);
+                        const totalCoins = formatNumber(pair.total_shared_coins !== undefined ? pair.total_shared_coins : (pair.shared_volume_coins !== undefined ? pair.shared_volume_coins : 0));
+                        const coinsA = formatNumber(pair.total_coins_a !== undefined ? pair.total_coins_a : 0);
+                        const coinsB = formatNumber(pair.total_coins_b !== undefined ? pair.total_coins_b : 0);
+                        const pctA = Math.round(pair.streamer_a_pct !== undefined ? pair.streamer_a_pct : 50);
                         const pctB = 100 - pctA;
 
-                        const avatarA = pair.streamer_a_avatar
-                            ? `<img src="${escapeHtml(pair.streamer_a_avatar)}" class="chat-avatar" alt="" onerror="this.style.display='none'" />`
-                            : `<div class="chat-avatar" style="font-size:10px;font-weight:700;">${uA.charAt(0).toUpperCase()}</div>`;
-                        const avatarB = pair.streamer_b_avatar
-                            ? `<img src="${escapeHtml(pair.streamer_b_avatar)}" class="chat-avatar" alt="" onerror="this.style.display='none'" />`
-                            : `<div class="chat-avatar" style="font-size:10px;font-weight:700;">${uB.charAt(0).toUpperCase()}</div>`;
+                        const avatarA = (pair.streamer_a_avatar || pair.s1_avatar)
+                            ? `<img src="${escapeHtml(pair.streamer_a_avatar || pair.s1_avatar)}" class="chat-avatar" style="width:24px;height:24px;min-width:24px;min-height:24px;max-width:24px;max-height:24px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-color);" alt="" onerror="this.style.display='none'" />`
+                            : `<div class="chat-avatar" style="width:24px;height:24px;min-width:24px;min-height:24px;max-width:24px;max-height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">${uA.charAt(0).toUpperCase()}</div>`;
+                        const avatarB = (pair.streamer_b_avatar || pair.s2_avatar)
+                            ? `<img src="${escapeHtml(pair.streamer_b_avatar || pair.s2_avatar)}" class="chat-avatar" style="width:24px;height:24px;min-width:24px;min-height:24px;max-width:24px;max-height:24px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border-color);" alt="" onerror="this.style.display='none'" />`
+                            : `<div class="chat-avatar" style="width:24px;height:24px;min-width:24px;min-height:24px;max-width:24px;max-height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">${uB.charAt(0).toUpperCase()}</div>`;
 
+                        const topDonorsList = pair.top_donors || pair.top_shared_donors || [];
                         let donorsHtml = "";
-                        if (pair.top_donors && pair.top_donors.length > 0) {
+                        if (topDonorsList.length > 0) {
                             donorsHtml = `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">`;
-                            pair.top_donors.slice(0, 5).forEach(d => {
+                            topDonorsList.slice(0, 5).forEach(d => {
                                 const du = escapeHtml(d.username);
                                 const dn = escapeHtml(d.display_name || d.username);
-                                const dc = formatNumber(d.total_coins || 0);
+                                const dc = formatNumber(d.total_coins || d.coins || 0);
                                 donorsHtml += `
                                     <span class="crm-quick-tag" onclick="window.tokRadar.openDossier('${du}')" title="${du}: ${dc} Coins an beide Kanäle">
                                         ${dn} (${dc})
