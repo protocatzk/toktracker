@@ -24,6 +24,16 @@
     let syncIntervalId = null;
     let isFetchingChat = false;
 
+    // Whale Ticker, Audio & Loyalty State
+    let whaleMinCoins = 2500;
+    let whaleSoundEnabled = true;
+    let lastSeenWhaleAlertIds = new Set();
+    let isPollingWhaleAlerts = false;
+    let audioCtx = null;
+    let currentHubView = "leaderboard";
+    let loyaltyDaysRecent = 14;
+    let isFetchingLoyalty = false;
+
     // DOM Elements
     const periodButtons = document.querySelectorAll(".tab-list .tab-btn");
     const filterStreamer = document.getElementById("filterStreamer");
@@ -37,6 +47,25 @@
     const kpiVipCount = document.getElementById("kpiVipCount");
     const cardKpiVip = document.getElementById("cardKpiVip");
     const kpiChatCount = document.getElementById("kpiChatCount");
+
+    // Whale Alert & Ticker Elements
+    const whaleToastContainer = document.getElementById("whaleToastContainer");
+    const whaleTickerScroll = document.getElementById("whaleTickerScroll");
+    const selWhaleThreshold = document.getElementById("selWhaleThreshold");
+    const btnToggleWhaleSound = document.getElementById("btnToggleWhaleSound");
+
+    // View Switching & Loyalty Hub Elements
+    const btnTabLeaderboard = document.getElementById("btnTabLeaderboard");
+    const btnTabLoyaltyHub = document.getElementById("btnTabLoyaltyHub");
+    const loyaltyHubControls = document.getElementById("loyaltyHubControls");
+    const selLoyaltyDays = document.getElementById("selLoyaltyDays");
+    const btnRefreshLoyaltyHub = document.getElementById("btnRefreshLoyaltyHub");
+    const radarSplitLayout = document.getElementById("radarSplitLayout");
+    const loyaltyHubLayout = document.getElementById("loyaltyHubLayout");
+    const frontenwechslerBadge = document.getElementById("frontenwechslerBadge");
+    const frontenwechslerTableBody = document.getElementById("frontenwechslerTableBody");
+    const overlapPairsBadge = document.getElementById("overlapPairsBadge");
+    const overlapMatrixBody = document.getElementById("overlapMatrixBody");
 
     // Donor Elements
     const donorSearchInput = document.getElementById("donorSearchInput");
@@ -106,6 +135,55 @@
             return `<span class="tier-badge tier-dolphin">🐬 Dolphin</span>`;
         }
         return `<span class="tier-badge tier-regular">Viewer</span>`;
+    }
+
+    // Web Audio API Synthesizer (Crystal Chime for Whale Alerts)
+    function initAudioContext() {
+        if (!audioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                audioCtx = new AudioContext();
+            }
+        }
+        if (audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+        }
+    }
+
+    function playWhaleAlertChime() {
+        if (!whaleSoundEnabled) return;
+        try {
+            initAudioContext();
+            if (!audioCtx) return;
+
+            const now = audioCtx.currentTime;
+            // 3-note ascending crystal chime: D5 (587.33Hz), A5 (880Hz), D6 (1174.66Hz)
+            const notes = [
+                { freq: 587.33, start: 0, dur: 0.35, gain: 0.14 },
+                { freq: 880.00, start: 0.1, dur: 0.4, gain: 0.16 },
+                { freq: 1174.66, start: 0.22, dur: 0.65, gain: 0.20 }
+            ];
+
+            notes.forEach(n => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(n.freq, now + n.start);
+
+                gain.gain.setValueAtTime(0.0001, now + n.start);
+                gain.gain.exponentialRampToValueAtTime(n.gain, now + n.start + 0.03);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start(now + n.start);
+                osc.stop(now + n.start + n.dur);
+            });
+        } catch (e) {
+            console.warn("Web Audio chime could not play:", e);
+        }
     }
 
     // Initialize Event Listeners
@@ -245,6 +323,74 @@
                 }
             });
         }
+
+        // Whale Ticker Controls
+        if (selWhaleThreshold) {
+            selWhaleThreshold.addEventListener("change", () => {
+                whaleMinCoins = parseInt(selWhaleThreshold.value, 10) || 2500;
+                lastSeenWhaleAlertIds.clear();
+                pollWhaleAlerts();
+            });
+        }
+
+        if (btnToggleWhaleSound) {
+            btnToggleWhaleSound.addEventListener("click", () => {
+                initAudioContext();
+                whaleSoundEnabled = !whaleSoundEnabled;
+                if (whaleSoundEnabled) {
+                    btnToggleWhaleSound.innerHTML = `<span>🔔 Sound: AN</span>`;
+                    btnToggleWhaleSound.style.borderColor = "#a855f7";
+                    btnToggleWhaleSound.style.color = "#d8b4fe";
+                    playWhaleAlertChime();
+                } else {
+                    btnToggleWhaleSound.innerHTML = `<span>🔇 Sound: AUS</span>`;
+                    btnToggleWhaleSound.style.borderColor = "var(--border-color)";
+                    btnToggleWhaleSound.style.color = "var(--text-muted)";
+                }
+            });
+        }
+
+        // View Mode Switcher
+        if (btnTabLeaderboard) {
+            btnTabLeaderboard.addEventListener("click", () => {
+                currentHubView = "leaderboard";
+                btnTabLeaderboard.classList.add("active");
+                if (btnTabLoyaltyHub) btnTabLoyaltyHub.classList.remove("active");
+                if (radarSplitLayout) radarSplitLayout.style.display = "grid";
+                if (loyaltyHubLayout) loyaltyHubLayout.style.display = "none";
+                if (loyaltyHubControls) loyaltyHubControls.style.display = "none";
+            });
+        }
+
+        if (btnTabLoyaltyHub) {
+            btnTabLoyaltyHub.addEventListener("click", () => {
+                currentHubView = "loyalty";
+                btnTabLoyaltyHub.classList.add("active");
+                if (btnTabLeaderboard) btnTabLeaderboard.classList.remove("active");
+                if (radarSplitLayout) radarSplitLayout.style.display = "none";
+                if (loyaltyHubLayout) loyaltyHubLayout.style.display = "flex";
+                if (loyaltyHubControls) loyaltyHubControls.style.display = "flex";
+                loadLoyaltyHubData();
+            });
+        }
+
+        if (btnRefreshLoyaltyHub) {
+            btnRefreshLoyaltyHub.addEventListener("click", () => {
+                loadLoyaltyHubData();
+            });
+        }
+
+        if (selLoyaltyDays) {
+            selLoyaltyDays.addEventListener("change", () => {
+                loyaltyDaysRecent = parseInt(selLoyaltyDays.value, 10) || 14;
+                loadLoyaltyHubData();
+            });
+        }
+
+        // Global Audio Unlock
+        document.addEventListener("click", () => {
+            initAudioContext();
+        }, { once: true });
     }
 
     function scrollToBottom() {
@@ -705,6 +851,9 @@
                 </div>
             </div>
 
+            <!-- Section: Loyalität & Frontenwechsler Analyse -->
+            ${renderModalLoyaltyCard(data.loyalty)}
+
             <!-- Section 1: Streamer Breakdown -->
             <div>
                 <h4 style="margin:0 0 10px 0; font-size:14px; display:flex; align-items:center; gap:6px;">
@@ -741,6 +890,75 @@
                 <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding-right:4px;">
                     ${chatsHtml}
                 </div>
+            </div>
+        `;
+    }
+
+    function renderModalLoyaltyCard(loyalty) {
+        if (!loyalty) return "";
+
+        const score = loyalty.score !== undefined ? loyalty.score : 50;
+        const color = loyalty.color || "#38bdf8";
+        const label = escapeHtml(loyalty.label || "Spender");
+        const classification = loyalty.classification || "multi";
+        const primaryName = escapeHtml(loyalty.primary_streamer || "-");
+        const primaryRatio = loyalty.primary_ratio ? Math.round(loyalty.primary_ratio * 100) : 0;
+        const streamerCount = loyalty.streamer_count || 1;
+
+        let frontenwechselHtml = "";
+        const fw = loyalty.frontenwechsel;
+        if (fw && fw.shifted) {
+            const oldStreamer = escapeHtml(fw.old_streamer || "Vorheriger Streamer");
+            const newStreamer = escapeHtml(fw.new_streamer || "Neuer Streamer");
+            const oldCoins = formatNumber(fw.old_coins || 0);
+            const newCoins = formatNumber(fw.new_coins || 0);
+
+            frontenwechselHtml = `
+                <div style="margin-top: 12px; padding: 10px 14px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 20px;">🔀</span>
+                        <div>
+                            <div style="font-size: 12.5px; font-weight: 700; color: #fca5a5;">
+                                Frontenwechsel erkannt: Fokus-Verschiebung
+                            </div>
+                            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
+                                Früherer Haupt-Streamer: <strong style="color:var(--text-strong);">@${oldStreamer}</strong> (${oldCoins} Coins)
+                                ➔ Neuer Fokus: <strong style="color:#4ade80;">@${newStreamer}</strong> (${newCoins} Coins)
+                            </div>
+                        </div>
+                    </div>
+                    <span class="tag-shifter">FRONTENWECHSLER</span>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="crm-card" style="border-left: 3px solid ${color};">
+                <div class="crm-card-header">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 16px;">🎯</span>
+                        <strong style="font-size: 14px; color: var(--text-strong);">Loyalitäts- &amp; Kanal-Bindung</strong>
+                    </div>
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: ${color}; background: rgba(255,255,255,0.06); padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border-subtle);">
+                        ${label} (${score}%)
+                    </span>
+                </div>
+
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-bottom: 4px;">
+                        <span style="color: var(--text-muted);">Loyalitäts-Grad (Netzwerkweit):</span>
+                        <span class="mono" style="font-weight: 700; color: ${color};">${score} / 100</span>
+                    </div>
+                    <div class="loyalty-progress-wrap">
+                        <div class="loyalty-progress-bar" style="width: ${Math.max(5, Math.min(100, score))}%; background: ${color};"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                        <span>Haupt-Streamer: <strong style="color: var(--text-strong);">@${primaryName}</strong> (${primaryRatio}% aller Coins)</span>
+                        <span>Verteilung: <span class="mono">${streamerCount} ${streamerCount === 1 ? 'Kanal' : 'Kanäle'}</span></span>
+                    </div>
+                </div>
+
+                ${frontenwechselHtml}
             </div>
         `;
     }
@@ -883,11 +1101,380 @@
         if (donorModalOverlay) donorModalOverlay.style.display = "none";
     }
 
+    // =========================================================================
+    // 4. Live-Whale-Alert & Ticker System
+    // =========================================================================
+
+    async function pollWhaleAlerts() {
+        if (isPollingWhaleAlerts) return;
+        isPollingWhaleAlerts = true;
+
+        try {
+            const res = await fetch(`/api/donor-radar/whale-alerts?min_coins=${whaleMinCoins}&limit=25`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (!json.ok) throw new Error(json.error || "Fehler");
+
+            const alerts = json.alerts || [];
+
+            if (lastSeenWhaleAlertIds.size === 0) {
+                // First initialization: record current IDs so we don't spam toasts
+                alerts.forEach(a => lastSeenWhaleAlertIds.add(a.id));
+                renderWhaleTicker(alerts);
+            } else {
+                // Identify brand new alerts
+                const newAlerts = alerts.filter(a => !lastSeenWhaleAlertIds.has(a.id));
+                if (newAlerts.length > 0) {
+                    newAlerts.forEach(a => {
+                        lastSeenWhaleAlertIds.add(a.id);
+                        showWhaleToast(a);
+                    });
+                    playWhaleAlertChime();
+                    renderWhaleTicker(alerts);
+                }
+            }
+        } catch (e) {
+            console.error("Fehler beim Abrufen der Whale-Alerts:", e);
+        } finally {
+            isPollingWhaleAlerts = false;
+        }
+    }
+
+    function renderWhaleTicker(alerts) {
+        if (!whaleTickerScroll) return;
+        if (!alerts || alerts.length === 0) {
+            whaleTickerScroll.innerHTML = `<span class="mono muted" style="font-size:11.5px; padding: 4px 8px;">Keine Whale-Events &ge; ${formatNumber(whaleMinCoins)} Coins in den letzten Aufzeichnungen.</span>`;
+            return;
+        }
+
+        let html = "";
+        alerts.forEach(a => {
+            const coins = Number(a.total_coins || a.total_diamonds || 0);
+            const uname = escapeHtml(a.sender_username || "");
+            const nick = escapeHtml(a.sender_nickname || uname);
+            const gift = escapeHtml(a.gift_name || "Geschenk");
+            const repeat = a.repeat_count > 1 ? ` x${a.repeat_count}` : "";
+            const streamer = escapeHtml(a.streamer_display_name || a.streamer_username || "");
+            const eur = a.eur_net !== undefined ? a.eur_net : (coins * 0.005);
+            const time = formatTimestamp(a.timestamp);
+            const tier = a.tier || (coins >= 10000 ? "whale" : "shark");
+            const badge = tier === "whale" ? "🐋" : "🦈";
+            const vipStar = a.is_vip ? `<span style="color:#fbbf24; font-size:12px; margin-right:2px;">★</span>` : "";
+
+            html += `
+                <div class="whale-ticker-chip" onclick="window.tokRadar.openDossier('${uname}')" title="Klicken für Spender-Dossier">
+                    <span>${badge}</span>
+                    ${vipStar}
+                    <strong style="color:var(--text-strong);">${nick}</strong>
+                    <span class="mono muted" style="font-size:11px;">@${uname}</span>
+                    <span style="color:var(--text-muted);">schenkte</span>
+                    <span class="tag-live mono" style="font-size:10.5px; background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.5); color:#d8b4fe;">${gift}${repeat}</span>
+                    <span class="mono" style="color:#38bdf8; font-weight:700;">${formatNumber(coins)} Coins</span>
+                    <span class="mono muted" style="font-size:10.5px;">(~${formatCurrency(eur, "EUR")})</span>
+                    <span style="color:var(--text-muted);">→ @${streamer}</span>
+                    <span class="mono muted" style="font-size:10px; margin-left:4px;">${time}</span>
+                </div>
+            `;
+        });
+
+        whaleTickerScroll.innerHTML = html;
+    }
+
+    function showWhaleToast(alert) {
+        if (!whaleToastContainer) return;
+
+        const toast = document.createElement("div");
+        toast.className = "whale-toast";
+
+        const coins = Number(alert.total_coins || alert.total_diamonds || 0);
+        const eurNet = alert.eur_net !== undefined ? alert.eur_net : (coins * 0.005);
+        const tierIcon = coins >= 30000 ? "👑" : coins >= 10000 ? "🐋" : "🦈";
+        const streamerName = escapeHtml(alert.streamer_display_name || alert.streamer_username || "Streamer");
+        const uname = escapeHtml(alert.sender_username || "Anonym");
+        const nick = escapeHtml(alert.sender_nickname || uname);
+        const giftName = escapeHtml(alert.gift_name || "Geschenk");
+        const repeat = alert.repeat_count > 1 ? ` x${alert.repeat_count}` : "";
+
+        toast.innerHTML = `
+            <span class="whale-toast-icon">${tierIcon}</span>
+            <div class="whale-toast-content">
+                <div class="whale-toast-title">
+                    <span>WHALE ALERT: <strong>${giftName}${repeat}</strong></span>
+                    <span class="mono" style="color: #fbbf24;">${formatNumber(coins)} Coins (~${formatCurrency(eurNet, "EUR")})</span>
+                </div>
+                <div class="whale-toast-msg">
+                    <span class="chat-donor-link" style="font-weight:700; color:#38bdf8;" onclick="window.tokRadar.openDossier('${uname}')">${nick}</span>
+                    <span class="mono muted" style="font-size:11px;">(@${uname})</span>
+                    <span>hat an</span>
+                    <strong style="color:var(--text-strong);">@${streamerName}</strong>
+                    <span>gesendet!</span>
+                </div>
+            </div>
+            <button type="button" class="whale-toast-close" title="Schließen">✕</button>
+        `;
+
+        const closeBtn = toast.querySelector(".whale-toast-close");
+        if (closeBtn) {
+            closeBtn.addEventListener("click", () => {
+                toast.style.animation = "toastOut 0.3s forwards ease";
+                setTimeout(() => toast.remove(), 300);
+            });
+        }
+
+        whaleToastContainer.appendChild(toast);
+
+        // Auto remove after 7.5 seconds
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.style.opacity = "0";
+                toast.style.transform = "translateX(50px)";
+                toast.style.transition = "all 0.4s ease";
+                setTimeout(() => toast.remove(), 400);
+            }
+        }, 7500);
+    }
+
+    // =========================================================================
+    // 5. Loyalitäts- & Frontenwechsler Hub
+    // =========================================================================
+
+    function renderDonorItemTags(tags) {
+        if (!tags || !Array.isArray(tags) || tags.length === 0) return "";
+        return tags.map(t => `<span class="crm-tag-pill" style="font-size:10px; padding:1px 6px;">${escapeHtml(t)}</span>`).join(" ");
+    }
+
+    async function loadLoyaltyHubData() {
+        if (isFetchingLoyalty) return;
+        isFetchingLoyalty = true;
+
+        if (frontenwechslerTableBody) {
+            frontenwechslerTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">Berechne Frontenwechsler...</td></tr>`;
+        }
+        if (overlapMatrixBody) {
+            overlapMatrixBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:30px;">Berechne Überschneidungs-Matrix...</td></tr>`;
+        }
+
+        try {
+            const days = selLoyaltyDays ? selLoyaltyDays.value : loyaltyDaysRecent;
+            const res = await fetch(`/api/donor-radar/loyalty-and-overlap?days_recent=${days}&min_coins=500`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (!json.ok || !json.data) throw new Error(json.error || "Fehler beim Laden");
+
+            const fwList = json.data.frontenwechsler || [];
+            const overlapList = json.data.overlap_matrix || [];
+
+            // 1. Render Frontenwechsler Table
+            if (frontenwechslerBadge) {
+                frontenwechslerBadge.textContent = `${fwList.length} Erkannt`;
+            }
+            if (frontenwechslerTableBody) {
+                if (fwList.length === 0) {
+                    frontenwechslerTableBody.innerHTML = `
+                        <tr>
+                            <td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">
+                                Keine Frontenwechsler im gewählten Zeitraum (${days} Tage) erkannt. Großspender bleiben bisher ihren Stamm-Kanälen treu.
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    let html = "";
+                    fwList.forEach(fw => {
+                        const uname = escapeHtml(fw.username);
+                        const nick = escapeHtml(fw.display_name || fw.username);
+                        const crm = fw.crm || { is_vip: false, tags: [] };
+                        const vipStar = `<button type="button" class="vip-star-btn ${crm.is_vip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleVipQuick('${uname}', event)" title="VIP-Status umschalten">${crm.is_vip ? '★' : '☆'}</button>`;
+                        const tierBadge = renderTierBadge(fw.tier);
+                        const tagsHtml = renderDonorItemTags(crm.tags);
+                        const shift = fw.frontenwechsel || {};
+                        const oldStreamer = escapeHtml(shift.old_streamer || "-");
+                        const newStreamer = escapeHtml(shift.new_streamer || "-");
+                        const oldCoins = formatNumber(shift.old_coins || 0);
+                        const newCoins = formatNumber(shift.new_coins || 0);
+                        const score = fw.loyalty_score !== undefined ? fw.loyalty_score : 50;
+                        const scoreColor = fw.color || "#eab308";
+                        const scoreLabel = escapeHtml(fw.label || "Multi-Streamer");
+
+                        const avatar = fw.avatar_url
+                            ? `<img src="${escapeHtml(fw.avatar_url)}" class="donor-avatar" alt="" onerror="this.style.display='none'" />`
+                            : `<div class="donor-avatar" style="display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-muted);">${uname.charAt(0).toUpperCase()}</div>`;
+
+                        html += `
+                            <tr>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        ${avatar}
+                                        <div>
+                                            <div class="donor-link" onclick="window.tokRadar.openDossier('${uname}')">${nick}</div>
+                                            <div class="mono muted" style="font-size:11px;">@${uname}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                        ${vipStar}
+                                        ${tierBadge}
+                                    </div>
+                                    ${tagsHtml}
+                                </td>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:6px;">
+                                        <span class="mono muted" style="font-size:11px;">Früher:</span>
+                                        <strong style="color:var(--text-strong);">@${oldStreamer}</strong>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:6px;">
+                                        <span class="mono" style="font-size:11px; color:#4ade80;">➔ Neu:</span>
+                                        <strong style="color:#4ade80;">@${newStreamer}</strong>
+                                    </div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <span class="mono" style="color:var(--text-muted);">${oldCoins}</span>
+                                </td>
+                                <td style="text-align:right;">
+                                    <span class="mono" style="font-weight:700; color:#38bdf8;">${newCoins}</span>
+                                </td>
+                                <td>
+                                    <div style="min-width:130px;">
+                                        <div style="display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:2px;">
+                                            <span style="color:${scoreColor}; font-weight:700;">${scoreLabel}</span>
+                                            <span class="mono" style="color:${scoreColor};">${score}%</span>
+                                        </div>
+                                        <div class="loyalty-progress-wrap" style="height:6px; margin:0;">
+                                            <div class="loyalty-progress-bar" style="width:${Math.max(5, Math.min(100, score))}%; background:${scoreColor};"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td style="text-align:center;">
+                                    <button type="button" class="btn-link sm" onclick="window.tokRadar.openDossier('${uname}')" style="font-size:11px; padding:3px 8px;">
+                                        Dossier →
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    frontenwechslerTableBody.innerHTML = html;
+                }
+            }
+
+            // 2. Render Overlap Matrix Table
+            if (overlapPairsBadge) {
+                overlapPairsBadge.textContent = `${overlapList.length} Kanal-Paare`;
+            }
+            if (overlapMatrixBody) {
+                if (overlapList.length === 0) {
+                    overlapMatrixBody.innerHTML = `
+                        <tr>
+                            <td colspan="6" style="text-align:center; color:var(--text-muted); padding:30px;">
+                                Keine Kanal-Überschneidungen mit gemeinsamen Großspendern im Zeitraum gefunden.
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    let html = "";
+                    overlapList.forEach(pair => {
+                        const sA = escapeHtml(pair.streamer_a_display_name || pair.streamer_a_username);
+                        const sB = escapeHtml(pair.streamer_b_display_name || pair.streamer_b_username);
+                        const uA = escapeHtml(pair.streamer_a_username);
+                        const uB = escapeHtml(pair.streamer_b_username);
+                        const sharedCount = formatNumber(pair.shared_donors_count || 0);
+                        const totalCoins = formatNumber(pair.total_shared_coins || 0);
+                        const coinsA = formatNumber(pair.total_coins_a || 0);
+                        const coinsB = formatNumber(pair.total_coins_b || 0);
+                        const pctA = Math.round(pair.streamer_a_pct || 50);
+                        const pctB = 100 - pctA;
+
+                        const avatarA = pair.streamer_a_avatar
+                            ? `<img src="${escapeHtml(pair.streamer_a_avatar)}" class="chat-avatar" alt="" onerror="this.style.display='none'" />`
+                            : `<div class="chat-avatar" style="font-size:10px;font-weight:700;">${uA.charAt(0).toUpperCase()}</div>`;
+                        const avatarB = pair.streamer_b_avatar
+                            ? `<img src="${escapeHtml(pair.streamer_b_avatar)}" class="chat-avatar" alt="" onerror="this.style.display='none'" />`
+                            : `<div class="chat-avatar" style="font-size:10px;font-weight:700;">${uB.charAt(0).toUpperCase()}</div>`;
+
+                        let donorsHtml = "";
+                        if (pair.top_donors && pair.top_donors.length > 0) {
+                            donorsHtml = `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">`;
+                            pair.top_donors.slice(0, 5).forEach(d => {
+                                const du = escapeHtml(d.username);
+                                const dn = escapeHtml(d.display_name || d.username);
+                                const dc = formatNumber(d.total_coins || 0);
+                                donorsHtml += `
+                                    <span class="crm-quick-tag" onclick="window.tokRadar.openDossier('${du}')" title="${du}: ${dc} Coins an beide Kanäle">
+                                        ${dn} (${dc})
+                                    </span>
+                                `;
+                            });
+                            donorsHtml += `</div>`;
+                        }
+
+                        html += `
+                            <tr>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <div style="display:flex; align-items:center; gap:4px;">
+                                            ${avatarA}
+                                            <span style="font-weight:700; color:var(--text-strong);">@${uA}</span>
+                                        </div>
+                                        <span class="mono muted" style="font-size:12px;">⟷</span>
+                                        <div style="display:flex; align-items:center; gap:4px;">
+                                            ${avatarB}
+                                            <span style="font-weight:700; color:var(--text-strong);">@${uB}</span>
+                                        </div>
+                                    </div>
+                                    ${donorsHtml}
+                                </td>
+                                <td style="text-align:right;">
+                                    <span class="mono" style="font-weight:700; color:#fbbf24;">${sharedCount} Spender</span>
+                                </td>
+                                <td style="text-align:right;">
+                                    <span class="mono" style="font-weight:800; color:#38bdf8; font-size:13px;">${totalCoins}</span>
+                                </td>
+                                <td style="text-align:right;">
+                                    <div class="mono" style="font-size:11.5px; color:#d8b4fe;">${coinsA}</div>
+                                    <div class="mono muted" style="font-size:10px;">${pctA}% Anteil</div>
+                                </td>
+                                <td style="text-align:right;">
+                                    <div class="mono" style="font-size:11.5px; color:#38bdf8;">${coinsB}</div>
+                                    <div class="mono muted" style="font-size:10px;">${pctB}% Anteil</div>
+                                </td>
+                                <td>
+                                    <div style="min-width:140px;">
+                                        <div style="display:flex; justify-content:space-between; font-size:10px; margin-bottom:3px;" class="mono muted">
+                                            <span>@${uA} (${pctA}%)</span>
+                                            <span>@${uB} (${pctB}%)</span>
+                                        </div>
+                                        <div style="height:7px; border-radius:4px; overflow:hidden; display:flex; background:var(--bg-surface); border:1px solid var(--border-subtle);">
+                                            <div style="width:${pctA}%; background:#a855f7;" title="@${uA}: ${pctA}%"></div>
+                                            <div style="width:${pctB}%; background:#0ea5e9;" title="@${uB}: ${pctB}%"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    overlapMatrixBody.innerHTML = html;
+                }
+            }
+        } catch (err) {
+            console.error("Fehler beim Abrufen der Loyalitätsdaten:", err);
+            if (frontenwechslerTableBody) {
+                frontenwechslerTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#f87171; padding:20px;">Fehler beim Laden der Frontenwechsler.</td></tr>`;
+            }
+            if (overlapMatrixBody) {
+                overlapMatrixBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#f87171; padding:20px;">Fehler beim Laden der Überschneidungs-Matrix.</td></tr>`;
+            }
+        } finally {
+            isFetchingLoyalty = false;
+        }
+    }
+
     // Polling Sync Loop
     function startSyncLoop() {
         stopSyncLoop();
         syncIntervalId = setInterval(() => {
             pollChatMessages();
+            pollWhaleAlerts();
         }, 3000);
     }
 
@@ -914,6 +1501,7 @@
         initEvents();
         loadDonorRadarData();
         pollChatMessages();
+        pollWhaleAlerts();
         startSyncLoop();
     });
 

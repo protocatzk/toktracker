@@ -4227,12 +4227,120 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
         profile["tags"] = crm["tags"]
         profile["notes"] = crm["notes"]
 
+        # Loyalitäts-Berechnung (Konzentration auf Hauptstreamer)
+        total_spent_coins = sum(int(s.get("coins_given") or 0) for s in streamers_breakdown)
+        if total_spent_coins > 0 and streamers_breakdown:
+            top_streamer = streamers_breakdown[0]
+            top_coins = int(top_streamer.get("coins_given") or 0)
+            loyalty_score = round((top_coins / total_spent_coins) * 100, 1)
+
+            if loyalty_score >= 85:
+                loyalty_tier = "diehard"
+                loyalty_label = "Eingeschworener Stamm-Supporter"
+                loyalty_badge = f"💎 {loyalty_score}% Treue"
+                loyalty_color = "#38bdf8"
+            elif loyalty_score >= 60:
+                loyalty_tier = "focused"
+                loyalty_label = "Fokussierter Fan"
+                loyalty_badge = f"🎯 {loyalty_score}% Fokus"
+                loyalty_color = "#34d399"
+            elif loyalty_score >= 40:
+                loyalty_tier = "multi"
+                loyalty_label = "Multi-Streamer Supporter"
+                loyalty_badge = f"⚖️ {loyalty_score}% Geteilt"
+                loyalty_color = "#fbbf24"
+            else:
+                loyalty_tier = "hopper"
+                loyalty_label = "Wander-Wal / Hopper"
+                loyalty_badge = f"🌪️ {loyalty_score}% Sprunghaft"
+                loyalty_color = "#f472b6"
+
+            loyalty = {
+                "score": loyalty_score,
+                "tier": loyalty_tier,
+                "label": loyalty_label,
+                "badge": loyalty_badge,
+                "color": loyalty_color,
+                "primary_streamer": top_streamer.get("streamer_username"),
+                "primary_streamer_display": top_streamer.get("streamer_display_name") or top_streamer.get("streamer_username"),
+                "primary_coins": top_coins,
+                "streamer_count": len(streamers_breakdown),
+            }
+        else:
+            loyalty = {
+                "score": 0.0,
+                "tier": "unknown",
+                "label": "Keine Daten",
+                "badge": "-",
+                "color": "#94a3b8",
+                "primary_streamer": "",
+                "primary_streamer_display": "",
+                "primary_coins": 0,
+                "streamer_count": 0,
+            }
+
+        # Frontenwechsler-Check (Historisch vs. Letzte 14 Tage)
+        cutoff_14d = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+        period_rows = conn.execute(
+            """
+            SELECT 
+                g.streamer_id,
+                s.username as streamer_username,
+                s.display_name as streamer_display_name,
+                CASE WHEN g.created_at < ? THEN 'old' ELSE 'recent' END as period_slot,
+                SUM(g.total_coins) as coins
+            FROM gift_events g
+            JOIN streamers s ON s.id = g.streamer_id
+            WHERE LOWER(g.sender_username) = ?
+            GROUP BY g.streamer_id, period_slot
+            """,
+            (cutoff_14d, clean_uname),
+        ).fetchall()
+
+        old_streamers: Dict[int, Tuple[str, int]] = {}
+        recent_streamers: Dict[int, Tuple[str, int]] = {}
+        for pr in period_rows:
+            slot = pr["period_slot"]
+            s_name = pr["streamer_display_name"] or pr["streamer_username"]
+            coins = int(pr["coins"] or 0)
+            if slot == "old":
+                old_streamers[pr["streamer_id"]] = (s_name, coins)
+            else:
+                recent_streamers[pr["streamer_id"]] = (s_name, coins)
+
+        frontenwechsel = {
+            "is_shifted": False,
+            "status_label": "Konstant loyal",
+            "description": "Bisher kein Frontenwechsel erkannt.",
+            "from_streamer": "",
+            "to_streamer": "",
+        }
+
+        if old_streamers and recent_streamers:
+            top_old_id = max(old_streamers, key=lambda k: old_streamers[k][1])
+            top_recent_id = max(recent_streamers, key=lambda k: recent_streamers[k][1])
+            if top_old_id != top_recent_id and recent_streamers[top_recent_id][1] >= 200:
+                s_from = old_streamers[top_old_id][0]
+                s_to = recent_streamers[top_recent_id][0]
+                frontenwechsel = {
+                    "is_shifted": True,
+                    "status_label": "⚠️ Frontenwechsler",
+                    "description": f"Früher Hauptunterstützer von {s_from}, schenkt in den letzten 14 Tagen vorrangig an {s_to}!",
+                    "from_streamer": s_from,
+                    "to_streamer": s_to,
+                }
+        elif recent_streamers and not old_streamers:
+            frontenwechsel["status_label"] = "Neuerscheinung"
+            frontenwechsel["description"] = "Erst in den letzten 14 Tagen aktiv geworden."
+
         return {
             "profile": profile,
             "streamers": streamers_breakdown,
             "top_gifts": top_gifts,
             "recent_chats": recent_chats,
             "crm": crm,
+            "loyalty": loyalty,
+            "frontenwechsel": frontenwechsel,
         }
 
 
@@ -4334,5 +4442,244 @@ def toggle_donor_vip(username: str) -> Dict[str, Any]:
     """
     current = get_donor_crm(username)
     return save_donor_crm(username, is_vip=not current["is_vip"])
+
+
+def get_recent_whale_gifts(
+    min_coins: int = 1000,
+    after_id: Optional[int] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    Liefert aktuelle Großspenden (Whale- & Shark-Events) für den Live-Ticker und Audio-Alerts.
+    """
+    query = """
+    SELECT 
+        g.id, g.streamer_id, g.gift_name, g.gift_icon_url, g.diamond_count,
+        g.repeat_count, g.total_coins, g.eur_net, g.usd_net, g.eur_gross, g.usd_gross,
+        g.sender_username, g.sender_nickname, g.created_at,
+        s.username as streamer_username, s.display_name as streamer_display_name, s.avatar_url as streamer_avatar_url,
+        COALESCE(c.is_vip, 0) as is_vip,
+        COALESCE(c.tags, '') as tags
+    FROM gift_events g
+    JOIN streamers s ON s.id = g.streamer_id
+    LEFT JOIN donor_crm c ON LOWER(c.username) = LOWER(g.sender_username)
+    WHERE g.total_coins >= ?
+    """
+    params: List[Any] = [min_coins]
+    if after_id is not None:
+        query += " AND g.id > ? ORDER BY g.id ASC LIMIT ?"
+        params.extend([after_id, max(1, min(limit, 100))])
+    else:
+        query += " ORDER BY g.id DESC LIMIT ?"
+        params.append(max(1, min(limit, 100)))
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+        alerts = []
+        for r in rows:
+            d = dict(r)
+            coins = int(d["total_coins"] or 0)
+            d["is_vip"] = bool(d.get("is_vip"))
+            d["tier"] = get_donor_tier(coins)
+            d["eur_net"] = round(float(d["eur_net"] or 0.0), 2)
+            d["usd_net"] = round(float(d["usd_net"] or 0.0), 2)
+            d["eur_gross"] = round(float(d["eur_gross"] or 0.0), 2)
+            d["usd_gross"] = round(float(d["usd_gross"] or 0.0), 2)
+            raw_tags = d.get("tags") or ""
+            d["tags"] = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            alerts.append(d)
+        return alerts
+
+
+def get_network_loyalty_and_overlap(
+    min_coins: int = 250,
+    days_recent: int = 14,
+) -> Dict[str, Any]:
+    """
+    Netzwerkweite Auswertung für den Loyalitäts- & Frontenwechsler-Hub:
+    1. Frontenwechsler: Großspender, die ihren primären Streamer gewechselt haben.
+    2. Overlap-Matrix: Paare von Streamern, die sich dieselben Großspender teilen.
+    """
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days_recent)
+    cutoff = cutoff_dt.isoformat()
+
+    with get_db() as conn:
+        # 1. Frontenwechsler ermitteln
+        history_query = """
+        SELECT 
+            LOWER(g.sender_username) as uname,
+            MAX(g.sender_username) as username,
+            MAX(g.sender_nickname) as display_name,
+            g.streamer_id,
+            s.username as streamer_username,
+            s.display_name as streamer_display_name,
+            s.avatar_url as streamer_avatar_url,
+            CASE WHEN g.created_at < ? THEN 'old' ELSE 'recent' END as period_slot,
+            SUM(g.total_coins) as coins,
+            SUM(g.eur_net) as eur_net,
+            COALESCE(MAX(c.is_vip), 0) as is_vip,
+            COALESCE(MAX(c.tags), '') as tags
+        FROM gift_events g
+        JOIN streamers s ON s.id = g.streamer_id
+        LEFT JOIN donor_crm c ON LOWER(c.username) = LOWER(g.sender_username)
+        GROUP BY LOWER(g.sender_username), g.streamer_id, period_slot
+        HAVING SUM(g.total_coins) >= 50
+        """
+        h_rows = conn.execute(history_query, (cutoff,)).fetchall()
+
+        donors_data: Dict[str, Dict[str, Any]] = {}
+        for r in h_rows:
+            uname = r["uname"]
+            if uname not in donors_data:
+                donors_data[uname] = {
+                    "username": r["username"],
+                    "display_name": r["display_name"] or r["username"],
+                    "is_vip": bool(r["is_vip"]),
+                    "tags": [t.strip() for t in (r["tags"] or "").split(",") if t.strip()],
+                    "old_streamers": {},
+                    "recent_streamers": {},
+                    "total_coins": 0,
+                }
+            coins = int(r["coins"] or 0)
+            eur = float(r["eur_net"] or 0.0)
+            donors_data[uname]["total_coins"] += coins
+            streamer_info = {
+                "id": r["streamer_id"],
+                "username": r["streamer_username"],
+                "display_name": r["streamer_display_name"] or r["streamer_username"],
+                "avatar_url": r["streamer_avatar_url"],
+                "coins": coins,
+                "eur_net": eur,
+            }
+            if r["period_slot"] == "old":
+                donors_data[uname]["old_streamers"][r["streamer_id"]] = streamer_info
+            else:
+                donors_data[uname]["recent_streamers"][r["streamer_id"]] = streamer_info
+
+        frontenwechsler = []
+        for uname, d in donors_data.items():
+            if not d["old_streamers"] or not d["recent_streamers"]:
+                continue
+            old_top_id = max(d["old_streamers"], key=lambda sid: d["old_streamers"][sid]["coins"])
+            recent_top_id = max(d["recent_streamers"], key=lambda sid: d["recent_streamers"][sid]["coins"])
+
+            if old_top_id != recent_top_id:
+                recent_coins_top = d["recent_streamers"][recent_top_id]["coins"]
+                if recent_coins_top >= min_coins:
+                    total_recent_coins = sum(s["coins"] for s in d["recent_streamers"].values())
+                    recent_share = round((recent_coins_top / total_recent_coins) * 100, 1) if total_recent_coins > 0 else 0.0
+
+                    old_s = d["old_streamers"][old_top_id]
+                    recent_s = d["recent_streamers"][recent_top_id]
+
+                    frontenwechsler.append({
+                        "username": d["username"],
+                        "display_name": d["display_name"],
+                        "is_vip": d["is_vip"],
+                        "tier": get_donor_tier(d["total_coins"]),
+                        "tags": d["tags"],
+                        "from_streamer": {
+                            "id": old_s["id"],
+                            "username": old_s["username"],
+                            "display_name": old_s["display_name"],
+                            "coins": old_s["coins"],
+                        },
+                        "to_streamer": {
+                            "id": recent_s["id"],
+                            "username": recent_s["username"],
+                            "display_name": recent_s["display_name"],
+                            "coins": recent_s["coins"],
+                            "eur_net": round(recent_s["eur_net"], 2),
+                        },
+                        "recent_share_percent": recent_share,
+                        "shift_volume_coins": recent_coins_top,
+                        "shift_volume_eur": round(recent_s["eur_net"], 2),
+                        "migration_type": "Kompletter Wechsel" if old_top_id not in d["recent_streamers"] else "Schwerpunkt-Verlagerung",
+                    })
+
+        frontenwechsler.sort(key=lambda x: x["shift_volume_coins"], reverse=True)
+
+        # 2. Streamer Overlap Matrix (Gemeinsame Großspender)
+        overlap_query = """
+        SELECT 
+            d1.streamer_id as s1_id,
+            s1.username as s1_username,
+            s1.display_name as s1_display_name,
+            s1.avatar_url as s1_avatar,
+            d2.streamer_id as s2_id,
+            s2.username as s2_username,
+            s2.display_name as s2_display_name,
+            s2.avatar_url as s2_avatar,
+            COUNT(d1.uname) as shared_donors_count,
+            SUM(d1.coins + d2.coins) as shared_volume_coins,
+            SUM(d1.eur_net + d2.eur_net) as shared_volume_eur
+        FROM (
+            SELECT LOWER(sender_username) as uname, streamer_id, SUM(total_coins) as coins, SUM(eur_net) as eur_net
+            FROM gift_events
+            GROUP BY LOWER(sender_username), streamer_id
+            HAVING SUM(total_coins) >= 50
+        ) d1
+        JOIN (
+            SELECT LOWER(sender_username) as uname, streamer_id, SUM(total_coins) as coins, SUM(eur_net) as eur_net
+            FROM gift_events
+            GROUP BY LOWER(sender_username), streamer_id
+            HAVING SUM(total_coins) >= 50
+        ) d2 ON d1.uname = d2.uname AND d1.streamer_id < d2.streamer_id
+        JOIN streamers s1 ON s1.id = d1.streamer_id
+        JOIN streamers s2 ON s2.id = d2.streamer_id
+        GROUP BY d1.streamer_id, d2.streamer_id
+        HAVING shared_donors_count >= 1
+        ORDER BY shared_volume_coins DESC
+        LIMIT 25
+        """
+        pair_rows = conn.execute(overlap_query).fetchall()
+        overlap_matrix = []
+        for pr in pair_rows:
+            p_dict = dict(pr)
+            s1_id = p_dict["s1_id"]
+            s2_id = p_dict["s2_id"]
+
+            shared_top_rows = conn.execute(
+                """
+                SELECT 
+                    LOWER(g.sender_username) as uname,
+                    MAX(g.sender_username) as username,
+                    MAX(g.sender_nickname) as display_name,
+                    SUM(g.total_coins) as coins,
+                    COALESCE(MAX(c.is_vip), 0) as is_vip
+                FROM gift_events g
+                LEFT JOIN donor_crm c ON LOWER(c.username) = LOWER(g.sender_username)
+                WHERE g.streamer_id IN (?, ?)
+                GROUP BY LOWER(g.sender_username)
+                HAVING COUNT(DISTINCT g.streamer_id) = 2
+                ORDER BY coins DESC
+                LIMIT 5
+                """,
+                (s1_id, s2_id),
+            ).fetchall()
+
+            top_shared = []
+            for sr in shared_top_rows:
+                top_shared.append({
+                    "username": sr["username"],
+                    "display_name": sr["display_name"] or sr["username"],
+                    "coins": int(sr["coins"] or 0),
+                    "is_vip": bool(sr["is_vip"]),
+                    "tier": get_donor_tier(int(sr["coins"] or 0)),
+                })
+
+            p_dict["top_shared_donors"] = top_shared
+            p_dict["shared_volume_eur"] = round(float(p_dict["shared_volume_eur"] or 0.0), 2)
+            overlap_matrix.append(p_dict)
+
+        return {
+            "frontenwechsler": frontenwechsler,
+            "overlap_matrix": overlap_matrix,
+            "days_recent": days_recent,
+            "summary": {
+                "total_shifters": len(frontenwechsler),
+                "total_overlap_pairs": len(overlap_matrix),
+            },
+        }
 
 

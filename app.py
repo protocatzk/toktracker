@@ -30,6 +30,8 @@ from database import (
     get_donor_crm,
     get_donor_details,
     get_donor_radar_data,
+    get_network_loyalty_and_overlap,
+    get_recent_whale_gifts,
     get_settings,
     get_site_analytics_overview,
     get_streamer_by_id_or_username,
@@ -1283,6 +1285,49 @@ async def api_toggle_donor_vip(username: str):
     init_db()
     res = toggle_donor_vip(username)
     return {"ok": True, "data": res}
+
+
+@app.get(
+    "/api/donor-radar/whale-alerts",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Echtzeit-Großspenden (Whale- & Shark-Events) für Live-Ticker und Audio-Alerts",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/donor-radar/whale-alerts",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert Echtzeit-Großspenden (Whale- & Shark-Events) für Live-Ticker und Audio-Alerts",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_whale_alerts(
+    min_coins: int = Query(1000, ge=50, le=100000, description="Mindestanzahl Coins für den Whale-Alert"),
+    after_id: Optional[int] = Query(None, description="Nur Geschenke mit ID > after_id abrufen"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    init_db()
+    alerts = get_recent_whale_gifts(min_coins=min_coins, after_id=after_id, limit=limit)
+    return {"ok": True, "alerts": alerts}
+
+
+@app.get(
+    "/api/donor-radar/loyalty-and-overlap",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert netzwerkweite Frontenwechsler-Analyse und Streamer-Überschneidungsmatrix",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/donor-radar/loyalty-and-overlap",
+    tags=["Spenderradar & Chatlog"],
+    summary="Liefert netzwerkweite Frontenwechsler-Analyse und Streamer-Überschneidungsmatrix",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_loyalty_and_overlap(
+    min_coins: int = Query(250, ge=50, description="Mindestmünzen für Frontenwechsler"),
+    days_recent: int = Query(14, ge=3, le=90, description="Zeitfenster für die aktuelle Periode in Tagen"),
+):
+    init_db()
+    data = get_network_loyalty_and_overlap(min_coins=min_coins, days_recent=days_recent)
+    return {"ok": True, "data": data}
 
 
 @app.get(

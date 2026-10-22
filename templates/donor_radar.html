@@ -424,6 +424,166 @@
             border-color: #fbbf24;
             box-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
         }
+
+        /* Whale Ticker Bar */
+        .whale-ticker-bar {
+            background: linear-gradient(90deg, rgba(147, 51, 234, 0.15) 0%, rgba(30, 41, 59, 0.85) 100%);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            border-radius: var(--radius-md, 6px);
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 14px rgba(147, 51, 234, 0.15);
+            overflow: hidden;
+        }
+        .whale-ticker-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            color: #d8b4fe;
+            white-space: nowrap;
+            text-transform: uppercase;
+        }
+        .ticker-pulse {
+            width: 8px;
+            height: 8px;
+            background: #a855f7;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #c084fc;
+            animation: pulse-glow 1.5s infinite;
+        }
+        @keyframes pulse-glow {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px #e9d5ff; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+        .whale-ticker-content {
+            flex: 1;
+            overflow-x: auto;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            scrollbar-width: none;
+        }
+        .whale-ticker-content::-webkit-scrollbar {
+            display: none;
+        }
+        .whale-ticker-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            padding: 3px 9px;
+            border-radius: 20px;
+            font-size: 11.5px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .whale-ticker-chip:hover {
+            border-color: #a855f7;
+            transform: translateY(-1px);
+        }
+        .whale-ticker-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        /* Whale Toast Container */
+        .whale-toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            max-width: 380px;
+            width: calc(100% - 40px);
+        }
+        .whale-toast {
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid #a855f7;
+            border-left: 4px solid #c084fc;
+            border-radius: 8px;
+            padding: 12px 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(168, 85, 247, 0.35);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            transition: all 0.25s ease;
+            cursor: pointer;
+        }
+        .whale-toast:hover {
+            transform: translateY(-2px);
+            border-color: #e9d5ff;
+        }
+        @keyframes toast-in {
+            from { transform: translateX(110%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes toast-out {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(110%); opacity: 0; }
+        }
+
+        /* Loyalty Hub Styling */
+        .hub-nav-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .hub-nav-btn.active {
+            background: var(--bg-surface);
+            border-color: #a855f7;
+            color: #d8b4fe;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+        }
+        .loyalty-progress-wrap {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-surface);
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+            margin: 6px 0;
+        }
+        .loyalty-progress-bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+        .tag-shifter {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            color: #fca5a5;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 10.5px;
+            font-weight: 800;
+            font-family: var(--font-mono, monospace);
+        }
     </style>
 </head>
 <body>
@@ -482,6 +642,31 @@
 
 <!-- Main Container -->
 <main class="page-container" style="max-width: 1440px; margin: 0 auto; padding: 20px 16px;">
+
+    <!-- Pop-in Whale Alert Toasts Container -->
+    <div id="whaleToastContainer" class="whale-toast-container"></div>
+
+    <!-- Live Whale-Alert Ticker Bar -->
+    <div class="whale-ticker-bar">
+        <div class="whale-ticker-label">
+            <span class="ticker-pulse"></span>
+            <span>WHALE-TICKER</span>
+        </div>
+        <div class="whale-ticker-content" id="whaleTickerTrack">
+            <span class="mono muted" style="font-size: 11.5px; padding: 0 10px;">Lade Live-Großspenden (&ge; <span id="tickerMinCoinsLabel">1.000</span> Coins)...</span>
+        </div>
+        <div class="whale-ticker-controls">
+            <select id="selWhaleThreshold" style="padding: 3px 6px; font-size: 11px; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <option value="500">&ge; 500 Coins</option>
+                <option value="1000" selected>&ge; 1.000 Coins</option>
+                <option value="2500">&ge; 2.500 Coins (Shark)</option>
+                <option value="10000">&ge; 10.000 Coins (Whale)</option>
+            </select>
+            <button type="button" id="btnToggleWhaleSound" class="btn-link sm" style="padding: 2px 8px; font-size: 11px;">
+                🔊 Sound AN
+            </button>
+        </div>
+    </div>
 
     <!-- KPI Summary Row -->
     <div class="radar-hero">
@@ -570,8 +755,31 @@
         </div>
     </div>
 
-    <!-- Main Split Layout -->
-    <div class="radar-split-container">
+    <!-- View Mode Switcher -->
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; gap: 8px;">
+            <button type="button" class="hub-nav-btn active" id="btnTabLeaderboard">
+                🐋 Spender-Leaderboard &amp; Chat
+            </button>
+            <button type="button" class="hub-nav-btn" id="btnTabLoyaltyHub">
+                🔀 Loyalitäts- &amp; Frontenwechsler-Hub
+            </button>
+        </div>
+        <div id="loyaltyHubControls" style="display: none; align-items: center; gap: 10px;">
+            <span class="mono muted" style="font-size: 11.5px;">Zeitraum für Loyalitäts-Wechsel:</span>
+            <select id="selLoyaltyDays" style="padding: 4px 8px; font-size: 11.5px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <option value="7">Letzte 7 Tage</option>
+                <option value="14" selected>Letzte 14 Tage</option>
+                <option value="30">Letzte 30 Tage</option>
+            </select>
+            <button type="button" id="btnRefreshLoyaltyHub" class="btn-link sm" style="padding: 3px 8px; font-size: 11px;">
+                ↻ Neu berechnen
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Split Layout (Leaderboard & Chat) -->
+    <div id="radarSplitLayout" class="radar-split-container">
 
         <!-- Column 1: Spender-Radar Leaderboard -->
         <div class="box" style="margin-bottom: 0; display: flex; flex-direction: column;">
@@ -667,6 +875,86 @@
                 <button type="button" id="btnScrollBottom" class="btn-link sm" style="font-size: 11px; padding: 2px 8px;">
                     ↓ Nach unten
                 </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Loyalty & Frontenwechsler Hub Layout -->
+    <div id="loyaltyHubLayout" style="display: none; flex-direction: column; gap: 20px;">
+
+        <!-- Section 1: Frontenwechsler & Spender-Migrationen -->
+        <div class="box" style="margin-bottom: 0;">
+            <div class="box-header" style="flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2 style="display: flex; align-items: center; gap: 8px;">
+                        <span>🔀 Frontenwechsler &amp; Spender-Migrationen</span>
+                        <span id="frontenwechslerBadge" class="tag-shifter" style="font-size: 11px;">0 Erkannt</span>
+                    </h2>
+                    <div class="section-hint">Großspender, deren Spendenfokus sich vom früheren Haupt-Streamer zu einem neuen Kanal verlagert hat.</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="mono muted" style="font-size: 11px;">Mindestspenden: &ge; 500 Coins</span>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="data-table" id="frontenwechslerTable">
+                    <thead>
+                        <tr>
+                            <th>Spender</th>
+                            <th>Status &amp; VIP</th>
+                            <th>Früherer Haupt-Kanal</th>
+                            <th>Neuer Fokus-Kanal</th>
+                            <th style="text-align: right;">Früher (Coins)</th>
+                            <th style="text-align: right;">Kürzlich (Coins)</th>
+                            <th>Loyalitäts-Score</th>
+                            <th style="text-align: center;">Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody id="frontenwechslerTableBody">
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                Keine Frontenwechsler im gewählten Zeitraum erkannt.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Section 2: Streamer-Überschneidungs-Matrix (Shared Whales) -->
+        <div class="box" style="margin-bottom: 0;">
+            <div class="box-header" style="flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2 style="display: flex; align-items: center; gap: 8px;">
+                        <span>⚡ Streamer-Überschneidungs-Matrix</span>
+                        <span id="overlapPairsBadge" class="mono muted" style="font-size: 11px; background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-subtle);">0 Kanal-Paare</span>
+                    </h2>
+                    <div class="section-hint">Überwachte Streamer, die sich signifikante Spender und Coins teilen (Netzwerk-Synergien oder Spender-Wettstreit).</div>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="data-table" id="overlapMatrixTable">
+                    <thead>
+                        <tr>
+                            <th>Streamer-Paar</th>
+                            <th style="text-align: right;">Gemeinsame Spender</th>
+                            <th style="text-align: right;">Gesamt-Münzen (Paar)</th>
+                            <th style="text-align: right;">Volumen Kanal A</th>
+                            <th style="text-align: right;">Volumen Kanal B</th>
+                            <th style="min-width: 140px;">Verteilung (Split)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="overlapMatrixBody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                Lade Überschneidungs-Matrix...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
