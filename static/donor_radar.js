@@ -12,6 +12,9 @@
     let donorSearch = "";
     let donorTier = "";
     let crossOnly = false;
+    let vipOnly = false;
+    let currentDossierData = null;
+    let currentDossierTags = [];
     let chatSearch = "";
     let whaleOnlyChat = false;
     let chatPaused = false;
@@ -31,12 +34,15 @@
     const kpiSharksCount = document.getElementById("kpiSharksCount");
     const kpiDolphinsCount = document.getElementById("kpiDolphinsCount");
     const kpiCrossCount = document.getElementById("kpiCrossCount");
+    const kpiVipCount = document.getElementById("kpiVipCount");
+    const cardKpiVip = document.getElementById("cardKpiVip");
     const kpiChatCount = document.getElementById("kpiChatCount");
 
     // Donor Elements
     const donorSearchInput = document.getElementById("donorSearchInput");
     const donorTierFilter = document.getElementById("donorTierFilter");
     const chkCrossOnly = document.getElementById("chkCrossOnly");
+    const chkVipOnly = document.getElementById("chkVipOnly");
     const donorTableBody = document.getElementById("donorTableBody");
 
     // Chat Elements
@@ -149,6 +155,23 @@
             });
         }
 
+        if (chkVipOnly) {
+            chkVipOnly.addEventListener("change", () => {
+                vipOnly = chkVipOnly.checked;
+                loadDonorRadarData();
+            });
+        }
+
+        if (cardKpiVip) {
+            cardKpiVip.addEventListener("click", () => {
+                if (chkVipOnly) {
+                    chkVipOnly.checked = !chkVipOnly.checked;
+                    vipOnly = chkVipOnly.checked;
+                    loadDonorRadarData();
+                }
+            });
+        }
+
         // Chat controls
         if (chkWhaleOnlyChat) {
             chkWhaleOnlyChat.addEventListener("change", () => {
@@ -240,6 +263,7 @@
             if (donorSearch) params.append("search", donorSearch);
             if (donorTier) params.append("min_tier", donorTier);
             if (crossOnly) params.append("cross_streamer_only", "true");
+            if (vipOnly) params.append("vip_only", "true");
 
             const res = await fetch(`/api/donor-radar?${params.toString()}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -264,6 +288,7 @@
         if (kpiSharksCount) kpiSharksCount.textContent = formatNumber(kpis.sharks);
         if (kpiDolphinsCount) kpiDolphinsCount.textContent = formatNumber(kpis.dolphins);
         if (kpiCrossCount) kpiCrossCount.textContent = formatNumber(kpis.cross_streamer_whales);
+        if (kpiVipCount) kpiVipCount.textContent = formatNumber(kpis.vip_donors || 0);
         if (kpiChatCount) kpiChatCount.textContent = formatNumber(kpis.total_chat_messages);
     }
 
@@ -300,17 +325,38 @@
                 ? `<span class="tag-cross-streamer" title="Beschenkt ${d.streamer_count} verschiedene Streamer">⚡ ${d.streamer_count} Kanäle</span>`
                 : "";
 
+            const isVip = Boolean(d.is_vip);
+            const starTitle = isVip ? "Von VIP-Watchlist entfernen" : "Auf VIP-Watchlist setzen";
+            const starChar = isVip ? "★" : "☆";
+            const starBtn = `<button type="button" class="vip-star-btn ${isVip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleVipQuick('${uname}', event)" title="${starTitle}">${starChar}</button>`;
+
+            const tagsList = Array.isArray(d.tags) ? d.tags : [];
+            const tagsHtml = tagsList.length > 0
+                ? tagsList.map(t => `<span class="crm-tag-pill">${escapeHtml(t)}</span>`).join(" ")
+                : "";
+
+            const notesIcon = d.has_notes
+                ? `<span class="crm-notes-badge" title="Notizen hinterlegt: ${escapeHtml(d.notes || '')}">📝</span>`
+                : "";
+
             html += `
                 <tr>
                     <td class="mono muted">${idx + 1}</td>
                     <td class="hide-sm">${tierBadge}</td>
                     <td>
-                        <div style="display:flex; flex-direction:column;">
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <strong style="color:var(--text-strong); cursor:pointer;" onclick="window.tokRadar.openDossier('${uname}')">${dname}</strong>
-                                ${crossBadge}
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            ${starBtn}
+                            <div style="display:flex; flex-direction:column;">
+                                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                    <strong style="color:var(--text-strong); cursor:pointer;" onclick="window.tokRadar.openDossier('${uname}')">${dname}</strong>
+                                    ${crossBadge}
+                                    ${notesIcon}
+                                </div>
+                                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                                    <span class="mono muted" style="font-size:11px;">@${uname}</span>
+                                    ${tagsHtml}
+                                </div>
                             </div>
-                            <span class="mono muted" style="font-size:11px;">@${uname}</span>
                         </div>
                     </td>
                     <td class="num-col mono" style="font-weight:700; color:#38bdf8;">${formatNumber(d.total_coins)}</td>
@@ -563,13 +609,23 @@
             chatsHtml = `<div style="color:var(--text-muted); font-size:12px;">Keine Chatnachrichten in den letzten 7 Tagen archiviert.</div>`;
         }
 
+        // CRM & Dossier State
+        currentDossierData = data;
+        const crm = data.crm || { is_vip: false, tags: [], notes: "", updated_at: null };
+        currentDossierTags = Array.isArray(crm.tags) ? [...crm.tags] : [];
+
         donorModalBody.innerHTML = `
             <!-- Top Profile Card -->
             <div style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:8px; padding:16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;">
                 <div style="display:flex; align-items:center; gap:14px;">
                     ${avatar}
                     <div>
-                        <h3 style="margin:0; font-size:18px; color:var(--text-strong);">${escapeHtml(p.display_name)}</h3>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <h3 style="margin:0; font-size:18px; color:var(--text-strong);">${escapeHtml(p.display_name)}</h3>
+                            <button type="button" class="vip-star-btn ${crm.is_vip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleModalVip()" title="VIP-Status umschalten" style="font-size:18px;">
+                                ${crm.is_vip ? '★' : '☆'}
+                            </button>
+                        </div>
                         <div class="mono muted" style="font-size:12px;">@${escapeHtml(p.username)}</div>
                         <div style="margin-top:4px; font-size:11.5px; color:var(--text-muted);">
                             Aktiv: <span class="mono">${escapeHtml(p.first_seen || "-")}</span> bis <span class="mono">${escapeHtml(p.last_seen || "-")}</span>
@@ -589,6 +645,62 @@
                     <div style="text-align:right;">
                         <div class="mono muted" style="font-size:11px;">BRUTTO (KAUF)</div>
                         <div class="mono" style="font-size:20px; font-weight:800; color:#fbbf24;">${formatCurrency(p.total_eur_gross, "EUR")}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CRM & VIP Watchlist Section -->
+            <div class="crm-card">
+                <div class="crm-card-header">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:16px;">⭐</span>
+                        <strong style="font-size:14px; color:var(--text-strong);">Gifter-CRM &amp; VIP-Watchlist</strong>
+                        <span id="crmSaveStatus" class="mono" style="font-size:11px; color:#4ade80; display:none; margin-left:6px; font-weight:700;">✓ Gespeichert</span>
+                    </div>
+                    <button type="button" id="modalBtnToggleVip" class="crm-vip-toggle ${crm.is_vip ? 'active' : ''}" onclick="window.tokRadar.toggleModalVip()">
+                        ${crm.is_vip ? '★ Auf VIP-Watchlist' : '☆ Nicht auf Watchlist'}
+                    </button>
+                </div>
+
+                <!-- Tags Management -->
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tags &amp; Einstufung:</span>
+                    </div>
+                    <div id="modalActiveTags" style="display:flex; flex-wrap:wrap; gap:6px; min-height:24px; align-items:center;">
+                        ${renderModalTagsHtml(currentDossierTags)}
+                    </div>
+                    
+                    <!-- Quick Tag Suggestions & Custom Input -->
+                    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                        <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                            <span class="mono muted" style="font-size:10.5px;">Vorschläge:</span>
+                            <span class="crm-quick-tag" onclick="window.tokRadar.addModalTag('Mega-Wal')">+ Mega-Wal</span>
+                            <span class="crm-quick-tag" onclick="window.tokRadar.addModalTag('Agentur-Chef')">+ Agentur-Chef</span>
+                            <span class="crm-quick-tag" onclick="window.tokRadar.addModalTag('Match-Sniper')">+ Match-Sniper</span>
+                            <span class="crm-quick-tag" onclick="window.tokRadar.addModalTag('Stamm-Gifter')">+ Stamm-Gifter</span>
+                            <span class="crm-quick-tag" onclick="window.tokRadar.addModalTag('High-Roller')">+ High-Roller</span>
+                            <span class="crm-quick-tag" onclick="window.tokRadar.addModalTag('Troll/Fake')">+ Troll/Fake</span>
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <input type="text" id="modalNewTagInput" placeholder="Neuer Tag..." style="padding:4px 8px; font-size:11.5px; background:var(--bg-surface); color:var(--text-main); border:1px solid var(--border-color); border-radius:4px; width:130px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.tokRadar.addCustomModalTag();}" />
+                            <button type="button" class="btn-link sm" onclick="window.tokRadar.addCustomModalTag()" style="padding:3px 8px; font-size:11.5px;">+ Tag</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notes Management -->
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <label for="modalNotesTextarea" style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Interne Admin-Notizen:</label>
+                        <span class="mono muted" style="font-size:10.5px;">Stand: <span id="modalCrmUpdated">${escapeHtml(crm.updated_at ? formatTimestamp(crm.updated_at) : 'Keine')}</span></span>
+                    </div>
+                    <textarea id="modalNotesTextarea" class="crm-notes-textarea" placeholder="Interne Notizen zu diesem Spender (z. B. Streamer-Präferenzen, Taktik bei Matches, Agentur-Zugehörigkeit, Hintergrundinfos)...">${escapeHtml(crm.notes || "")}</textarea>
+                    <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+                        <button type="button" id="btnSaveCrmNotes" class="btn-link primary sm" onclick="window.tokRadar.saveModalCrm(true)" style="padding:5px 14px; font-size:12px;">
+                            💾 Notizen &amp; Tags speichern
+                        </button>
                     </div>
                 </div>
             </div>
@@ -633,6 +745,140 @@
         `;
     }
 
+    function renderModalTagsHtml(tags) {
+        if (!tags || tags.length === 0) {
+            return `<span class="mono muted" style="font-size:11px;">Keine Tags zugewiesen. Wähle unten einen Vorschlag oder erstelle einen neuen Tag.</span>`;
+        }
+        return tags.map((t, idx) => `
+            <span class="crm-tag-pill">
+                ${escapeHtml(t)}
+                <span class="tag-del-btn" onclick="window.tokRadar.removeModalTag(${idx})" title="Tag entfernen">×</span>
+            </span>
+        `).join("");
+    }
+
+    // Quick toggle VIP from Table
+    async function toggleVipQuick(username, evt) {
+        if (evt) evt.stopPropagation();
+        try {
+            const btn = evt ? evt.currentTarget : null;
+            if (btn) btn.style.transform = "scale(1.4)";
+            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/toggle-vip`, {
+                method: "POST"
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (json.ok) {
+                loadDonorRadarData();
+            }
+        } catch (e) {
+            console.error("Fehler beim Umschalten des VIP-Status:", e);
+        }
+    }
+
+    // Toggle VIP inside Dossier Modal
+    async function toggleModalVip() {
+        if (!currentDossierData || !currentDossierData.profile) return;
+        const uname = currentDossierData.profile.username;
+        try {
+            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(uname)}/toggle-vip`, {
+                method: "POST"
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (json.ok && json.data) {
+                currentDossierData.crm = json.data;
+                const isVip = Boolean(json.data.is_vip);
+                const btn = document.getElementById("modalBtnToggleVip");
+                if (btn) {
+                    btn.className = `crm-vip-toggle ${isVip ? 'active' : ''}`;
+                    btn.innerHTML = isVip ? '★ Auf VIP-Watchlist' : '☆ Nicht auf Watchlist';
+                }
+                showCrmSaveStatus();
+                loadDonorRadarData();
+            }
+        } catch (e) {
+            console.error("Fehler beim Umschalten des VIP-Status:", e);
+        }
+    }
+
+    // Add Tag
+    function addModalTag(tag) {
+        const cleanTag = String(tag || "").trim().replace(/,/g, "");
+        if (!cleanTag) return;
+        if (!currentDossierTags.includes(cleanTag)) {
+            currentDossierTags.push(cleanTag);
+            const container = document.getElementById("modalActiveTags");
+            if (container) container.innerHTML = renderModalTagsHtml(currentDossierTags);
+            saveModalCrm(false);
+        }
+    }
+
+    function addCustomModalTag() {
+        const input = document.getElementById("modalNewTagInput");
+        if (!input) return;
+        const val = input.value.trim();
+        if (val) {
+            addModalTag(val);
+            input.value = "";
+        }
+    }
+
+    function removeModalTag(idx) {
+        if (idx >= 0 && idx < currentDossierTags.length) {
+            currentDossierTags.splice(idx, 1);
+            const container = document.getElementById("modalActiveTags");
+            if (container) container.innerHTML = renderModalTagsHtml(currentDossierTags);
+            saveModalCrm(false);
+        }
+    }
+
+    // Save Notes & Tags
+    async function saveModalCrm(showNotification = true) {
+        if (!currentDossierData || !currentDossierData.profile) return;
+        const uname = currentDossierData.profile.username;
+        const textarea = document.getElementById("modalNotesTextarea");
+        const notes = textarea ? textarea.value.trim() : (currentDossierData.crm ? currentDossierData.crm.notes : "");
+
+        try {
+            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(uname)}/crm`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    is_vip: currentDossierData.crm ? currentDossierData.crm.is_vip : false,
+                    tags: currentDossierTags,
+                    notes: notes,
+                })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (json.ok && json.data) {
+                currentDossierData.crm = json.data;
+                const updatedSpan = document.getElementById("modalCrmUpdated");
+                if (updatedSpan && json.data.updated_at) {
+                    updatedSpan.textContent = formatTimestamp(json.data.updated_at);
+                }
+                if (showNotification) {
+                    showCrmSaveStatus();
+                }
+                loadDonorRadarData();
+            }
+        } catch (e) {
+            console.error("Fehler beim Speichern der CRM-Daten:", e);
+            if (showNotification) alert("Fehler beim Speichern der Notizen.");
+        }
+    }
+
+    function showCrmSaveStatus() {
+        const el = document.getElementById("crmSaveStatus");
+        if (!el) return;
+        el.style.display = "inline";
+        el.style.opacity = "1";
+        setTimeout(() => {
+            el.style.display = "none";
+        }, 2500);
+    }
+
     function closeDonorModal() {
         if (donorModalOverlay) donorModalOverlay.style.display = "none";
     }
@@ -655,6 +901,12 @@
     // Export globally for inline onclick
     window.tokRadar = {
         openDossier: openDossier,
+        toggleVipQuick: toggleVipQuick,
+        toggleModalVip: toggleModalVip,
+        addModalTag: addModalTag,
+        addCustomModalTag: addCustomModalTag,
+        removeModalTag: removeModalTag,
+        saveModalCrm: saveModalCrm,
     };
 
     // Initialize on DOM Ready

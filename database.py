@@ -3,8 +3,8 @@ import re
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timedelta
-from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple, Union
 
 try:
     import pymysql
@@ -401,6 +401,19 @@ def _init_mysql_schema() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS donor_crm (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(191) NOT NULL UNIQUE,
+                is_vip TINYINT DEFAULT 0,
+                tags TEXT,
+                notes TEXT,
+                created_at VARCHAR(64) NOT NULL,
+                updated_at VARCHAR(64) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
 
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
@@ -420,6 +433,8 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_created", "created_at")
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_username", "username")
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_whale", "is_whale, streamer_id")
+        _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_username", "username")
+        _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_vip", "is_vip")
 
         _ensure_column_mysql(conn, "tiktok_battles", "battle_mode", "VARCHAR(32) DEFAULT '1v1'")
         _ensure_column_mysql(conn, "tiktok_battles", "teammate_user_id", "VARCHAR(128) DEFAULT ''")
@@ -591,6 +606,16 @@ def _init_sqlite_schema() -> None:
                 FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
                 FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
             );
+
+            CREATE TABLE IF NOT EXISTS donor_crm (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                is_vip INTEGER DEFAULT 0,
+                tags TEXT DEFAULT '',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
 
@@ -664,6 +689,10 @@ def _init_sqlite_schema() -> None:
                 ON chat_messages(username);
             CREATE INDEX IF NOT EXISTS idx_chat_messages_whale
                 ON chat_messages(is_whale, streamer_id);
+            CREATE INDEX IF NOT EXISTS idx_donor_crm_username
+                ON donor_crm(username);
+            CREATE INDEX IF NOT EXISTS idx_donor_crm_vip
+                ON donor_crm(is_vip);
             """
         )
 
@@ -3904,13 +3933,14 @@ def get_donor_radar_data(
     min_tier: Optional[str] = None,
     streamer_id: Optional[int] = None,
     cross_streamer_only: bool = False,
+    vip_only: bool = False,
     search: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ) -> Dict[str, Any]:
     """
     Aggregiert Spender und Wale über alle getrackten Streamer.
-    Liefert KPI-Karten, Cross-Streamer-Erkennung und Top-Spender-Rangliste.
+    Liefert KPI-Karten, Cross-Streamer-Erkennung und Top-Spender-Rangliste inkl. VIP/CRM-Status.
     """
     cutoff = _get_period_cutoff(period)
 
@@ -3918,50 +3948,57 @@ def get_donor_radar_data(
     params: List[Any] = []
 
     if cutoff:
-        where_clauses.append("created_at >= ?")
+        where_clauses.append("g.created_at >= ?")
         params.append(cutoff)
 
     if streamer_id:
-        where_clauses.append("streamer_id = ?")
+        where_clauses.append("g.streamer_id = ?")
         params.append(streamer_id)
 
     if search:
         search_pattern = f"%{search.strip().lower()}%"
-        where_clauses.append("(LOWER(sender_username) LIKE ? OR LOWER(sender_nickname) LIKE ?)")
+        where_clauses.append("(LOWER(g.sender_username) LIKE ? OR LOWER(g.sender_nickname) LIKE ?)")
         params.extend([search_pattern, search_pattern])
 
     where_sql = " AND ".join(where_clauses)
 
     having_clauses = []
     if min_tier == "whale":
-        having_clauses.append("SUM(total_coins) >= 10000")
+        having_clauses.append("SUM(g.total_coins) >= 10000")
     elif min_tier == "shark":
-        having_clauses.append("SUM(total_coins) >= 2500")
+        having_clauses.append("SUM(g.total_coins) >= 2500")
     elif min_tier == "dolphin":
-        having_clauses.append("SUM(total_coins) >= 500")
+        having_clauses.append("SUM(g.total_coins) >= 500")
 
     if cross_streamer_only:
-        having_clauses.append("COUNT(DISTINCT streamer_id) >= 2")
+        having_clauses.append("COUNT(DISTINCT g.streamer_id) >= 2")
+
+    if vip_only:
+        having_clauses.append("COALESCE(MAX(c.is_vip), 0) = 1")
 
     having_sql = f"HAVING {' AND '.join(having_clauses)}" if having_clauses else ""
 
     query = f"""
     SELECT 
-        LOWER(sender_username) AS uname_key,
-        MAX(sender_username) AS username,
-        MAX(sender_nickname) AS display_name,
-        SUM(total_coins) AS total_coins,
-        SUM(eur_net) AS total_eur_net,
-        SUM(usd_net) AS total_usd_net,
-        SUM(eur_gross) AS total_eur_gross,
-        SUM(usd_gross) AS total_usd_gross,
-        COUNT(id) AS total_gifts,
-        COUNT(DISTINCT streamer_id) AS streamer_count,
-        MIN(created_at) AS first_seen,
-        MAX(created_at) AS last_seen
-    FROM gift_events
+        LOWER(g.sender_username) AS uname_key,
+        MAX(g.sender_username) AS username,
+        MAX(g.sender_nickname) AS display_name,
+        SUM(g.total_coins) AS total_coins,
+        SUM(g.eur_net) AS total_eur_net,
+        SUM(g.usd_net) AS total_usd_net,
+        SUM(g.eur_gross) AS total_eur_gross,
+        SUM(g.usd_gross) AS total_usd_gross,
+        COUNT(g.id) AS total_gifts,
+        COUNT(DISTINCT g.streamer_id) AS streamer_count,
+        MIN(g.created_at) AS first_seen,
+        MAX(g.created_at) AS last_seen,
+        COALESCE(MAX(c.is_vip), 0) AS is_vip,
+        MAX(c.tags) AS tags,
+        MAX(c.notes) AS notes
+    FROM gift_events g
+    LEFT JOIN donor_crm c ON LOWER(c.username) = LOWER(g.sender_username)
     WHERE {where_sql}
-    GROUP BY LOWER(sender_username)
+    GROUP BY LOWER(g.sender_username)
     {having_sql}
     ORDER BY total_coins DESC
     LIMIT ? OFFSET ?
@@ -3980,6 +4017,11 @@ def get_donor_radar_data(
             d["total_usd_net"] = round(float(d["total_usd_net"] or 0.0), 2)
             d["total_eur_gross"] = round(float(d["total_eur_gross"] or 0.0), 2)
             d["total_usd_gross"] = round(float(d["total_usd_gross"] or 0.0), 2)
+            d["is_vip"] = bool(d.get("is_vip"))
+            raw_tags = d.get("tags") or ""
+            d["tags"] = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            d["notes"] = d.get("notes") or ""
+            d["has_notes"] = bool(d["notes"].strip())
             donors.append(d)
 
         # KPIs über alle Spender im Zeitraum
@@ -3994,13 +4036,13 @@ def get_donor_radar_data(
             SUM(CASE WHEN coins >= 500 THEN eur_net ELSE 0 END) as sum_whale_eur_net
         FROM (
             SELECT 
-                LOWER(sender_username) as uname,
-                SUM(total_coins) as coins,
-                SUM(eur_net) as eur_net,
-                COUNT(DISTINCT streamer_id) as s_count
-            FROM gift_events
+                LOWER(g.sender_username) as uname,
+                SUM(g.total_coins) as coins,
+                SUM(g.eur_net) as eur_net,
+                COUNT(DISTINCT g.streamer_id) as s_count
+            FROM gift_events g
             WHERE {where_sql}
-            GROUP BY LOWER(sender_username)
+            GROUP BY LOWER(g.sender_username)
         ) sub
         """
         kpi_row = conn.execute(kpis_query, params).fetchone()
@@ -4009,6 +4051,11 @@ def get_donor_radar_data(
             "SELECT COUNT(*) as total_chat FROM chat_messages"
         ).fetchone()
         total_chat = int(chat_count_row["total_chat"] or 0) if chat_count_row else 0
+
+        vip_cnt_row = conn.execute(
+            "SELECT COUNT(*) as total_vips FROM donor_crm WHERE is_vip = 1"
+        ).fetchone()
+        total_vips = int(vip_cnt_row["total_vips"] or 0) if vip_cnt_row else 0
 
         w_count = int(kpi_row["count_whales"] or 0) if kpi_row else 0
         s_count = int(kpi_row["count_sharks"] or 0) if kpi_row else 0
@@ -4023,6 +4070,7 @@ def get_donor_radar_data(
             "whale_coins": int(kpi_row["sum_whale_coins"] or 0) if kpi_row else 0,
             "whale_eur_net": round(float(kpi_row["sum_whale_eur_net"] or 0.0), 2) if kpi_row else 0.0,
             "total_chat_messages": total_chat,
+            "vip_donors": total_vips,
         }
 
         streamers = conn.execute(
@@ -4174,11 +4222,117 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
         ).fetchall()
         recent_chats = [dict(cr) for cr in chat_rows]
 
+        crm = get_donor_crm(clean_uname)
+        profile["is_vip"] = crm["is_vip"]
+        profile["tags"] = crm["tags"]
+        profile["notes"] = crm["notes"]
+
         return {
             "profile": profile,
             "streamers": streamers_breakdown,
             "top_gifts": top_gifts,
             "recent_chats": recent_chats,
+            "crm": crm,
         }
+
+
+def get_donor_crm(username: str) -> Dict[str, Any]:
+    """
+    Liefert die CRM-Daten (VIP-Status, Tags, interne Notizen) eines Spenders.
+    """
+    clean_uname = username.strip().lstrip("@").lower()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT id, username, is_vip, tags, notes, created_at, updated_at
+            FROM donor_crm
+            WHERE LOWER(username) = ?
+            """,
+            (clean_uname,),
+        ).fetchone()
+
+        if not row:
+            return {
+                "id": None,
+                "username": clean_uname,
+                "is_vip": False,
+                "tags": [],
+                "notes": "",
+                "created_at": None,
+                "updated_at": None,
+            }
+
+        raw_tags = row["tags"] or ""
+        tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "is_vip": bool(row["is_vip"]),
+            "tags": tags_list,
+            "notes": row["notes"] or "",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+
+def save_donor_crm(
+    username: str,
+    is_vip: Optional[bool] = None,
+    tags: Optional[Union[List[str], str]] = None,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Speichert oder aktualisiert VIP-Status, Tags und Notizen eines Spenders.
+    Vollständig portabel für SQLite und MySQL.
+    """
+    clean_uname = username.strip().lstrip("@").lower()
+    now = datetime.now(timezone.utc).isoformat()
+
+    tags_str: Optional[str] = None
+    if tags is not None:
+        if isinstance(tags, list):
+            tags_str = ",".join([t.strip().replace(",", "") for t in tags if t.strip()])
+        else:
+            tags_str = str(tags).strip()
+
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id, is_vip, tags, notes FROM donor_crm WHERE LOWER(username) = ?",
+            (clean_uname,),
+        ).fetchone()
+
+        if existing:
+            new_vip = int(is_vip) if is_vip is not None else int(existing["is_vip"] or 0)
+            new_tags = tags_str if tags_str is not None else (existing["tags"] or "")
+            new_notes = notes if notes is not None else (existing["notes"] or "")
+            conn.execute(
+                """
+                UPDATE donor_crm
+                SET is_vip = ?, tags = ?, notes = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (new_vip, new_tags, new_notes, now, existing["id"]),
+            )
+        else:
+            new_vip = int(is_vip) if is_vip is not None else 0
+            new_tags = tags_str if tags_str is not None else ""
+            new_notes = notes if notes is not None else ""
+            conn.execute(
+                """
+                INSERT INTO donor_crm (username, is_vip, tags, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (clean_uname, new_vip, new_tags, new_notes, now, now),
+            )
+
+    return get_donor_crm(clean_uname)
+
+
+def toggle_donor_vip(username: str) -> Dict[str, Any]:
+    """
+    Schaltet den VIP-Watchlist-Status eines Spenders um.
+    """
+    current = get_donor_crm(username)
+    return save_donor_crm(username, is_vip=not current["is_vip"])
 
 

@@ -27,6 +27,7 @@ from database import (
     get_chat_messages,
     get_dashboard_overview,
     get_db,
+    get_donor_crm,
     get_donor_details,
     get_donor_radar_data,
     get_settings,
@@ -41,13 +42,16 @@ from database import (
     record_bot_session,
     record_gift_event,
     record_page_view,
+    save_donor_crm,
     seed_demo_data,
+    toggle_donor_vip,
     update_settings,
     upsert_streamer,
     upsert_telegram_user_permission,
 )
 from schemas import (
     DailyBotReportResponse,
+    DonorCRMUpdateRequest,
     GiftCreateRequest,
     MiniAppAuthRequest,
     MiniAppVerifyCodeRequest,
@@ -1206,6 +1210,7 @@ async def api_donor_radar(
     min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
     streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
     cross_streamer_only: bool = Query(False, description="Nur Spender mit >= 2 Streamern anzeigen"),
+    vip_only: bool = Query(False, description="Nur Spender auf der VIP-Watchlist anzeigen"),
     search: Optional[str] = Query(None, description="Suchbegriff für Username / Nickname"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -1216,6 +1221,7 @@ async def api_donor_radar(
         min_tier=min_tier,
         streamer_id=streamer_id,
         cross_streamer_only=cross_streamer_only,
+        vip_only=vip_only,
         search=search,
         limit=limit,
         offset=offset,
@@ -1241,6 +1247,42 @@ async def api_donor_detail(username: str):
     if not details:
         raise HTTPException(status_code=404, detail="Spender nicht gefunden")
     return {"ok": True, "data": details}
+
+
+@app.post(
+    "/api/donor-radar/donors/{username}/crm",
+    tags=["Spenderradar & Chatlog"],
+    summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.post(
+    "/api/v1/donor-radar/donors/{username}/crm",
+    tags=["Spenderradar & Chatlog"],
+    summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_update_donor_crm(username: str, req: DonorCRMUpdateRequest):
+    init_db()
+    res = save_donor_crm(username=username, is_vip=req.is_vip, tags=req.tags, notes=req.notes)
+    return {"ok": True, "data": res}
+
+
+@app.post(
+    "/api/donor-radar/donors/{username}/toggle-vip",
+    tags=["Spenderradar & Chatlog"],
+    summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.post(
+    "/api/v1/donor-radar/donors/{username}/toggle-vip",
+    tags=["Spenderradar & Chatlog"],
+    summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_toggle_donor_vip(username: str):
+    init_db()
+    res = toggle_donor_vip(username)
+    return {"ok": True, "data": res}
 
 
 @app.get(

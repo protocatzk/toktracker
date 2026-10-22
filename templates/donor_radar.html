@@ -283,6 +283,147 @@
             flex-direction: column;
             gap: 20px;
         }
+
+        /* VIP & CRM Specific Styles */
+        .vip-star-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            line-height: 1;
+            color: #475569;
+            transition: transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease;
+            vertical-align: middle;
+            user-select: none;
+        }
+        .vip-star-btn:hover {
+            transform: scale(1.3);
+            color: #facc15;
+        }
+        .vip-star-btn.is-vip {
+            color: #fbbf24;
+            text-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+        }
+
+        .crm-tag-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(251, 191, 36, 0.12);
+            border: 1px solid rgba(251, 191, 36, 0.35);
+            color: #fde047;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            font-family: var(--font-mono, monospace);
+        }
+        .crm-tag-pill .tag-del-btn {
+            cursor: pointer;
+            color: #fca5a5;
+            font-weight: bold;
+            margin-left: 2px;
+            font-size: 11px;
+            line-height: 1;
+        }
+        .crm-tag-pill .tag-del-btn:hover {
+            color: #ef4444;
+        }
+
+        .crm-notes-badge {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: #94a3b8;
+            transition: color 0.15s ease;
+        }
+        .crm-notes-badge:hover {
+            color: #38bdf8;
+        }
+
+        .crm-card {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .crm-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .crm-vip-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+            background: var(--bg-surface);
+            color: var(--text-muted);
+            transition: all 0.2s ease;
+        }
+        .crm-vip-toggle:hover {
+            border-color: #fbbf24;
+            color: var(--text-main);
+        }
+        .crm-vip-toggle.active {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: #f59e0b;
+            color: #fbbf24;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+        }
+        .crm-quick-tag {
+            background: var(--bg-surface);
+            border: 1px dashed var(--border-color);
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+        .crm-quick-tag:hover {
+            border-color: #fbbf24;
+            color: #fde047;
+            background: rgba(251, 191, 36, 0.08);
+            transform: translateY(-1px);
+        }
+        .crm-notes-textarea {
+            width: 100%;
+            min-height: 80px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 12.5px;
+            line-height: 1.4;
+            resize: vertical;
+            transition: border-color 0.15s ease;
+            box-sizing: border-box;
+        }
+        .crm-notes-textarea:focus {
+            outline: none;
+            border-color: #fbbf24;
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
+        }
     </style>
 </head>
 <body>
@@ -400,6 +541,20 @@
             </div>
         </div>
 
+        <!-- VIP Watchlist Card -->
+        <div class="radar-kpi-card" style="border-left: 3px solid #eab308; cursor: pointer;" id="cardKpiVip" title="Klicken, um VIP-Filter umzuschalten">
+            <div>
+                <div class="radar-kpi-header">
+                    <span>⭐ VIP-Watchlist</span>
+                    <span class="mono" style="color: #fde047;">Fokus</span>
+                </div>
+                <div class="radar-kpi-val" id="kpiVipCount" style="color: #fbbf24;">-</div>
+            </div>
+            <div class="radar-kpi-sub">
+                <span>Beobachtete Großspender</span>
+            </div>
+        </div>
+
         <!-- Chatlogs Recorded Card -->
         <div class="radar-kpi-card" style="border-left: 3px solid #ec4899;">
             <div>
@@ -441,7 +596,12 @@
 
                     <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
                         <input type="checkbox" id="chkCrossOnly" style="accent-color: #f59e0b;" />
-                        <span>⚡ Nur Cross-Streamer</span>
+                        <span>⚡ Cross-Streamer</span>
+                    </label>
+
+                    <label style="font-size: 11.5px; color: #fbbf24; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 700;">
+                        <input type="checkbox" id="chkVipOnly" style="accent-color: #eab308;" />
+                        <span>⭐ VIP-Watchlist</span>
                     </label>
                 </div>
             </div>
