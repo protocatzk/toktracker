@@ -40,6 +40,8 @@ from database import (
 from schemas import (
     DailyBotReportResponse,
     GiftCreateRequest,
+    MiniAppAuthRequest,
+    MiniAppVerifyCodeRequest,
     SettingsUpdateRequest,
     SqliteImportRequest,
     StreamerCreateRequest,
@@ -128,15 +130,21 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 def verify_admin_or_api_key(
     toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
 ) -> Dict[str, Any]:
     """
     Schützt alle Admin- und Verwaltungs-Endpunkte:
-    1. Prüft zuerst auf ein gültiges, signiertes Admin-Session-Cookie (Telegram-Login).
+    1. Prüft zuerst auf ein gültiges, signiertes Admin-Session-Cookie oder Header (Telegram-Login).
     2. Prüft alternativ auf einen konfigurierten X-API-Key (für externe Skripte/Automationen).
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    session_payload = admin_auth_manager.verify_session_token(token)
     if session_payload:
         return session_payload
 
@@ -547,6 +555,137 @@ async def api_miniapp_battle_detail(battle_id: int):
     if not battle:
         raise HTTPException(status_code=404, detail="Battle nicht gefunden")
     return battle
+
+
+@app.post(
+    "/api/miniapp/auth",
+    tags=["Telegram Mini-App"],
+    summary="Authentifiziert den Telegram-Nutzer anhand von WebApp initData (HMAC-SHA256)",
+)
+async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
+    init_db()
+    validated = admin_auth_manager.validate_webapp_init_data(payload.init_data)
+    if not validated:
+        raise HTTPException(status_code=400, detail="Ungültige Telegram WebApp-Signatur")
+
+    user = validated.get("user") or {}
+    tg_id = user.get("id")
+    username = user.get("username")
+    first_name = user.get("first_name", "")
+
+    is_admin = admin_auth_manager.is_admin_user(telegram_id=tg_id, username=username)
+
+    token = None
+    admin_label = f"tg_{tg_id}" if tg_id else f"tg_{username or 'user'}"
+    if is_admin:
+        token = admin_auth_manager.create_session_token(admin_label=admin_label)
+        _set_admin_session_cookie(response, admin_label=admin_label)
+
+    return {
+        "ok": True,
+        "authenticated": True,
+        "is_admin": is_admin,
+        "user": {
+            "id": tg_id,
+            "username": username,
+            "first_name": first_name,
+        },
+        "token": token,
+        "admin_label": admin_label if is_admin else None,
+    }
+
+
+@app.get(
+    "/api/miniapp/auth/status",
+    tags=["Telegram Mini-App"],
+    summary="Prüft den aktuellen Authentifizierungsstatus der Mini-App Session",
+)
+async def api_miniapp_auth_status(
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    session_payload = admin_auth_manager.verify_session_token(token)
+    if session_payload:
+        return {
+            "authenticated": True,
+            "is_admin": True,
+            "admin_label": session_payload.get("sub", "admin"),
+            "exp": session_payload.get("exp"),
+        }
+    return {
+        "authenticated": False,
+        "is_admin": False,
+        "admin_label": None,
+    }
+
+
+@app.post(
+    "/api/miniapp/auth/request_otp",
+    tags=["Telegram Mini-App"],
+    summary="Fordert einen 6-stelligen Login-Code an (Fallback für Webbrowser)",
+)
+async def api_miniapp_auth_request_otp(request: Request):
+    init_db()
+    client_host = request.client.host if request.client else "unbekannt"
+    res = await telegram_bot_service.send_admin_login_challenge(
+        identifier_hint=None,
+        client_info=f"Mini-App Web ({client_host})",
+    )
+    return res
+
+
+@app.post(
+    "/api/miniapp/auth/verify_otp",
+    tags=["Telegram Mini-App"],
+    summary="Verifiziert den 6-stelligen OTP-Code oder das Notfall-Admin-Passwort",
+)
+async def api_miniapp_auth_verify_otp(payload: MiniAppVerifyCodeRequest, response: Response):
+    admin_label = admin_auth_manager.verify_code(
+        code=payload.code,
+        challenge_id=payload.challenge_id,
+    )
+    if not admin_label:
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiger oder abgelaufener Einmal-Code.",
+        )
+    token = admin_auth_manager.create_session_token(admin_label=admin_label)
+    _set_admin_session_cookie(response, admin_label=admin_label)
+    return {
+        "ok": True,
+        "authenticated": True,
+        "is_admin": True,
+        "admin_label": admin_label,
+        "token": token,
+    }
+
+
+@app.post(
+    "/api/miniapp/auth/logout",
+    tags=["Telegram Mini-App"],
+    summary="Beendet die Admin-Session in der Mini-App",
+)
+async def api_miniapp_auth_logout(response: Response):
+    response.delete_cookie(key=AdminAuthManager.COOKIE_NAME, path="/")
+    return {"ok": True, "message": "Erfolgreich abgemeldet"}
+
+
+@app.get(
+    "/api/miniapp/analytics",
+    tags=["Telegram Mini-App"],
+    summary="Öffentliche Analytics- und Chart-Daten für die Mini-App",
+)
+async def api_miniapp_analytics(
+    period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
+    streamer_id: Optional[int] = Query(None, description="Optionaler Einzelfilter nach Streamer"),
+):
+    init_db()
+    return get_analytics_data(streamer_id=streamer_id, period=period)
 
 
 # =====================================================================

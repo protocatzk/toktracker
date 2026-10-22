@@ -8,6 +8,7 @@ import logging
 import os
 import secrets
 import time
+import urllib.parse
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set
@@ -227,6 +228,87 @@ class AdminAuthManager:
             return payload
         except Exception:
             return None
+
+    def validate_webapp_init_data(self, init_data: str) -> Optional[Dict[str, Any]]:
+        """
+        Validiert die von der Telegram WebApp übergebene initData-Zeichenkette
+        kryptografisch nach der offiziellen Telegram-Spezifikation (HMAC-SHA256).
+        """
+        if not init_data or not config.telegram_bot_token:
+            return None
+        try:
+            parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+            received_hash = parsed.pop("hash", None)
+            if not received_hash:
+                return None
+
+            data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
+            secret_key = hmac.new(
+                b"WebAppData",
+                config.telegram_bot_token.encode("utf-8"),
+                hashlib.sha256,
+            ).digest()
+            expected_hash = hmac.new(
+                secret_key,
+                data_check_string.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+
+            if not hmac.compare_digest(received_hash, expected_hash):
+                return None
+
+            user_raw = parsed.get("user")
+            user_data = json.loads(user_raw) if user_raw else {}
+            auth_date = int(parsed.get("auth_date", 0))
+
+            return {
+                "user": user_data,
+                "auth_date": auth_date,
+                "query_id": parsed.get("query_id"),
+                "chat_type": parsed.get("chat_type"),
+            }
+        except Exception:
+            return None
+
+    def is_admin_user(self, telegram_id: Optional[int] = None, username: Optional[str] = None) -> bool:
+        """
+        Prüft, ob ein Telegram-Nutzer Administrator-Rechte besitzt
+        (über .env-Whitelist oder 'role=admin' in der telegram_users-Tabelle).
+        """
+        clean_uname = (username or "").strip().lstrip("@").lower()
+
+        if telegram_id is not None:
+            try:
+                tid = int(telegram_id)
+                if tid in config.env_allowed_telegram_ids:
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        if clean_uname and clean_uname in config.env_allowed_telegram_usernames:
+            return True
+
+        try:
+            users = list_telegram_users()
+            for u in users:
+                u_tid = u.get("telegram_id")
+                u_uname = str(u.get("username") or "").strip().lstrip("@").lower()
+                is_allowed = int(u.get("is_allowed", 0)) == 1
+                is_admin = u.get("role") == "admin"
+
+                if is_allowed and is_admin:
+                    if telegram_id is not None and u_tid:
+                        try:
+                            if int(u_tid) == int(telegram_id):
+                                return True
+                        except (ValueError, TypeError):
+                            pass
+                    if clean_uname and u_uname and clean_uname == u_uname:
+                        return True
+        except Exception:
+            pass
+
+        return False
 
 
 admin_auth_manager = AdminAuthManager()

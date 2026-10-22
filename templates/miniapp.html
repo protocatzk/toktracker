@@ -7,9 +7,11 @@
     
     <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Bundled Chart.js for rich mobile analytics -->
+    <script src="/static/chart.umd.min.js"></script>
     
     <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <link rel="stylesheet" href="/static/miniapp.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/miniapp.css?v=2.2.0" />
 </head>
 <body>
 
@@ -22,6 +24,7 @@
             <div>
                 <div class="ma-brand-title">
                     toktracker <span class="ma-badge">Mini-App</span>
+                    <span class="ma-admin-indicator" id="maHeaderAdminBadge" style="display: none;">👑 ADMIN</span>
                 </div>
                 <div class="ma-brand-sub" id="kpiLiveCount">-- LIVE</div>
             </div>
@@ -85,12 +88,12 @@
         <div id="maLiveBattlesContainer"></div>
 
         <div class="section-head">
-            <div class="section-title">⚔️ Match-Historie (1v1, 2v2, 3er & 4er)</div>
+            <div class="section-title">⚔️ Match-Historie (1v1, 2v2, 3er &amp; 4er)</div>
         </div>
         <div id="maRecentBattlesContainer">
             <div class="ma-empty-state">
                 <div class="ma-empty-icon">⏳</div>
-                <div>Lade Matches & Duelle...</div>
+                <div>Lade Matches &amp; Duelle...</div>
             </div>
         </div>
     </section>
@@ -100,7 +103,7 @@
     <!-- ============================================================== -->
     <section class="ma-tab-view" id="tab-streamers">
         <div class="section-head">
-            <div class="section-title">👥 Streamer Monitor & Ranking</div>
+            <div class="section-title">👥 Streamer Monitor &amp; Ranking</div>
         </div>
         <div id="maStreamersContainer">
             <div class="ma-empty-state">
@@ -111,7 +114,62 @@
     </section>
 
     <!-- ============================================================== -->
-    <!-- TAB 3: LIVE GIFT TICKER                                        -->
+    <!-- TAB 3: ANALYTICS & GRAPHEN (ÖFFENTLICH)                       -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-analytics">
+        <div class="section-head">
+            <div class="section-title">📊 Einnahmen &amp; Coin-Verlauf</div>
+            <select id="maAnalyticsStreamerSelect" class="ma-select-mini">
+                <option value="all">Alle Streamer</option>
+            </select>
+        </div>
+
+        <!-- Timeline Chart Card -->
+        <div class="ma-card ma-chart-card">
+            <div class="chart-header-row">
+                <span class="chart-title" id="maTimelineTitle">Einnahmen-Verlauf</span>
+                <span class="chart-subtitle" id="maTimelineSub">Entwicklung über Zeit</span>
+            </div>
+            <div class="ma-chart-wrap" style="height: 220px;">
+                <canvas id="maChartTimeline"></canvas>
+            </div>
+        </div>
+
+        <!-- Top Spender Ranking -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">🏆 Top Spender &amp; Whales</div>
+        </div>
+        <div id="maTopGiftersContainer" class="ma-card" style="padding: 0;">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Spender-Rangliste...</div>
+            </div>
+        </div>
+
+        <!-- Gift Distribution Chart -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">🎁 Beliebteste Geschenke</div>
+        </div>
+        <div class="ma-card ma-chart-card">
+            <div class="ma-chart-wrap" style="height: 200px;">
+                <canvas id="maChartGiftDist"></canvas>
+            </div>
+            <div id="maTopGiftsList" class="ma-gift-dist-list"></div>
+        </div>
+
+        <!-- Time of Day Chart -->
+        <div class="section-head" style="margin-top: 16px;">
+            <div class="section-title">⏰ Aktivität nach Tageszeit</div>
+        </div>
+        <div class="ma-card ma-chart-card">
+            <div class="ma-chart-wrap" style="height: 180px;">
+                <canvas id="maChartTimeOfDay"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!-- TAB 4: LIVE GIFT TICKER                                        -->
     <!-- ============================================================== -->
     <section class="ma-tab-view" id="tab-gifts">
         <div class="section-head">
@@ -125,9 +183,106 @@
         </div>
     </section>
 
+    <!-- ============================================================== -->
+    <!-- TAB 5: ADMIN PANEL                                            -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-admin">
+        <!-- Auth Gate for Non-Admins -->
+        <div id="maAdminAuthGate" class="ma-card" style="display: none; text-align: center; padding: 24px 16px;">
+            <div style="font-size: 34px; margin-bottom: 8px;">🔐</div>
+            <h3 style="font-size: 16px; margin-bottom: 6px;">Admin-Bereich</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;" id="maAuthGateMsg">
+                Dieser Bereich erfordert Administrator-Rechte.
+            </p>
+            <div class="ma-form-group" style="max-width: 280px; margin: 0 auto 12px;">
+                <input type="text" id="maOtpCodeInput" class="ma-input" placeholder="6-stelliger Code" maxlength="16" style="text-align: center; font-size: 18px; letter-spacing: 2px;" />
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: center; max-width: 280px; margin: 0 auto;">
+                <button type="button" class="ma-btn ma-btn-primary" id="maBtnSubmitOtp" style="flex: 1;">Anmelden</button>
+                <button type="button" class="ma-btn ma-btn-secondary" id="maBtnRequestOtp" style="flex: 1;">Code anfordern</button>
+            </div>
+        </div>
+
+        <!-- Admin Content (Visible when admin authenticated) -->
+        <div id="maAdminContent">
+            <!-- Admin Profile Banner -->
+            <div class="ma-admin-hero">
+                <div class="ma-admin-user-info">
+                    <div class="ma-admin-badge-icon">👑</div>
+                    <div>
+                        <div class="ma-admin-name" id="maAdminUserLabel">Admin</div>
+                        <div class="ma-admin-role">Vollzugriff · TokTracker Control</div>
+                    </div>
+                </div>
+                <button type="button" class="ma-btn-icon-danger" id="maBtnAdminLogout" title="Abmelden">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+
+            <!-- Quick Action Grid -->
+            <div class="section-head" style="margin-top: 14px;">
+                <div class="section-title">⚡ Schnellaktionen</div>
+            </div>
+            <div class="ma-admin-action-grid">
+                <button type="button" class="ma-action-btn" id="maBtnOpenAddStreamer">
+                    <span class="action-icon">➕</span>
+                    <span class="action-text">Streamer anlegen</span>
+                </button>
+                <button type="button" class="ma-action-btn" id="maBtnOpenAddGift">
+                    <span class="action-icon">🎁</span>
+                    <span class="action-text">Gift buchen</span>
+                </button>
+                <button type="button" class="ma-action-btn" id="maBtnOpenSettings">
+                    <span class="action-icon">⚙️</span>
+                    <span class="action-text">Kurse &amp; Settings</span>
+                </button>
+                <button type="button" class="ma-action-btn" id="maBtnOpenWhitelist">
+                    <span class="action-icon">👥</span>
+                    <span class="action-text">Bot-Whitelist</span>
+                </button>
+            </div>
+
+            <!-- Streamer Management List -->
+            <div class="section-head" style="margin-top: 18px;">
+                <div class="section-title">👥 Streamer-Steuerung &amp; Monitoring</div>
+            </div>
+            <div id="maAdminStreamersContainer">
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">⏳</div>
+                    <div>Lade Streamer-Verwaltung...</div>
+                </div>
+            </div>
+
+            <!-- System Diagnostics & Health -->
+            <div class="section-head" style="margin-top: 18px;">
+                <div class="section-title">🩺 System-Status &amp; Diagnostics</div>
+            </div>
+            <div class="ma-card" id="maSystemDiagCard" style="font-size: 11px; line-height: 1.6;">
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
+                    <span style="color: var(--text-muted);">Datenbank-Engine:</span>
+                    <span id="maDiagDbEngine" class="mono">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
+                    <span style="color: var(--text-muted);">Aktive Worker:</span>
+                    <span id="maDiagActiveWorkers" class="mono">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
+                    <span style="color: var(--text-muted);">Telegram Bot:</span>
+                    <span id="maDiagBotStatus" class="mono">--</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">TikTok Session:</span>
+                    <span id="maDiagTiktokSession" class="mono">--</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
 </div>
 
-<!-- Bottom Navigation Bar (Telegram Native Mobile Style) -->
+<!-- ============================================================== -->
+<!-- BOTTOM NAVIGATION BAR (5 TABS)                                 -->
+<!-- ============================================================== -->
 <nav class="ma-bottom-nav">
     <button type="button" class="nav-tab-btn active" data-tab="tab-matches">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -150,6 +305,15 @@
         <span>Streamer</span>
     </button>
 
+    <button type="button" class="nav-tab-btn" data-tab="tab-analytics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        <span>Analytics</span>
+    </button>
+
     <button type="button" class="nav-tab-btn" data-tab="tab-gifts">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <polyline points="20 12 20 22 4 22 4 12"/>
@@ -160,8 +324,156 @@
         </svg>
         <span>Gifts</span>
     </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-admin">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span>Admin</span>
+    </button>
 </nav>
 
-<script src="/static/miniapp.js?v=2.0.1"></script>
+<!-- ============================================================== -->
+<!-- BOTTOM SHEET MODALS                                            -->
+<!-- ============================================================== -->
+
+<!-- Modal 1: Streamer hinzufügen -->
+<div class="ma-modal-backdrop" id="modalAddStreamer">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">➕ Streamer hinzufügen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalAddStreamer">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-form-group">
+                <label>TikTok @Username</label>
+                <input type="text" id="inputAddStreamerUsername" class="ma-input" placeholder="z. B. montana.black" required />
+            </div>
+            <div class="ma-form-group">
+                <label>Anzeigename (optional)</label>
+                <input type="text" id="inputAddStreamerDisplayName" class="ma-input" placeholder="z. B. Monte" />
+            </div>
+            <div class="ma-form-check">
+                <input type="checkbox" id="checkAddStreamerAutoTrack" checked />
+                <label for="checkAddStreamerAutoTrack">Sofort überwachen (Tracking starten)</label>
+            </div>
+            <div class="ma-form-check">
+                <input type="checkbox" id="checkAddStreamerAutoReconnect" checked />
+                <label for="checkAddStreamerAutoReconnect">Auto-Monitor aktiv (automatisch reconnecten)</label>
+            </div>
+            <button type="button" class="ma-btn ma-btn-primary full-width" id="btnSubmitAddStreamer" style="margin-top: 14px;">Streamer anlegen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 2: Manuelles Geschenk buchen -->
+<div class="ma-modal-backdrop" id="modalAddGift">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">🎁 Manuelles Geschenk buchen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalAddGift">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-form-group">
+                <label>Ziel-Streamer</label>
+                <select id="selectAddGiftStreamer" class="ma-input"></select>
+            </div>
+            <div class="ma-form-row">
+                <div class="ma-form-group" style="flex: 2;">
+                    <label>Geschenk-Name</label>
+                    <input type="text" id="inputAddGiftName" class="ma-input" value="Rose" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Coins/Stk.</label>
+                    <input type="number" id="inputAddGiftCoins" class="ma-input" value="1" min="1" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Anzahl</label>
+                    <input type="number" id="inputAddGiftCount" class="ma-input" value="1" min="1" />
+                </div>
+            </div>
+            <div class="ma-form-group">
+                <label>Spender Username</label>
+                <input type="text" id="inputAddGiftSender" class="ma-input" value="live_viewer" />
+            </div>
+            <button type="button" class="ma-btn ma-btn-primary full-width" id="btnSubmitAddGift" style="margin-top: 14px;">Geschenk buchen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 3: Kurse & Settings -->
+<div class="ma-modal-backdrop" id="modalSettings">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">⚙️ Kurse &amp; Berechnungen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalSettings">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-form-row">
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>USD pro Diamond (Netto)</label>
+                    <input type="number" step="0.0001" id="inputSettingsUsdDiamond" class="ma-input" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Gross USD pro Coin</label>
+                    <input type="number" step="0.0001" id="inputSettingsGrossCoin" class="ma-input" />
+                </div>
+            </div>
+            <div class="ma-form-row">
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>USD zu EUR Kurs</label>
+                    <input type="number" step="0.001" id="inputSettingsUsdToEur" class="ma-input" />
+                </div>
+                <div class="ma-form-group" style="flex: 1;">
+                    <label>Hauptwährung</label>
+                    <select id="selectSettingsCurrency" class="ma-input">
+                        <option value="EUR">EUR (€)</option>
+                        <option value="USD">USD ($)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="ma-form-group">
+                <label>Telegram Zugriffsmodus</label>
+                <select id="selectSettingsTgMode" class="ma-input">
+                    <option value="whitelist">Whitelist (nur freigeschaltete Nutzer)</option>
+                    <option value="public">Public (alle Nutzer zugelassen)</option>
+                </select>
+            </div>
+            <button type="button" class="ma-btn ma-btn-primary full-width" id="btnSubmitSettings" style="margin-top: 14px;">Einstellungen speichern</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 4: Telegram Whitelist -->
+<div class="ma-modal-backdrop" id="modalWhitelist">
+    <div class="ma-modal-sheet">
+        <div class="ma-sheet-header">
+            <div class="ma-sheet-title">👥 Telegram Whitelist &amp; Rollen</div>
+            <button type="button" class="ma-sheet-close" data-close="modalWhitelist">&times;</button>
+        </div>
+        <div class="ma-sheet-body">
+            <div class="ma-card" style="padding: 10px; margin-bottom: 12px;">
+                <div style="font-size: 11px; font-weight: 700; margin-bottom: 6px;">Nutzer manuell freischalten</div>
+                <div class="ma-form-row">
+                    <input type="text" id="inputAddTgUserIdent" class="ma-input" placeholder="@username oder ID" style="flex: 2;" />
+                    <select id="selectAddTgUserRole" class="ma-input" style="flex: 1;">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <button type="button" class="ma-btn ma-btn-primary" id="btnSubmitAddTgUser">Hinzufügen</button>
+                </div>
+            </div>
+            <div id="maWhitelistUsersContainer" style="max-height: 280px; overflow-y: auto;">
+                <div class="ma-empty-state">Lade Whitelist...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div class="ma-toast-container" id="maToastContainer"></div>
+
+<script src="/static/miniapp.js?v=2.2.0"></script>
 </body>
 </html>
