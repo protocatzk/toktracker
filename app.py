@@ -447,7 +447,7 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
     tags=["Telegram Mini-App"],
     summary="Kompakter Daten-Feed für die Telegram Mini-App (Live-Matches, Einnahmen, Streamer)",
 )
-async def api_miniapp_data(period: str = Query("today", description="today | 24h | 7d | 30d | all")):
+async def api_miniapp_data(period: str = Query("24h", description="today | 24h | 7d | 30d | all")):
     init_db()
     monitor_manager.autostart_from_db()
 

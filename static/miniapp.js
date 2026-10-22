@@ -24,7 +24,7 @@
     }
 
     // State
-    let currentPeriod = "today";
+    let currentPeriod = "24h";
     let activeTab = "tab-matches";
     let pollInterval = null;
     let isFetching = false;
