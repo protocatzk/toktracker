@@ -393,6 +393,60 @@
         let html = '<div class="section-head"><div class="section-title">🔴 LIVE DUELL</div></div>';
         liveBattles.forEach(item => {
             const b = item.battle || {};
+            const isInternal = Boolean(b.is_internal);
+
+            if (isInternal) {
+                const sA = b.streamer_a || {};
+                const sB = b.streamer_b || {};
+                const sScore = sA.score || b.streamer_score || 0;
+                const oScore = sB.score || b.opponent_score || 0;
+                const totalScore = Math.max(1, sScore + oScore);
+                const sPct = Math.round((sScore / totalScore) * 100);
+                const oPct = 100 - sPct;
+
+                html += `
+                    <div class="battle-card-mobile active-match card-derby">
+                        <div class="battle-card-header">
+                            <span class="match-mode-pill mode-derby">⚔️ DERBY</span>
+                            <span class="match-result-badge live">LIVE DERBY</span>
+                        </div>
+
+                        <div class="battle-arena-1v1">
+                            <div class="combatant-side">
+                                <div class="combatant-avatar-wrap">
+                                    <img src="${escapeHtml(sA.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                </div>
+                                <div class="combatant-name">${escapeHtml(sA.display_name || sA.username || '')}</div>
+                                <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
+                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sA.eur_net || 0)}</div>
+                            </div>
+
+                            <div class="vs-center-mobile"><span class="vs-text" style="color:#8b5cf6;">VS</span></div>
+
+                            <div class="combatant-side">
+                                <div class="combatant-avatar-wrap">
+                                    <img src="${escapeHtml(sB.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                </div>
+                                <div class="combatant-name">${escapeHtml(sB.display_name || sB.username || '')}</div>
+                                <div class="combatant-score" style="color: #ec4899;">${formatNumber(oScore)}</div>
+                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sB.eur_net || 0)}</div>
+                            </div>
+                        </div>
+
+                        <div class="duel-score-bar-mobile">
+                            <div class="bar-side-left" style="width: ${sPct}%; background: #38bdf8;"></div>
+                            <div class="bar-side-right" style="width: ${oPct}%; background: #ec4899;"></div>
+                        </div>
+
+                        <div class="battle-card-footer">
+                            <span>Vorsprung: ${formatNumber(Math.abs(sScore - oScore))} Pkt</span>
+                            <span class="battle-earnings-badge" style="background: rgba(139, 92, 246, 0.2); color: #c084fc; border: 1px solid #8b5cf6;">🔥 +${formatCurrency(b.total_eur_net || b.eur_net || 0, "EUR")}</span>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
             const mode = b.battle_mode || "1v1";
             const sName = item.display_name || item.username;
             const sAvatar = item.avatar_url || "/static/avatar_default.png";
@@ -461,6 +515,63 @@
 
         let html = "";
         battles.forEach(b => {
+            const isInternal = Boolean(b.is_internal);
+
+            if (isInternal) {
+                const sA = b.streamer_a || {};
+                const sB = b.streamer_b || {};
+                const sScore = sA.score || b.streamer_score || 0;
+                const oScore = sB.score || b.opponent_score || 0;
+                const totalScore = Math.max(1, sScore + oScore);
+                const sPct = Math.round((sScore / totalScore) * 100);
+                const oPct = 100 - sPct;
+
+                const relTime = getRelativeTime(b.started_at || b.created_at);
+                const winnerLabel = b.winner_username ? `🏆 @${escapeHtml(b.winner_username)}` : "🤝 REMIS";
+
+                html += `
+                    <div class="battle-card-mobile card-derby">
+                        <div class="battle-card-header">
+                            <span class="match-mode-pill mode-derby">⚔️ INTERNES DERBY</span>
+                            <span class="match-result-badge win">${winnerLabel}</span>
+                        </div>
+
+                        <div class="battle-arena-1v1">
+                            <div class="combatant-side">
+                                <div class="combatant-avatar-wrap">
+                                    <img src="${escapeHtml(sA.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sA.username ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                </div>
+                                <div class="combatant-name">${escapeHtml(sA.display_name || sA.username || '')}</div>
+                                <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
+                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sA.eur_net || 0)}</div>
+                            </div>
+
+                            <div class="vs-center-mobile"><span class="vs-text" style="color:#8b5cf6;">VS</span></div>
+
+                            <div class="combatant-side">
+                                <div class="combatant-avatar-wrap">
+                                    <img src="${escapeHtml(sB.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sB.username ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                </div>
+                                <div class="combatant-name">${escapeHtml(sB.display_name || sB.username || '')}</div>
+                                <div class="combatant-score" style="color: #ec4899;">${formatNumber(oScore)}</div>
+                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sB.eur_net || 0)}</div>
+                            </div>
+                        </div>
+
+                        <div class="duel-score-bar-mobile">
+                            <div class="bar-side-left" style="width: ${sPct}%; background: #38bdf8;"></div>
+                            <div class="bar-side-right" style="width: ${oPct}%; background: #ec4899;"></div>
+                        </div>
+
+                        <div class="battle-card-footer">
+                            <span>${relTime} · ${formatNumber(b.total_coins || b.coins_earned || 0)} Coins</span>
+                            <span class="battle-earnings-badge" style="background: rgba(139, 92, 246, 0.2); color: #c084fc; border: 1px solid #8b5cf6;">🔥 +${formatCurrency(b.total_eur_net || b.eur_net || 0, "EUR")}</span>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
             const mode = b.battle_mode || "1v1";
             const res = (b.result || "DRAW").toUpperCase();
             const resClass = res === "WIN" ? "win" : (res === "LOSE" ? "lose" : "draw");

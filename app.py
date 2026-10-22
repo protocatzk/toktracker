@@ -450,6 +450,163 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
 # TELEGRAM MINI-APP API (MOBILE-FIRST)
 # =====================================================================
 
+def consolidate_live_battles(
+    raw_workers: List[Dict[str, Any]],
+    streamer_map: Dict[Any, Any],
+    filter_streamer_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Konsolidiert aktive TikTok-Live-Battles aus den Workern.
+    Erkennt interne Duelle (beide Duellanten getrackt) und fasst sie zu einer
+    einheitlichen "Internes Derby"-Karte zusammen, anstatt zwei separate Karten anzuzeigen.
+    """
+    active_items = []
+    for w in raw_workers:
+        ab = w.get("active_battle")
+        if not ab:
+            continue
+        uname = str(w.get("username") or "")
+        s_id = w.get("streamer_id")
+        s_info = streamer_map.get(s_id) or streamer_map.get(uname.lower()) or {}
+        active_items.append({
+            "streamer_id": s_id,
+            "username": uname,
+            "display_name": s_info.get("display_name") or uname,
+            "avatar_url": s_info.get("avatar_url") or "",
+            "battle": dict(ab),
+        })
+
+    consolidated = []
+    merged_indices = set()
+
+    for i, item1 in enumerate(active_items):
+        if i in merged_indices:
+            continue
+
+        b1 = item1["battle"]
+        b1_id = str(b1.get("battle_id") or "").strip()
+        uname1 = item1["username"].lower()
+        opp1 = str(b1.get("opponent_username") or "").lower()
+
+        # Prüfen, ob ein anderer Worker dasselbe Battle hat
+        partner_item = None
+        for j, item2 in enumerate(active_items):
+            if i == j or j in merged_indices:
+                continue
+            b2 = item2["battle"]
+            b2_id = str(b2.get("battle_id") or "").strip()
+            uname2 = item2["username"].lower()
+            opp2 = str(b2.get("opponent_username") or "").lower()
+
+            # Gleiche battle_id oder wechselseitige Gegner
+            if (b1_id and b1_id == b2_id) or (uname1 and opp1 and uname1 == opp2 and uname2 == opp1):
+                partner_item = item2
+                merged_indices.add(j)
+                break
+
+        if partner_item:
+            merged_indices.add(i)
+            # Internes Duell zusammenführen
+            s1_coins = b1.get("coins_earned", 0) or 0
+            s2_coins = partner_item["battle"].get("coins_earned", 0) or 0
+            s1_eur = float(b1.get("eur_net", 0.0) or 0.0)
+            s2_eur = float(partner_item["battle"].get("eur_net", 0.0) or 0.0)
+            tot_coins = s1_coins + s2_coins
+            tot_eur = round(s1_eur + s2_eur, 2)
+
+            score1 = b1.get("streamer_score", 0) or 0
+            score2 = partner_item["battle"].get("streamer_score", 0) or 0
+
+            # Reihenfolge bestimmen: Wenn Filter gesetzt, gefilterter Streamer nach links; sonst Führender nach links
+            if filter_streamer_id and partner_item["streamer_id"] == filter_streamer_id:
+                left_item = partner_item
+                right_item = item1
+                left_score = score2
+                right_score = score1
+                left_coins = s2_coins
+                right_coins = s1_coins
+                left_eur = s2_eur
+                right_eur = s1_eur
+            elif not filter_streamer_id and score2 > score1:
+                left_item = partner_item
+                right_item = item1
+                left_score = score2
+                right_score = score1
+                left_coins = s2_coins
+                right_coins = s1_coins
+                left_eur = s2_eur
+                right_eur = s1_eur
+            else:
+                left_item = item1
+                right_item = partner_item
+                left_score = score1
+                right_score = score2
+                left_coins = s1_coins
+                right_coins = s2_coins
+                left_eur = s1_eur
+                right_eur = s2_eur
+
+            streamer_a = {
+                "id": left_item["streamer_id"],
+                "username": left_item["username"],
+                "display_name": left_item["display_name"],
+                "avatar_url": left_item["avatar_url"],
+                "score": left_score,
+                "coins_earned": left_coins,
+                "eur_net": left_eur,
+            }
+            streamer_b = {
+                "id": right_item["streamer_id"],
+                "username": right_item["username"],
+                "display_name": right_item["display_name"],
+                "avatar_url": right_item["avatar_url"],
+                "score": right_score,
+                "coins_earned": right_coins,
+                "eur_net": right_eur,
+            }
+
+            merged_battle = dict(left_item["battle"])
+            merged_battle["is_internal"] = True
+            merged_battle["streamer_a"] = streamer_a
+            merged_battle["streamer_b"] = streamer_b
+            merged_battle["total_coins"] = tot_coins
+            merged_battle["total_eur_net"] = tot_eur
+            merged_battle["streamer_score"] = left_score
+            merged_battle["opponent_score"] = right_score
+            merged_battle["opponent_username"] = right_item["username"]
+            merged_battle["opponent_display_name"] = right_item["display_name"]
+            merged_battle["opponent_avatar_url"] = right_item["avatar_url"]
+            merged_battle["coins_earned"] = tot_coins
+            merged_battle["eur_net"] = tot_eur
+
+            if filter_streamer_id:
+                if left_item["streamer_id"] == filter_streamer_id or right_item["streamer_id"] == filter_streamer_id:
+                    consolidated.append({
+                        "streamer_id": left_item["streamer_id"],
+                        "username": left_item["username"],
+                        "display_name": left_item["display_name"],
+                        "avatar_url": left_item["avatar_url"],
+                        "battle": merged_battle,
+                        "is_internal": True,
+                    })
+            else:
+                consolidated.append({
+                    "streamer_id": left_item["streamer_id"],
+                    "username": left_item["username"],
+                    "display_name": left_item["display_name"],
+                    "avatar_url": left_item["avatar_url"],
+                    "battle": merged_battle,
+                    "is_internal": True,
+                })
+        else:
+            # Normales Duell gegen externen Gegner
+            if filter_streamer_id and item1["streamer_id"] != filter_streamer_id:
+                continue
+            item1["battle"]["is_internal"] = False
+            consolidated.append(item1)
+
+    return consolidated
+
 @app.get(
     "/api/miniapp/data",
     tags=["Telegram Mini-App"],
@@ -497,22 +654,9 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
     # Streamer sortieren: Erst LIVE, dann nach höchstem Umsatz
     streamers.sort(key=lambda x: (not x["is_live"], -x["eur_net"], -x["total_coins"]))
 
-    # 3. Live aktive Battles aus den aktiven Workern
+    # 3. Live aktive Battles aus den aktiven Workern (konsolidiert)
     diag = monitor_manager.get_all_diagnostics()
-    live_battles = []
-    for w in diag.get("workers", []):
-        ab = w.get("active_battle")
-        if not ab:
-            continue
-        uname = w.get("username", "")
-        s_info = streamer_map.get(w.get("streamer_id")) or streamer_map.get(uname.lower()) or {}
-        live_battles.append({
-            "streamer_id": w.get("streamer_id"),
-            "username": uname,
-            "display_name": s_info.get("display_name") or uname,
-            "avatar_url": s_info.get("avatar_url") or "",
-            "battle": ab,
-        })
+    live_battles = consolidate_live_battles(diag.get("workers", []), streamer_map)
 
     # 4. Kürzliche Battles
     battles_resp = get_battles_list(period=period, limit=25)
@@ -868,18 +1012,14 @@ async def api_get_battles(
         limit=limit,
         offset=offset,
     )
-    # Laufende Battles aus aktiven Workern erfassen
+    # Laufende Battles aus aktiven Workern erfassen (konsolidiert)
     diag = monitor_manager.get_all_diagnostics()
-    live_active = [
-        {
-            "streamer_id": s["streamer_id"],
-            "username": s["username"],
-            "battle": s["active_battle"],
-        }
-        for s in diag.get("workers", [])
-        if s.get("active_battle")
-    ]
-    data["live_active_battles"] = live_active
+    streamers_summary = {s["id"]: s for s in get_streamers_summary()}
+    data["live_active_battles"] = consolidate_live_battles(
+        diag.get("workers", []),
+        streamers_summary,
+        filter_streamer_id=streamer_id,
+    )
     return data
 
 

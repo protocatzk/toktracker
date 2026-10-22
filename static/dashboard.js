@@ -1401,6 +1401,40 @@ function renderLiveActiveBattles(liveBattles) {
     container.style.display = "block";
     list.innerHTML = validLive.map(item => {
         const b = item.battle || {};
+        const isInternal = Boolean(b.is_internal);
+
+        if (isInternal) {
+            const sA = b.streamer_a || {};
+            const sB = b.streamer_b || {};
+            const scoreA = (sA.score || 0).toLocaleString("de-DE");
+            const scoreB = (sB.score || 0).toLocaleString("de-DE");
+            const totCoins = (b.total_coins || 0).toLocaleString("de-DE");
+            const totEur = fmtEUR(b.total_eur_net || 0);
+
+            return `
+                <div class="live-active-card card-derby" style="background:var(--bg-card); border:1px solid #8b5cf6; border-left:4px solid #8b5cf6; border-radius:6px; padding:12px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span class="live-pulse" style="background:#8b5cf6;"></span>
+                        <div>
+                            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                <span class="mode-badge mode-derby" style="font-size:10px; padding:1px 6px;">⚔️ INTERNES DERBY</span>
+                                <strong>@${escapeHtml(sA.username || '')}</strong> <span class="pct-pill" style="font-size:10px; color:#10b981; border-color:#10b981;">+${fmtEUR(sA.eur_net || 0)}</span>
+                                <span style="color:#8b5cf6; font-weight:800;">VS</span>
+                                <strong>@${escapeHtml(sB.username || '')}</strong> <span class="pct-pill" style="font-size:10px; color:#10b981; border-color:#10b981;">+${fmtEUR(sB.eur_net || 0)}</span>
+                            </div>
+                            <div class="muted" style="font-size:11px; margin-top:2px;">Battle #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</div>
+                        </div>
+                    </div>
+                    <div style="font-family:'JetBrains Mono', Consolas, monospace; font-size:18px; font-weight:800;">
+                        <span style="color:#38bdf8;">${scoreA}</span> : <span style="color:#ec4899;">${scoreB}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <span class="pct-pill" style="border-color:#f59e0b; color:#f59e0b; font-weight:700;">🔥 +${totCoins} Coins (${totEur})</span>
+                    </div>
+                </div>
+            `;
+        }
+
         const sName = escapeHtml(item.username || "Streamer");
         const oName = escapeHtml(b.opponent_display_name || b.opponent_username || "Gegner");
         const sScore = (b.streamer_score || 0).toLocaleString("de-DE");
@@ -1482,11 +1516,34 @@ function renderBattlesFeed(data) {
         const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
         const is2v2 = bMode === "2v2" || Boolean(b.teammate_username);
 
+        const isInternal = Boolean(b.is_internal);
         let cardClass = "card-draw";
         let resultLabel = "🤝 UNENTSCHIEDEN";
         let resultClass = "draw";
 
-        if (isFfa && !isOngoing) {
+        if (isInternal) {
+            cardClass = "card-derby";
+            if (b.is_single_view) {
+                if (isWin) {
+                    resultLabel = "🏆 SIEG (INTERNES DUELL)";
+                    resultClass = "win";
+                } else if (isLose) {
+                    resultLabel = "❌ NIEDERLAGE (INTERNES DUELL)";
+                    resultClass = "lose";
+                } else {
+                    resultLabel = "🤝 UNENTSCHIEDEN";
+                    resultClass = "draw";
+                }
+            } else {
+                if (b.winner_username) {
+                    resultLabel = `🏆 SIEGER: @${escapeHtml(b.winner_username)}`;
+                    resultClass = "win";
+                } else {
+                    resultLabel = "🤝 UNENTSCHIEDEN";
+                    resultClass = "draw";
+                }
+            }
+        } else if (isFfa && !isOngoing) {
             const rank = b.streamer_rank || (isWin ? 1 : 2);
             if (rank === 1) {
                 cardClass = "card-win";
@@ -1538,7 +1595,9 @@ function renderBattlesFeed(data) {
         const matchDate = b.started_at ? b.started_at.replace("T", " ").substring(0, 16) : "-";
 
         let modeBadge = `<span class="mode-badge mode-1v1">⚔️ 1 VS 1</span>`;
-        if (bMode === "2v2") {
+        if (isInternal) {
+            modeBadge = `<span class="mode-badge mode-derby">⚔️ INTERNES DERBY</span>`;
+        } else if (bMode === "2v2") {
             modeBadge = `<span class="mode-badge mode-2v2">👥 2 VS 2 TEAM</span>`;
         } else if (bMode === "1v1v1") {
             modeBadge = `<span class="mode-badge mode-1v1v1">🔺 1 VS 1 VS 1 (3ER)</span>`;
@@ -1687,6 +1746,47 @@ function renderBattlesFeed(data) {
                     </div>
                 </div>
             `;
+        } else if (isInternal) {
+            const sA = b.streamer_a || {};
+            const sB = b.streamer_b || {};
+            const isWinnerA = Boolean(b.winner_username && b.winner_username === sA.username);
+            const isWinnerB = Boolean(b.winner_username && b.winner_username === sB.username);
+
+            matchupRowHtml = `
+                <div class="battle-matchup-row">
+                    <!-- Streamer A Seite -->
+                    <div class="battle-participant streamer-side">
+                        <img class="battle-avatar ${isWinnerA ? 'winner-ring' : ''}" src="${sA.avatar_url || sAvatar}" alt="Streamer A" onerror="this.src='/static/avatar_default.png';">
+                        <div class="participant-details">
+                            <span class="participant-name">${escapeHtml(sA.display_name || sA.username || '')}</span>
+                            <span class="participant-uname">@${escapeHtml(sA.username || '')} <span class="internal-streamer-pill">Getrackt</span></span>
+                            <span class="participant-score ${isWinnerA ? 'score-win' : ''}">${(sA.score || sScore).toLocaleString("de-DE")}</span>
+                            <span class="internal-earnings-tag">+${fmtNum(sA.coins_earned || 0)} 💎 (${fmtEUR(sA.eur_net || 0)})</span>
+                        </div>
+                    </div>
+
+                    <!-- Versus Mitte -->
+                    <div class="battle-versus-center">
+                        <span class="vs-badge" style="background:linear-gradient(135deg, #ec4899, #8b5cf6); color:#fff; border:none;">VS</span>
+                        <div class="versus-bar-container" title="${sPct}% vs ${oPct}%">
+                            <div class="versus-bar-fill-streamer" style="width:${sPct}%; background:#38bdf8;"></div>
+                            <div class="versus-bar-fill-opponent" style="width:${oPct}%; background:#ec4899;"></div>
+                        </div>
+                        <span class="score-delta-text">${deltaText} (${sPct}% : ${oPct}%)</span>
+                    </div>
+
+                    <!-- Streamer B Seite -->
+                    <div class="battle-participant opponent-side">
+                        <div class="participant-details">
+                            <span class="participant-name">${escapeHtml(sB.display_name || sB.username || '')}</span>
+                            <span class="participant-uname"><span class="internal-streamer-pill">Getrackt</span> @${escapeHtml(sB.username || '')}</span>
+                            <span class="participant-score ${isWinnerB ? 'score-win' : ''}">${(sB.score || oScore).toLocaleString("de-DE")}</span>
+                            <span class="internal-earnings-tag">+${fmtNum(sB.coins_earned || 0)} 💎 (${fmtEUR(sB.eur_net || 0)})</span>
+                        </div>
+                        <img class="battle-avatar ${isWinnerB ? 'winner-ring' : ''}" src="${sB.avatar_url || oAvatar}" alt="Streamer B" onerror="this.src='/static/avatar_default.png';">
+                    </div>
+                </div>
+            `;
         } else {
             matchupRowHtml = `
                 <div class="battle-matchup-row">
@@ -1738,24 +1838,33 @@ function renderBattlesFeed(data) {
                 <!-- MVP Strip -->
                 <div class="battle-mvp-strip">
                     <div class="mvp-item">
-                        <span class="muted">Top-Spender:</span>
-                        <strong>${escapeHtml(b.streamer_mvp_name || 'Kein MVP')}</strong>
-                        ${b.streamer_mvp_score ? `<span class="pct-pill">${b.streamer_mvp_score.toLocaleString("de-DE")} Pkt</span>` : ''}
+                        <span class="muted">${isInternal ? 'MVP @' + escapeHtml(b.streamer_a?.username || 'A') + ':' : 'Top-Spender:'}</span>
+                        <strong>${escapeHtml((isInternal ? b.streamer_a?.mvp_name : b.streamer_mvp_name) || 'Kein MVP')}</strong>
+                        ${(isInternal ? b.streamer_a?.mvp_score : b.streamer_mvp_score) ? `<span class="pct-pill">${(isInternal ? b.streamer_a.mvp_score : b.streamer_mvp_score).toLocaleString("de-DE")} Pkt</span>` : ''}
                     </div>
                     <div class="mvp-item">
-                        <span class="muted">Gegner-MVP:</span>
-                        <strong>${escapeHtml(b.opponent_mvp_name || 'Kein MVP')}</strong>
-                        ${b.opponent_mvp_score ? `<span class="pct-pill">${b.opponent_mvp_score.toLocaleString("de-DE")} Pkt</span>` : ''}
+                        <span class="muted">${isInternal ? 'MVP @' + escapeHtml(b.streamer_b?.username || 'B') + ':' : 'Gegner-MVP:'}</span>
+                        <strong>${escapeHtml((isInternal ? b.streamer_b?.mvp_name : b.opponent_mvp_name) || 'Kein MVP')}</strong>
+                        ${(isInternal ? b.streamer_b?.mvp_score : b.opponent_mvp_score) ? `<span class="pct-pill">${(isInternal ? b.streamer_b.mvp_score : b.opponent_mvp_score).toLocaleString("de-DE")} Pkt</span>` : ''}
                     </div>
                 </div>
 
                 <!-- Footer mit Einnahmen und Button für Grafik -->
                 <div class="battle-card-footer">
+                    ${isInternal ? `
+                    <div class="battle-earnings-pill" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <span style="font-weight:700; color:#c9d1d9;">🔥 Gesamtvolumen:</span>
+                        <span class="coins" style="font-weight:800;">+${(b.total_coins || b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
+                        <span class="eur" style="font-weight:800;">(~ ${(b.total_eur_net || b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Netto)</span>
+                        <span class="muted" style="font-size:11px; margin-left:auto;">(@${escapeHtml(b.streamer_a?.username || '')}: ${fmtEUR(b.streamer_a?.eur_net || 0)} | @${escapeHtml(b.streamer_b?.username || '')}: ${fmtEUR(b.streamer_b?.eur_net || 0)})</span>
+                    </div>
+                    ` : `
                     <div class="battle-earnings-pill">
                         <span>Duell-Einnahmen:</span>
                         <span class="coins">+${(b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
                         <span class="eur">(~ ${(b.eur_net || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Netto)</span>
                     </div>
+                    `}
                     <div class="battle-btn-group">
                         <button type="button" class="sm primary" onclick="openBattleGraphicModal(${b.id})">🎨 Grafik anzeigen</button>
                     </div>

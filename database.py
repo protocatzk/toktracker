@@ -2164,6 +2164,22 @@ def record_battle_start(
     created_at = started_at
 
     with get_db() as conn:
+        # Falls battle_id leer oder nur ein Zeitstempel ist: Prüfen, ob der getrackte Gegner bereits ein aktives Battle gestartet hat
+        if opponent_username and (not battle_id or len(str(battle_id)) < 8):
+            my_row = conn.execute("SELECT username FROM streamers WHERE id = ?", (streamer_id,)).fetchone()
+            if my_row:
+                my_uname = str(my_row["username"] or "").lower()
+                partner_active = conn.execute(
+                    """
+                    SELECT battle_id FROM tiktok_battles
+                    WHERE LOWER(opponent_username) = ? AND status = 'active'
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (my_uname,),
+                ).fetchone()
+                if partner_active and partner_active["battle_id"]:
+                    battle_id = partner_active["battle_id"]
+
         existing = conn.execute(
             """
             SELECT id, battle_mode, opponent_username, teammate_username, opponent2_username, opponent3_username FROM tiktok_battles
@@ -2490,6 +2506,7 @@ def get_battles_list(
     """
     Liefert paginierte Liste aller erfassten Battles mit Streamer- und Gegnerdetails.
     Unterstützt 1v1, 2v2, 1v1v1 und 1v1v1v1 Matches und gezielte Filterung nach Modus.
+    Erkennt interne Duelle zwischen zwei getrackten Streamern und konsolidiert diese ohne Doppelung.
     """
     cutoff = _get_period_cutoff(period)
     where_clauses = []
@@ -2498,6 +2515,11 @@ def get_battles_list(
     if streamer_id:
         where_clauses.append("b.streamer_id = ?")
         params.append(streamer_id)
+    else:
+        # In der Gesamtansicht: Duplikate von internen Duellen herausfiltern (nur kanonische Zeile mit MIN(id))
+        where_clauses.append(
+            "(b.battle_id = '' OR b.id = (SELECT MIN(b2.id) FROM tiktok_battles b2 WHERE b2.battle_id = b.battle_id))"
+        )
     if cutoff:
         where_clauses.append("b.created_at >= ?")
         params.append(cutoff)
@@ -2539,7 +2561,166 @@ def get_battles_list(
             LIMIT ? OFFSET ?
         """
         rows = conn.execute(query_sql, tuple(params + [limit, offset])).fetchall()
-        battles = [dict(r) for r in rows]
+        raw_battles = [dict(r) for r in rows]
+
+        # Getrackte Streamer zur schnellen Gegnererkennung laden
+        all_streamers = conn.execute("SELECT id, username, display_name, avatar_url FROM streamers").fetchall()
+        streamer_by_uname = {str(r["username"]).lower(): dict(r) for r in all_streamers}
+
+        battles = []
+        for b in raw_battles:
+            opp_uname = str(b.get("opponent_username") or "").lower()
+            is_opp_tracked = opp_uname in streamer_by_uname
+            b_id = str(b.get("battle_id") or "").strip()
+
+            partner_row = None
+            if b_id and b_id != "":
+                p_res = conn.execute(
+                    """
+                    SELECT b.*, s.username AS streamer_username, s.display_name AS streamer_display_name, s.avatar_url AS streamer_avatar_url
+                    FROM tiktok_battles b
+                    JOIN streamers s ON s.id = b.streamer_id
+                    WHERE b.battle_id = ? AND b.id != ?
+                    LIMIT 1
+                    """,
+                    (b_id, b["id"]),
+                ).fetchone()
+                if p_res:
+                    partner_row = dict(p_res)
+
+            # Falls keine battle_id passte, aber Gegner getrackt ist: Zeitfenster prüfen (±180s)
+            if not partner_row and is_opp_tracked:
+                partner_streamer = streamer_by_uname[opp_uname]
+                s_at = b.get("started_at") or b.get("created_at") or ""
+                if s_at:
+                    try:
+                        s_dt = datetime.fromisoformat(s_at.replace("Z", ""))
+                        win_start = (s_dt - timedelta(seconds=180)).isoformat(timespec="seconds")
+                        win_end = (s_dt + timedelta(seconds=180)).isoformat(timespec="seconds")
+                        p_res = conn.execute(
+                            """
+                            SELECT b.*, s.username AS streamer_username, s.display_name AS streamer_display_name, s.avatar_url AS streamer_avatar_url
+                            FROM tiktok_battles b
+                            JOIN streamers s ON s.id = b.streamer_id
+                            WHERE b.streamer_id = ? AND LOWER(b.opponent_username) = ? AND b.id != ?
+                              AND b.started_at >= ? AND b.started_at <= ?
+                            ORDER BY b.id DESC LIMIT 1
+                            """,
+                            (partner_streamer["id"], str(b.get("streamer_username") or "").lower(), b["id"], win_start, win_end),
+                        ).fetchone()
+                        if p_res:
+                            partner_row = dict(p_res)
+                    except Exception:
+                        pass
+
+            if partner_row or is_opp_tracked:
+                b["is_internal"] = True
+                p = partner_row or {}
+                partner_st = streamer_by_uname.get(opp_uname) or {}
+
+                # Seite A und B bestimmen
+                if streamer_id:
+                    # In der Einzelstreamer-Ansicht bleibt der gewählte Streamer links (Seite A)
+                    b["is_single_view"] = True
+                    side_a_data = b
+                    side_b_data = p
+                    side_b_uname = p.get("streamer_username") or partner_st.get("username") or b.get("opponent_username")
+                    side_b_dname = p.get("streamer_display_name") or partner_st.get("display_name") or b.get("opponent_display_name")
+                    side_b_avatar = p.get("streamer_avatar_url") or partner_st.get("avatar_url") or b.get("opponent_avatar_url")
+                    side_b_score = p.get("streamer_score", b.get("opponent_score", 0))
+                    side_b_coins = p.get("coins_earned", 0)
+                    side_b_eur = float(p.get("eur_net", 0.0))
+                    side_b_id = p.get("streamer_id") or partner_st.get("id")
+                else:
+                    # In der Gesamtansicht: Der Streamer mit dem höheren Score (oder Seite A) kommt nach links
+                    b["is_single_view"] = False
+                    score_b = p.get("streamer_score", b.get("opponent_score", 0))
+                    score_a = b.get("streamer_score", 0)
+                    if score_b > score_a:
+                        side_a_data = p
+                        side_b_data = b
+                        side_b_uname = b.get("streamer_username")
+                        side_b_dname = b.get("streamer_display_name")
+                        side_b_avatar = b.get("streamer_avatar_url")
+                        side_b_score = score_a
+                        side_b_coins = b.get("coins_earned", 0)
+                        side_b_eur = float(b.get("eur_net", 0.0))
+                        side_b_id = b.get("streamer_id")
+                    else:
+                        side_a_data = b
+                        side_b_data = p
+                        side_b_uname = p.get("streamer_username") or partner_st.get("username") or b.get("opponent_username")
+                        side_b_dname = p.get("streamer_display_name") or partner_st.get("display_name") or b.get("opponent_display_name")
+                        side_b_avatar = p.get("streamer_avatar_url") or partner_st.get("avatar_url") or b.get("opponent_avatar_url")
+                        side_b_score = score_b
+                        side_b_coins = p.get("coins_earned", 0)
+                        side_b_eur = float(p.get("eur_net", 0.0))
+                        side_b_id = p.get("streamer_id") or partner_st.get("id")
+
+                coins_a = side_a_data.get("coins_earned", 0) or 0
+                eur_a = float(side_a_data.get("eur_net", 0.0) or 0.0)
+                tot_coins = coins_a + side_b_coins
+                tot_eur = round(eur_a + side_b_eur, 2)
+
+                b["total_coins"] = tot_coins
+                b["total_eur_net"] = tot_eur
+                b["coins_earned"] = tot_coins
+                b["eur_net"] = tot_eur
+
+                score_a_val = side_a_data.get("streamer_score", 0) or 0
+                score_b_val = side_b_score or 0
+                if score_a_val > score_b_val:
+                    b["winner_username"] = side_a_data.get("streamer_username")
+                    b["winner_display_name"] = side_a_data.get("streamer_display_name")
+                elif score_b_val > score_a_val:
+                    b["winner_username"] = side_b_uname
+                    b["winner_display_name"] = side_b_dname
+                else:
+                    b["winner_username"] = None
+                    b["winner_display_name"] = None
+
+                b["streamer_a"] = {
+                    "id": side_a_data.get("streamer_id"),
+                    "username": side_a_data.get("streamer_username"),
+                    "display_name": side_a_data.get("streamer_display_name"),
+                    "avatar_url": side_a_data.get("streamer_avatar_url") or "/static/avatar_default.png",
+                    "score": score_a_val,
+                    "coins_earned": coins_a,
+                    "eur_net": eur_a,
+                    "mvp_name": side_a_data.get("streamer_mvp_name") or "",
+                    "mvp_score": side_a_data.get("streamer_mvp_score") or 0,
+                    "mvp_avatar": side_a_data.get("streamer_mvp_avatar") or "",
+                    "result": side_a_data.get("result") or ("WIN" if score_a_val > score_b_val else ("LOSE" if score_a_val < score_b_val else "DRAW")),
+                }
+
+                b["streamer_b"] = {
+                    "id": side_b_id,
+                    "username": side_b_uname,
+                    "display_name": side_b_dname,
+                    "avatar_url": side_b_avatar or "/static/avatar_default.png",
+                    "score": score_b_val,
+                    "coins_earned": side_b_coins,
+                    "eur_net": side_b_eur,
+                    "mvp_name": side_b_data.get("streamer_mvp_name") or b.get("opponent_mvp_name") or "",
+                    "mvp_score": side_b_data.get("streamer_mvp_score") or b.get("opponent_mvp_score") or 0,
+                    "mvp_avatar": side_b_data.get("streamer_mvp_avatar") or b.get("opponent_mvp_avatar") or "",
+                    "result": side_b_data.get("result") or ("WIN" if score_b_val > score_a_val else ("LOSE" if score_b_val < score_a_val else "DRAW")),
+                }
+
+                # Kompatibilitätsfelder
+                b["streamer_username"] = b["streamer_a"]["username"]
+                b["streamer_display_name"] = b["streamer_a"]["display_name"]
+                b["streamer_avatar_url"] = b["streamer_a"]["avatar_url"]
+                b["streamer_score"] = b["streamer_a"]["score"]
+
+                b["opponent_username"] = b["streamer_b"]["username"]
+                b["opponent_display_name"] = b["streamer_b"]["display_name"]
+                b["opponent_avatar_url"] = b["streamer_b"]["avatar_url"]
+                b["opponent_score"] = b["streamer_b"]["score"]
+            else:
+                b["is_internal"] = False
+
+            battles.append(b)
 
     return {
         "total": total_count,
@@ -2569,11 +2750,12 @@ def get_battle_stats(
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
+    total_expr = "COUNT(DISTINCT CASE WHEN battle_id != '' THEN battle_id ELSE id END)" if not streamer_id else "COUNT(id)"
     with get_db() as conn:
         agg = conn.execute(
             f"""
             SELECT
-                COUNT(id) AS total_battles,
+                {total_expr} AS total_battles,
                 COALESCE(SUM(CASE WHEN result = 'WIN' THEN 1 ELSE 0 END), 0) AS wins,
                 COALESCE(SUM(CASE WHEN result = 'LOSE' THEN 1 ELSE 0 END), 0) AS losses,
                 COALESCE(SUM(CASE WHEN result = 'DRAW' THEN 1 ELSE 0 END), 0) AS draws,
@@ -2691,6 +2873,43 @@ def get_battle_details(battle_id: int) -> Optional[Dict[str, Any]]:
                 (battle["streamer_id"], battle["started_at"], battle["ended_at"]),
             ).fetchall()
             gifts = [dict(g) for g in g_rows]
+
+        # Partner-Battle prüfen falls internes Derby
+        partner_row = None
+        b_id = str(battle.get("battle_id") or "").strip()
+        if b_id:
+            p_res = conn.execute(
+                """
+                SELECT b.*, s.username AS streamer_username, s.display_name AS streamer_display_name, s.avatar_url AS streamer_avatar_url
+                FROM tiktok_battles b
+                JOIN streamers s ON s.id = b.streamer_id
+                WHERE b.battle_id = ? AND b.id != ? LIMIT 1
+                """,
+                (b_id, battle["id"]),
+            ).fetchone()
+            if p_res:
+                partner_row = dict(p_res)
+
+        if partner_row:
+            battle["is_internal"] = True
+            battle["partner_battle"] = partner_row
+            battle["total_coins"] = (battle.get("coins_earned") or 0) + (partner_row.get("coins_earned") or 0)
+            battle["total_eur_net"] = round(float(battle.get("eur_net") or 0.0) + float(partner_row.get("eur_net") or 0.0), 2)
+            if battle.get("started_at") and battle.get("ended_at"):
+                g2_rows = conn.execute(
+                    """
+                    SELECT * FROM gift_events
+                    WHERE streamer_id = ? AND created_at >= ? AND created_at <= ?
+                    ORDER BY total_coins DESC, id DESC
+                    LIMIT 50
+                    """,
+                    (partner_row["streamer_id"], battle["started_at"], battle["ended_at"]),
+                ).fetchall()
+                for g in g2_rows:
+                    dg = dict(g)
+                    dg["recipient_username"] = partner_row["streamer_username"]
+                    gifts.append(dg)
+                gifts.sort(key=lambda x: -int(x.get("total_coins", 0)))
 
         battle["gifts"] = gifts
         return battle
