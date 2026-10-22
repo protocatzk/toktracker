@@ -1131,7 +1131,28 @@ async def api_site_analytics(
 ):
     init_db()
     data = get_site_analytics_overview(period=period)
-    data["tiktok_workers"] = monitor_manager.get_active_streamers()
+    overview = get_dashboard_overview(period=period)
+    workers_list = []
+    for s in overview.get("streamers", []):
+        uname = s["username"]
+        diag = monitor_manager.get_worker_diagnostics(uname)
+        status = monitor_manager.get_status(uname)
+        workers_list.append({
+            "id": s["id"],
+            "username": uname,
+            "display_name": s.get("display_name") or uname,
+            "avatar_url": s.get("avatar_url"),
+            "is_live": s.get("is_live", 0),
+            "is_monitoring": monitor_manager.is_tracking(uname),
+            "status": status,
+            "connected_since": diag.get("connected_since") if diag else None,
+            "total_diamonds": s.get("total_diamonds", 0),
+            "gifts_received_session": diag.get("gifts_received_session", 0) if diag else 0,
+            "reconnect_count": diag.get("reconnect_attempts", 0) if diag else 0,
+            "last_seen_live": s.get("last_seen_live"),
+            "last_error": diag.get("last_error") if diag else (s.get("last_error") or ""),
+        })
+    data["tiktok_workers"] = workers_list
     data["recent_challenges"] = admin_auth_manager.get_recent_challenges(limit=25)
     data["telegram_diagnostics"] = telegram_bot_service.get_diagnostics()
     return data

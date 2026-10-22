@@ -135,10 +135,15 @@
     function renderTrafficChart(timeline) {
         const canvas = document.getElementById("chartTrafficTimeline");
         if (!canvas) return;
+        if (typeof Chart === "undefined") {
+            console.warn("Chart.js ist nicht geladen");
+            return;
+        }
 
-        const labels = timeline.map(t => t.label || t.bucket);
-        const viewsData = timeline.map(t => t.views || 0);
-        const visitorsData = timeline.map(t => t.visitors || 0);
+        const hasData = timeline && timeline.length > 0;
+        const labels = hasData ? timeline.map(t => t.label || t.bucket) : ["Keine Daten"];
+        const viewsData = hasData ? timeline.map(t => t.views || 0) : [0];
+        const visitorsData = hasData ? timeline.map(t => t.visitors || 0) : [0];
 
         if (trafficChartInstance) {
             trafficChartInstance.data.labels = labels;
@@ -225,29 +230,45 @@
     function renderPathsChart(paths) {
         const canvas = document.getElementById("chartPathsBreakdown");
         if (!canvas) return;
-
-        const topPaths = paths.slice(0, 5);
-        const otherCount = paths.slice(5).reduce((acc, p) => acc + (p.views || 0), 0);
-
-        const labels = topPaths.map(p => p.path);
-        const dataVals = topPaths.map(p => p.views);
-        if (otherCount > 0) {
-            labels.push("Andere");
-            dataVals.push(otherCount);
+        if (typeof Chart === "undefined") {
+            console.warn("Chart.js ist nicht geladen");
+            return;
         }
 
-        const colors = [
-            "#38bdf8",
-            "#8b5cf6",
-            "#ec4899",
-            "#10b981",
-            "#f59e0b",
-            "#64748b",
-        ];
+        const hasPaths = paths && paths.length > 0;
+        let labels = [];
+        let dataVals = [];
+        let colors = [];
+
+        if (hasPaths) {
+            const topPaths = paths.slice(0, 5);
+            const otherCount = paths.slice(5).reduce((acc, p) => acc + (p.views || 0), 0);
+
+            labels = topPaths.map(p => p.path);
+            dataVals = topPaths.map(p => p.views);
+            if (otherCount > 0) {
+                labels.push("Andere");
+                dataVals.push(otherCount);
+            }
+
+            colors = [
+                "#38bdf8",
+                "#8b5cf6",
+                "#ec4899",
+                "#10b981",
+                "#f59e0b",
+                "#64748b",
+            ].slice(0, labels.length);
+        } else {
+            labels = ["Keine Aufrufe"];
+            dataVals = [1];
+            colors = ["rgba(255, 255, 255, 0.08)"];
+        }
 
         if (pathsChartInstance) {
             pathsChartInstance.data.labels = labels;
             pathsChartInstance.data.datasets[0].data = dataVals;
+            pathsChartInstance.data.datasets[0].backgroundColor = colors;
             pathsChartInstance.update();
             return;
         }
@@ -260,7 +281,7 @@
                 datasets: [
                     {
                         data: dataVals,
-                        backgroundColor: colors.slice(0, labels.length),
+                        backgroundColor: colors,
                         borderColor: "#12171f",
                         borderWidth: 2,
                     },
@@ -498,6 +519,21 @@
 
     // Initialisierung & Event Listener
     document.addEventListener("DOMContentLoaded", () => {
+        // Tab Navigation Listeners
+        const tabMappings = {
+            "tabBtnPaths": "sectionPaths",
+            "tabBtnLog": "sectionLog",
+            "tabBtnBotSessions": "sectionBotSessions",
+            "tabBtnWorkers": "sectionWorkers",
+            "tabBtnUsers": "sectionUsers",
+        };
+        Object.entries(tabMappings).forEach(([btnId, secId]) => {
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.addEventListener("click", () => window.switchSection(secId));
+            }
+        });
+
         // Period Buttons
         document.querySelectorAll("[data-period]").forEach(btn => {
             btn.addEventListener("click", () => {
