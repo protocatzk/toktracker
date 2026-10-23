@@ -43,10 +43,19 @@
     // Radar State
     let radarTier = "all";
     let radarCrossOnly = false;
+    let radarVipOnly = false;
     let radarSearch = "";
     let radarSearchDebounceTimer = null;
     let radarLoadedOnce = false;
     let cachedRadarData = null;
+    let radarSubTab = "donors";
+    let whaleAlertMinCoins = 1000;
+    let lastSeenWhaleAlertId = 0;
+    let whaleSoundEnabled = false;
+    let loyaltyDaysRecent = 14;
+    let radarPollInterval = null;
+    let currentDossierData = null;
+    let audioCtx = null;
 
     // Chart.js Instances
     let chartTimelineInstance = null;
@@ -188,11 +197,38 @@
         radarKpiSharks: document.getElementById("maRadarKpiSharks"),
         radarKpiDolphins: document.getElementById("maRadarKpiDolphins"),
         radarKpiCross: document.getElementById("maRadarKpiCross"),
+        radarKpiVip: document.getElementById("maRadarKpiVip"),
+        cardKpiVip: document.getElementById("maCardKpiVip"),
         radarSearchInput: document.getElementById("maRadarSearchInput"),
         radarSearchClear: document.getElementById("maRadarSearchClear"),
         radarTierPills: document.querySelectorAll(".ma-tier-pill"),
         btnToggleCrossOnly: document.getElementById("maBtnToggleCrossOnly"),
+        btnToggleVipOnly: document.getElementById("maBtnToggleVipOnly"),
         radarDonorsContainer: document.getElementById("maRadarDonorsContainer"),
+        whaleTickerBar: document.getElementById("maWhaleTickerBar"),
+        whaleTickerTrack: document.getElementById("maWhaleTickerTrack"),
+        btnToggleWhaleSound: document.getElementById("maBtnToggleWhaleSound"),
+        whaleSoundIcon: document.getElementById("maWhaleSoundIcon"),
+        whaleAlertCountBadge: document.getElementById("maWhaleAlertCountBadge"),
+        subTabDonors: document.getElementById("maSubTabDonors"),
+        subTabAlerts: document.getElementById("maSubTabAlerts"),
+        subTabLoyalty: document.getElementById("maSubTabLoyalty"),
+        subViewDonors: document.getElementById("maSubViewDonors"),
+        subViewAlerts: document.getElementById("maSubViewAlerts"),
+        subViewLoyalty: document.getElementById("maSubViewLoyalty"),
+        whaleAlertsContainer: document.getElementById("maWhaleAlertsContainer"),
+        btnRefreshWhaleAlerts: document.getElementById("maBtnRefreshWhaleAlerts"),
+        alertThresholdPills: document.querySelectorAll(".ma-alert-pill"),
+        frontenwechslerBadge: document.getElementById("maFrontenwechslerBadge"),
+        frontenwechslerContainer: document.getElementById("maFrontenwechslerContainer"),
+        overlapPairsBadge: document.getElementById("maOverlapPairsBadge"),
+        overlapMatrixContainer: document.getElementById("maOverlapMatrixContainer"),
+        btnRefreshLoyalty: document.getElementById("maBtnRefreshLoyalty"),
+        loyaltyDaysPills: document.querySelectorAll(".ma-loyalty-pill"),
+        modalDonorDossier: document.getElementById("modalDonorDossier"),
+        dossierUsername: document.getElementById("maDossierUsername"),
+        dossierTierBadge: document.getElementById("maDossierTierBadge"),
+        dossierBody: document.getElementById("maDossierBody"),
 
         toastContainer: document.getElementById("maToastContainer"),
     };
@@ -1506,7 +1542,90 @@
     // =====================================================================
     // 4b. SPENDER-RADAR & WHALES (TAB 4)
     // =====================================================================
-    async function fetchRadarData() {
+
+    // Web Audio Synthesizer for Whale Alerts (Optional Sound)
+    function initAudioContext() {
+        if (!audioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) audioCtx = new AudioContext();
+        }
+        if (audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+        }
+    }
+
+    function playWhaleAlertChime(isWhale = false) {
+        if (!whaleSoundEnabled) return;
+        try {
+            initAudioContext();
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            const freq = isWhale ? 880 : 660;
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(freq, now);
+            osc.frequency.exponentialRampToValueAtTime(isWhale ? 1320 : 990, now + 0.15);
+            gain.gain.setValueAtTime(0.08, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+            osc.start(now);
+            osc.stop(now + 0.45);
+        } catch (e) {}
+    }
+
+    function triggerWhaleHaptic(tier) {
+        if (tier === "whale") {
+            triggerHaptic("heavy");
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+                window.Telegram.WebApp.HapticFeedback.notificationOccurred("success");
+            }
+        } else {
+            triggerHaptic("medium");
+        }
+    }
+
+    function renderTierBadge(tier) {
+        tier = (tier || "dolphin").toLowerCase();
+        if (tier === "whale") {
+            return `<span class="ma-tier-tag whale">🐋 WHALE</span>`;
+        } else if (tier === "shark") {
+            return `<span class="ma-tier-tag shark">🦈 SHARK</span>`;
+        }
+        return `<span class="ma-tier-tag dolphin">🐬 DOLPHIN</span>`;
+    }
+
+    // Polling Supervisor for Radar Tab (Smart 12s interval, stops in background)
+    function startRadarPolling() {
+        stopRadarPolling();
+        if (activeTab === "tab-radar" && !document.hidden) {
+            radarPollInterval = setInterval(() => {
+                if (activeTab === "tab-radar" && !document.hidden) {
+                    if (radarSubTab === "donors") {
+                        fetchRadarData(true);
+                    } else if (radarSubTab === "alerts") {
+                        fetchWhaleAlerts(true);
+                    }
+                    fetchWhaleTicker(true);
+                } else {
+                    stopRadarPolling();
+                }
+            }, 12000);
+        }
+    }
+
+    function stopRadarPolling() {
+        if (radarPollInterval) {
+            clearInterval(radarPollInterval);
+            radarPollInterval = null;
+        }
+    }
+
+    // 1. Fetch Donors List & Radar KPIs
+    async function fetchRadarData(silent = false) {
         if (!elements.radarDonorsContainer) return;
 
         let url = `/api/miniapp/radar?period=${encodeURIComponent(currentPeriod)}`;
@@ -1515,6 +1634,9 @@
         }
         if (radarCrossOnly) {
             url += `&cross_only=true`;
+        }
+        if (radarVipOnly) {
+            url += `&vip_only=true`;
         }
         if (radarSearch && radarSearch.trim()) {
             url += `&search=${encodeURIComponent(radarSearch.trim())}`;
@@ -1542,12 +1664,14 @@
             renderRadarData(data);
         } catch (err) {
             console.error("Fehler beim Laden des Spender-Radars:", err);
-            elements.radarDonorsContainer.innerHTML = `
-                <div class="ma-empty-state">
-                    <div class="ma-empty-icon">⚠️</div>
-                    <div>Fehler beim Laden der Radar-Daten</div>
-                </div>
-            `;
+            if (!silent) {
+                elements.radarDonorsContainer.innerHTML = `
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">⚠️</div>
+                        <div>Fehler beim Laden der Radar-Daten</div>
+                    </div>
+                `;
+            }
         }
     }
 
@@ -1560,6 +1684,7 @@
         if (elements.radarKpiSharks) elements.radarKpiSharks.textContent = formatNumber(kpis.sharks || 0);
         if (elements.radarKpiDolphins) elements.radarKpiDolphins.textContent = formatNumber(kpis.dolphins || 0);
         if (elements.radarKpiCross) elements.radarKpiCross.textContent = formatNumber(kpis.cross_streamer_whales || 0);
+        if (elements.radarKpiVip) elements.radarKpiVip.textContent = formatNumber(kpis.vip_donors || 0);
         if (elements.radarTotalBadge) elements.radarTotalBadge.textContent = `${donors.length} erfasst`;
 
         if (!donors.length) {
@@ -1592,14 +1717,16 @@
             const giftsCount = formatNumber(d.total_gifts || 0);
 
             html += `
-                <div class="ma-donor-card tier-${tier}">
+                <div class="ma-donor-card tier-${tier}" data-donor-username="${displayUname}" style="cursor: pointer;">
                     <div class="ma-donor-header">
                         <div class="ma-donor-ident">
                             <div class="ma-donor-rank ${rankClass}">#${rank}</div>
                             <div class="ma-donor-names">
                                 <div class="ma-donor-uname">
                                     <span>${displayUname}</span>
-                                    ${isVip ? `<span class="ma-donor-vip-badge" title="VIP-Spender">⭐</span>` : ""}
+                                    <button type="button" class="ma-vip-star-btn ${isVip ? 'is-vip' : ''}" data-action="toggle-vip" data-username="${displayUname}" title="VIP-Status umschalten">
+                                        ⭐
+                                    </button>
                                 </div>
                                 ${displayNick ? `<div class="ma-donor-nick">${displayNick}</div>` : ""}
                             </div>
@@ -1614,10 +1741,12 @@
                         <div class="ma-donor-tags">
                             <span class="ma-tier-tag ${tier}">${tierEmoji} ${tierLabel}</span>
                             ${isCross ? `<span class="ma-cross-tag">⚡ ${streamerCount} Kanäle</span>` : ""}
+                            ${d.has_notes ? `<span style="font-size: 10px; color: #fbbf24;" title="Notizen vorhanden">📝</span>` : ""}
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <span>🎁 ${giftsCount} Gifts</span>
                             ${d.last_seen ? `<span>· ${getRelativeTime(d.last_seen)}</span>` : ""}
+                            <span style="font-size: 11px; color: var(--text-muted);">›</span>
                         </div>
                     </div>
                 </div>
@@ -1625,6 +1754,755 @@
         });
 
         elements.radarDonorsContainer.innerHTML = html;
+
+        // Click handlers on donor cards & VIP stars
+        elements.radarDonorsContainer.querySelectorAll(".ma-donor-card").forEach(card => {
+            card.addEventListener("click", (e) => {
+                if (e.target.closest("[data-action='toggle-vip']")) return;
+                const uname = card.getAttribute("data-donor-username");
+                if (uname) {
+                    triggerHaptic("light");
+                    openDonorDossier(uname);
+                }
+            });
+        });
+
+        elements.radarDonorsContainer.querySelectorAll("[data-action='toggle-vip']").forEach(starBtn => {
+            starBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const uname = starBtn.getAttribute("data-username");
+                if (uname) toggleDonorVip(uname, starBtn, e);
+            });
+        });
+    }
+
+    // 2. Fetch Live Whale Ticker
+    async function fetchWhaleTicker(silent = false) {
+        if (!elements.whaleTickerTrack) return;
+        try {
+            const res = await fetch(`/api/donor-radar/whale-alerts?min_coins=1000&limit=15`, { headers: getAuthHeaders() });
+            if (!res.ok) return;
+            const json = await res.json();
+            const alerts = json.alerts || [];
+
+            if (!alerts.length) {
+                elements.whaleTickerTrack.innerHTML = `<span class="mono muted" style="font-size: 11px; padding: 0 8px;">Noch keine Whale-Alerts im System</span>`;
+                return;
+            }
+
+            // Check if there is a newly arrived high-value gift
+            let maxId = lastSeenWhaleAlertId;
+            let hasNewAlert = false;
+            let highestNewTier = "dolphin";
+
+            alerts.forEach(a => {
+                if (a.id > maxId) {
+                    if (lastSeenWhaleAlertId > 0) {
+                        hasNewAlert = true;
+                        if (a.tier === "whale") highestNewTier = "whale";
+                        else if (highestNewTier !== "whale" && a.tier === "shark") highestNewTier = "shark";
+                    }
+                    if (a.id > maxId) maxId = a.id;
+                }
+            });
+
+            if (hasNewAlert && lastSeenWhaleAlertId > 0) {
+                lastSeenWhaleAlertId = maxId;
+                triggerWhaleHaptic(highestNewTier);
+                playWhaleAlertChime(highestNewTier === "whale");
+                const topAlert = alerts[0];
+                showToast(`🐋 Whale-Alert: @${topAlert.sender_username} schenkte ${formatNumber(topAlert.total_coins)} Coins an @${topAlert.streamer_username}!`);
+            } else if (maxId > lastSeenWhaleAlertId) {
+                lastSeenWhaleAlertId = maxId;
+            }
+
+            let chipsHtml = "";
+            alerts.slice(0, 10).forEach(a => {
+                const tier = (a.tier || "shark").toLowerCase();
+                const tierEmoji = tier === "whale" ? "🐋" : "🦈";
+                const uname = escapeHtml(a.sender_username || "anonym");
+                const coins = formatNumber(a.total_coins || 0);
+                const sName = escapeHtml(a.streamer_username || "");
+
+                chipsHtml += `
+                    <div class="ma-ticker-chip" data-donor="${uname}" title="${uname} schenkte ${coins} Coins an @${sName}">
+                        <span>${tierEmoji}</span>
+                        <strong>${uname}</strong>
+                        <span style="color: #fbbf24;">💎 ${coins}</span>
+                        <span class="muted" style="font-size: 9.5px;">→ @${sName}</span>
+                    </div>
+                `;
+            });
+
+            elements.whaleTickerTrack.innerHTML = chipsHtml;
+
+            // Clicking any ticker chip opens the donor dossier
+            elements.whaleTickerTrack.querySelectorAll(".ma-ticker-chip").forEach(chip => {
+                chip.addEventListener("click", () => {
+                    const uname = chip.getAttribute("data-donor");
+                    if (uname) {
+                        triggerHaptic("light");
+                        openDonorDossier(uname);
+                    }
+                });
+            });
+        } catch (e) {
+            console.error("Whale Ticker Error:", e);
+        }
+    }
+
+    // 3. Fetch Whale-Alerts Feed (Subtab 2)
+    async function fetchWhaleAlerts(silent = false) {
+        if (!elements.whaleAlertsContainer) return;
+        if (!silent) {
+            elements.whaleAlertsContainer.innerHTML = `
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">⏳</div>
+                    <div>Lade Live-Großspenden (&ge; ${formatNumber(whaleAlertMinCoins)} Coins)...</div>
+                </div>
+            `;
+        }
+
+        try {
+            const res = await fetch(`/api/donor-radar/whale-alerts?min_coins=${whaleAlertMinCoins}&limit=35`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const alerts = json.alerts || [];
+
+            if (elements.whaleAlertCountBadge) {
+                elements.whaleAlertCountBadge.textContent = alerts.length;
+                elements.whaleAlertCountBadge.style.display = alerts.length ? "inline-block" : "none";
+            }
+
+            if (!alerts.length) {
+                elements.whaleAlertsContainer.innerHTML = `
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">🔍</div>
+                        <div>Keine Großspenden über ${formatNumber(whaleAlertMinCoins)} Coins erfasst</div>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = "";
+            alerts.forEach(a => {
+                const tier = (a.tier || "shark").toLowerCase();
+                const tierEmoji = tier === "whale" ? "🐋" : (tier === "shark" ? "🦈" : "🐬");
+                const giftImg = a.gift_icon_url || "/static/avatar_default.png";
+                const giftName = escapeHtml(a.gift_name || "Geschenk");
+                const repeat = parseInt(a.repeat_count || 1, 10);
+                const sender = escapeHtml(a.sender_username || "anonym");
+                const streamer = escapeHtml(a.streamer_display_name || a.streamer_username || "");
+                const streamerAvatar = a.streamer_avatar_url || "/static/avatar_default.png";
+                const coins = formatNumber(a.total_coins || 0);
+                const eurNet = formatCurrency(a.eur_net || 0, "EUR");
+                const isVip = !!a.is_vip;
+
+                html += `
+                    <div class="ma-alert-card tier-${tier}" data-donor="${sender}">
+                        <div class="ma-alert-left">
+                            <img src="${escapeHtml(giftImg)}" class="ma-alert-gift-img" onerror="this.src='/static/avatar_default.png'" />
+                            <div style="min-width: 0; flex: 1;">
+                                <div class="ma-alert-sender">
+                                    <span>${tierEmoji}</span>
+                                    <span>${sender}</span>
+                                    ${isVip ? '<span style="color:#fbbf24;">⭐</span>' : ''}
+                                </div>
+                                <div class="ma-alert-target">
+                                    <img src="${escapeHtml(streamerAvatar)}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: cover;" onerror="this.src='/static/avatar_default.png'" />
+                                    <span>an @${streamer}</span>
+                                    <span>· ${repeat > 1 ? repeat + 'x ' : ''}${giftName}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ma-alert-right">
+                            <div class="ma-alert-coins">💎 ${coins}</div>
+                            <div class="ma-alert-eur">+${eurNet}</div>
+                            <div class="ma-alert-time">${a.created_at ? getRelativeTime(a.created_at) : ''}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            elements.whaleAlertsContainer.innerHTML = html;
+
+            elements.whaleAlertsContainer.querySelectorAll(".ma-alert-card").forEach(c => {
+                c.addEventListener("click", () => {
+                    const uname = c.getAttribute("data-donor");
+                    if (uname) {
+                        triggerHaptic("light");
+                        openDonorDossier(uname);
+                    }
+                });
+            });
+        } catch (e) {
+            console.error("Whale Alerts Feed Error:", e);
+            if (!silent) {
+                elements.whaleAlertsContainer.innerHTML = `
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">⚠️</div>
+                        <div>Fehler beim Laden des Whale-Alert Feeds</div>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    // 4. Fetch Loyalty & Frontenwechsler Data (Subtab 3)
+    async function fetchLoyaltyData(silent = false) {
+        if (!elements.frontenwechslerContainer && !elements.overlapMatrixContainer) return;
+        if (!silent) {
+            if (elements.frontenwechslerContainer) {
+                elements.frontenwechslerContainer.innerHTML = `
+                    <div class="ma-empty-state"><div class="ma-empty-icon">⏳</div><div>Analysiere Frontenwechsler...</div></div>
+                `;
+            }
+            if (elements.overlapMatrixContainer) {
+                elements.overlapMatrixContainer.innerHTML = `
+                    <div class="ma-empty-state"><div class="ma-empty-icon">⏳</div><div>Berechne Überschneidungs-Matrix...</div></div>
+                `;
+            }
+        }
+
+        try {
+            const res = await fetch(`/api/donor-radar/loyalty-and-overlap?days_recent=${loyaltyDaysRecent}&min_coins=50`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const data = json.data || {};
+            const shifters = data.frontenwechsler || [];
+            const overlaps = data.overlap_matrix || [];
+
+            if (elements.frontenwechslerBadge) {
+                elements.frontenwechslerBadge.textContent = `${shifters.length} erkannt`;
+            }
+            if (elements.overlapPairsBadge) {
+                elements.overlapPairsBadge.textContent = `${overlaps.length} Paare`;
+            }
+
+            // Render Frontenwechsler
+            if (elements.frontenwechslerContainer) {
+                if (!shifters.length) {
+                    elements.frontenwechslerContainer.innerHTML = `
+                        <div class="ma-empty-state">
+                            <div class="ma-empty-icon">🤝</div>
+                            <div>Keine Frontenwechsler im gewählten Zeitraum (${loyaltyDaysRecent} Tage) erkannt.</div>
+                        </div>
+                    `;
+                } else {
+                    let sHtml = "";
+                    shifters.forEach(s => {
+                        const uname = escapeHtml(s.username || "anonym");
+                        const fromS = s.from_streamer || {};
+                        const toS = s.to_streamer || {};
+                        const loyalty = s.loyalty || {};
+                        const score = loyalty.score || 50;
+                        const classLabel = escapeHtml(loyalty.label || "Spender");
+                        const classColor = loyalty.color || "#38bdf8";
+
+                        sHtml += `
+                            <div class="ma-shifter-card" data-donor="${uname}">
+                                <div class="ma-shifter-head">
+                                    <div class="ma-shifter-uname">
+                                        <span>🔀</span>
+                                        <strong>${uname}</strong>
+                                        ${s.is_vip ? '<span style="color:#fbbf24;">⭐</span>' : ''}
+                                    </div>
+                                    <span class="ma-shifter-class" style="background: ${classColor}22; color: ${classColor}; border: 1px solid ${classColor}66;">
+                                        ${classLabel} (${score}%)
+                                    </span>
+                                </div>
+                                <div class="ma-shifter-flow">
+                                    <div class="ma-shifter-streamer">
+                                        <img src="${escapeHtml(fromS.avatar_url || '/static/avatar_default.png')}" class="ma-shifter-streamer-av" onerror="this.src='/static/avatar_default.png'" />
+                                        <div class="ma-shifter-streamer-info">
+                                            <div class="muted" style="font-size: 9px;">FRÜHER</div>
+                                            <div>@${escapeHtml(fromS.username || '')}</div>
+                                            <div class="mono" style="font-size: 10px; color: var(--text-muted);">💎 ${formatNumber(fromS.coins || 0)}</div>
+                                        </div>
+                                    </div>
+                                    <div class="ma-shifter-arrow">➔</div>
+                                    <div class="ma-shifter-streamer" style="text-align: right; justify-content: flex-end;">
+                                        <div class="ma-shifter-streamer-info">
+                                            <div style="font-size: 9px; color: #10b981; font-weight: 800;">NEUER FOKUS</div>
+                                            <div style="color: #38bdf8;">@${escapeHtml(toS.username || '')}</div>
+                                            <div class="mono" style="font-size: 10px; color: #fbbf24; font-weight: 800;">💎 ${formatNumber(toS.coins || 0)}</div>
+                                        </div>
+                                        <img src="${escapeHtml(toS.avatar_url || '/static/avatar_default.png')}" class="ma-shifter-streamer-av" style="border-color: #38bdf8;" onerror="this.src='/static/avatar_default.png'" />
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    elements.frontenwechslerContainer.innerHTML = sHtml;
+
+                    elements.frontenwechslerContainer.querySelectorAll(".ma-shifter-card").forEach(c => {
+                        c.addEventListener("click", () => {
+                            const uname = c.getAttribute("data-donor");
+                            if (uname) {
+                                triggerHaptic("light");
+                                openDonorDossier(uname);
+                            }
+                        });
+                    });
+                }
+            }
+
+            // Render Overlap Matrix
+            if (elements.overlapMatrixContainer) {
+                if (!overlaps.length) {
+                    elements.overlapMatrixContainer.innerHTML = `
+                        <div class="ma-empty-state">
+                            <div class="ma-empty-icon">⚡</div>
+                            <div>Keine Überschneidungs-Paare gefunden.</div>
+                        </div>
+                    `;
+                } else {
+                    let oHtml = "";
+                    overlaps.forEach(p => {
+                        const sA = escapeHtml(p.streamer_a_display_name || p.streamer_a_username || "A");
+                        const sB = escapeHtml(p.streamer_b_display_name || p.streamer_b_username || "B");
+                        const pctA = p.streamer_a_pct || 50;
+                        const pctB = p.streamer_b_pct || 50;
+                        const totalCoins = formatNumber(p.total_shared_coins || p.shared_volume_coins || 0);
+                        const sharedCount = p.shared_donors_count || 1;
+
+                        oHtml += `
+                            <div class="ma-overlap-card">
+                                <div class="ma-overlap-head">
+                                    <div style="font-size: 12px; font-weight: 800; color: var(--text-strong);">
+                                        <span>@${sA}</span> <span class="muted">&amp;</span> <span>@${sB}</span>
+                                    </div>
+                                    <span class="mono" style="font-size: 10.5px; color: #fbbf24; font-weight: 800;">
+                                        💎 ${totalCoins}
+                                    </span>
+                                </div>
+                                <div class="ma-overlap-split-bar">
+                                    <div class="ma-split-seg-a" style="width: ${pctA}%;"></div>
+                                    <div class="ma-split-seg-b" style="width: ${pctB}%;"></div>
+                                </div>
+                                <div class="ma-overlap-meta">
+                                    <span style="color: #c084fc;">@${sA}: ${pctA}%</span>
+                                    <span class="muted">👥 ${sharedCount} Spender geteilt</span>
+                                    <span style="color: #38bdf8;">@${sB}: ${pctB}%</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    elements.overlapMatrixContainer.innerHTML = oHtml;
+                }
+            }
+        } catch (e) {
+            console.error("Loyalty Data Error:", e);
+            if (!silent) {
+                if (elements.frontenwechslerContainer) elements.frontenwechslerContainer.innerHTML = '<div class="ma-empty-state">Fehler bei Frontenwechsler</div>';
+                if (elements.overlapMatrixContainer) elements.overlapMatrixContainer.innerHTML = '<div class="ma-empty-state">Fehler bei Überschneidungen</div>';
+            }
+        }
+    }
+
+    // 5. Donor Dossier Modal & CRM Inspection
+    // 5. Donor Dossier Modal & CRM Inspection
+    async function openDonorDossier(username) {
+        if (!elements.modalDonorDossier || !elements.dossierBody) return;
+        elements.dossierUsername.textContent = `@${username}`;
+        elements.dossierTierBadge.innerHTML = "";
+        elements.dossierBody.innerHTML = `
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Spender-Dossier für @${escapeHtml(username)}...</div>
+            </div>
+        `;
+        openModal(elements.modalDonorDossier);
+
+        try {
+            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const payload = json.data || {};
+            const profile = payload.profile || payload;
+            const crm = payload.crm || {};
+            const streamers = payload.streamers || [];
+            const topGifts = payload.top_gifts || [];
+            const recentChats = payload.recent_chats || [];
+            const loyalty = payload.loyalty || {};
+            const frontenwechsel = payload.frontenwechsel || {};
+
+            const finalUsername = profile.username || username;
+            const finalIsVip = profile.is_vip !== undefined ? !!profile.is_vip : (crm.is_vip !== undefined ? !!crm.is_vip : false);
+            const finalTags = Array.isArray(profile.tags) && profile.tags.length ? profile.tags : (Array.isArray(crm.tags) ? crm.tags : []);
+            const finalNotes = (profile.notes !== undefined && profile.notes !== null) ? profile.notes : (crm.notes || "");
+
+            currentDossierData = {
+                username: finalUsername,
+                is_vip: finalIsVip,
+                tags: finalTags,
+                notes: finalNotes,
+            };
+
+            const tier = (profile.tier || "dolphin").toLowerCase();
+            const isVip = finalIsVip;
+            const displayNick = (profile.display_name && profile.display_name !== finalUsername) ? escapeHtml(profile.display_name) : "";
+            const avatar = profile.avatar_url || "/static/avatar_default.png";
+            const coins = formatNumber(profile.total_coins || 0);
+            const eurNet = formatCurrency(profile.total_eur_net || 0, "EUR");
+            const usdNet = formatCurrency(profile.total_usd_net || 0, "USD");
+            const giftsCount = formatNumber(profile.total_gifts || 0);
+            const tags = finalTags;
+            const notes = finalNotes;
+
+            elements.dossierUsername.textContent = `@${finalUsername}`;
+            elements.dossierTierBadge.innerHTML = renderTierBadge(tier);
+
+            // 1. Streamer distribution
+            let sHtml = "";
+            const totalCoinsDonor = Number(profile.total_coins || 0);
+            streamers.forEach(s => {
+                const sCoins = Number(s.coins_given !== undefined ? s.coins_given : (s.coins || 0));
+                const pct = s.percentage !== undefined ? s.percentage : (totalCoinsDonor > 0 ? Math.round((sCoins / totalCoinsDonor) * 100) : 0);
+                const sUsername = s.streamer_username || s.username || "unbekannt";
+                const sAvatar = s.streamer_avatar_url || s.avatar_url || "/static/avatar_default.png";
+
+                sHtml += `
+                    <div class="ma-dossier-streamer-item">
+                        <div class="ma-dossier-streamer-top">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <img src="${escapeHtml(sAvatar)}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" onerror="this.src='/static/avatar_default.png'" />
+                                <strong>@${escapeHtml(sUsername)}</strong>
+                            </div>
+                            <div class="mono" style="color: #fbbf24; font-weight: 700;">💎 ${formatNumber(sCoins)} (${pct}%)</div>
+                        </div>
+                        <div class="ma-dossier-bar-wrap">
+                            <div class="ma-dossier-bar" style="width: ${pct}%;"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // 2. Favorite Gifts
+            let gHtml = "";
+            topGifts.slice(0, 6).forEach(g => {
+                const gCount = formatNumber(g.total_sent || g.count || g.total_repeats || 1);
+                const gCoins = formatNumber(g.total_coins || g.coins || 0);
+                const gIcon = g.gift_icon_url || "";
+                gHtml += `
+                    <div style="display: inline-flex; align-items: center; gap: 5px; background: var(--bg-surface); border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 6px; font-size: 11px;">
+                        ${gIcon ? `<img src="${escapeHtml(gIcon)}" style="width: 16px; height: 16px; object-fit: contain;" onerror="this.style.display='none'" />` : `<span>🎁</span>`}
+                        <strong>${escapeHtml(g.gift_name || 'Geschenk')}</strong>
+                        <span class="muted">(${gCount}x)</span>
+                        <span style="color: #fbbf24; font-weight: 700;">💎 ${gCoins}</span>
+                    </div>
+                `;
+            });
+
+            // 3. Loyalty & Frontenwechsel Banner
+            let loyaltyHtml = "";
+            if (loyalty && (loyalty.score !== undefined || loyalty.primary_streamer)) {
+                const lScore = loyalty.score || 0;
+                const lColor = loyalty.color || "#38bdf8";
+                const lLabel = escapeHtml(loyalty.label || "Supporter");
+                const lBadge = escapeHtml(loyalty.badge || `${lScore}% Treue`);
+                const lPrimary = escapeHtml(loyalty.primary_streamer || "");
+                const lCoins = formatNumber(loyalty.primary_coins || 0);
+
+                loyaltyHtml = `
+                    <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <div style="font-size: 11.5px; font-weight: 700; color: ${lColor};">${lBadge}</div>
+                            <span class="mono muted" style="font-size: 10px;">${lLabel}</span>
+                        </div>
+                        ${lPrimary ? `<div style="font-size: 10.5px; color: var(--text-muted);">Stamm-Kanal: <strong style="color: var(--text-main);">@${lPrimary}</strong> (💎 ${lCoins})</div>` : ''}
+                        ${(frontenwechsel && frontenwechsel.is_shifted) ? `
+                            <div style="margin-top: 5px; font-size: 10px; color: #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 3px 6px; border-radius: 4px;">
+                                ⚠️ Frontenwechsel: Von @${escapeHtml(frontenwechsel.from_streamer)} ➔ Neuer Fokus @${escapeHtml(frontenwechsel.to_streamer)}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // 4. Recent Chats
+            let chatHtml = "";
+            if (recentChats && recentChats.length) {
+                let chatRows = "";
+                recentChats.slice(0, 4).forEach(c => {
+                    const cText = escapeHtml(c.comment || "");
+                    const cStreamer = escapeHtml(c.streamer_display_name || c.streamer_username || "");
+                    const cTime = c.created_at ? getRelativeTime(c.created_at) : "";
+                    chatRows += `
+                        <div style="font-size: 11px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 2px;">
+                            <div style="color: var(--text-main); line-height: 1.35;">💬 "${cText}"</div>
+                            <div class="muted" style="font-size: 9.5px;">bei @${cStreamer} · ${cTime}</div>
+                        </div>
+                    `;
+                });
+                chatHtml = `
+                    <div style="margin-bottom: 14px;">
+                        <div class="ma-dossier-section-title">
+                            <span>Letzte Chat-Nachrichten</span>
+                            <span class="muted mono" style="font-size: 10px;">${recentChats.length}</span>
+                        </div>
+                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; max-height: 130px; overflow-y: auto;">
+                            ${chatRows}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 5. Quick Tag choices
+            const availableQuickTags = ["whale", "loyal", "sniper", "chatter", "mod", "sponsor"];
+            let tagsHtml = "";
+            availableQuickTags.forEach(t => {
+                const hasTag = tags.includes(t);
+                tagsHtml += `
+                    <div class="ma-crm-tag-chip ${hasTag ? 'active' : ''}" data-tag="${t}">
+                        #${t} ${hasTag ? '✓' : '+'}
+                    </div>
+                `;
+            });
+            tags.forEach(t => {
+                if (!availableQuickTags.includes(t)) {
+                    tagsHtml += `
+                        <div class="ma-crm-tag-chip active" data-tag="${escapeHtml(t)}">
+                            #${escapeHtml(t)} ✓
+                        </div>
+                    `;
+                }
+            });
+
+            elements.dossierBody.innerHTML = `
+                <!-- Profile Hero -->
+                <div class="ma-dossier-hero">
+                    <img src="${escapeHtml(avatar)}" class="ma-dossier-avatar" onerror="this.src='/static/avatar_default.png'" />
+                    <div style="flex: 1; min-width: 0;">
+                        <div class="ma-dossier-title">
+                            <span>@${escapeHtml(finalUsername)}</span>
+                            <button type="button" class="ma-vip-star-btn ${isVip ? 'is-vip' : ''}" id="maModalVipBtn" style="font-size: 18px;" title="VIP Status umschalten">
+                                ⭐
+                            </button>
+                        </div>
+                        ${displayNick ? `<div class="ma-dossier-nick">${displayNick}</div>` : ""}
+                        <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                            ${profile.is_cross_streamer ? '<span class="ma-cross-tag">⚡ Multi-Streamer Spender</span>' : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loyalty Box -->
+                ${loyaltyHtml}
+
+                <!-- KPI Grid -->
+                <div class="ma-dossier-kpi-grid">
+                    <div class="ma-dossier-kpi-box">
+                        <span class="ma-dossier-kpi-lbl">Gesamt-Spenden</span>
+                        <span class="ma-dossier-kpi-val" style="color: #fbbf24;">💎 ${coins}</span>
+                    </div>
+                    <div class="ma-dossier-kpi-box">
+                        <span class="ma-dossier-kpi-lbl">Netto (EUR)</span>
+                        <span class="ma-dossier-kpi-val" style="color: #10b981;">+${eurNet}</span>
+                    </div>
+                    <div class="ma-dossier-kpi-box">
+                        <span class="ma-dossier-kpi-lbl">Geschenke-Anzahl</span>
+                        <span class="ma-dossier-kpi-val">${giftsCount}</span>
+                    </div>
+                    <div class="ma-dossier-kpi-box">
+                        <span class="ma-dossier-kpi-lbl">Zuletzt gesehen</span>
+                        <span class="ma-dossier-kpi-val" style="font-size: 11px; font-weight: 700; color: var(--text-muted);">
+                            ${profile.last_seen ? getRelativeTime(profile.last_seen) : '-'}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- CRM & Notizen Section -->
+                <div class="ma-dossier-crm-box">
+                    <div class="ma-crm-header">
+                        <span class="ma-crm-title">⭐ Spender-CRM &amp; Tags</span>
+                        <span class="muted" style="font-size: 10px;">Tap auf Tag zum Umschalten</span>
+                    </div>
+                    <div class="ma-crm-tags-wrap" id="maDossierTagsWrap">
+                        ${tagsHtml}
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted);">Private Spender-Notizen:</label>
+                        <textarea id="maDossierNotesInput" class="ma-crm-notes-input" placeholder="Wichtige Infos zu diesem Großspender notieren...">${escapeHtml(notes)}</textarea>
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+                        <button type="button" class="ma-btn ma-btn-primary" id="maBtnSaveDossierNotes" style="font-size: 11px; padding: 5px 12px;">
+                            💾 Notiz speichern
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Streamer Verteilung -->
+                <div style="margin-bottom: 14px;">
+                    <div class="ma-dossier-section-title">
+                        <span>Beschenkte Streamer</span>
+                        <span class="muted mono" style="font-size: 10.5px;">${streamers.length} Kanäle</span>
+                    </div>
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px;">
+                        ${sHtml || '<div class="muted">Keine Streamer-Zuordnung verfügbar.</div>'}
+                    </div>
+                </div>
+
+                <!-- Top Geschenke -->
+                <div style="margin-bottom: 14px;">
+                    <div class="ma-dossier-section-title">
+                        <span>Lieblings-Geschenke</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${gHtml || '<div class="muted">Keine Geschenk-Daten verfügbar.</div>'}
+                    </div>
+                </div>
+
+                <!-- Chat Activity -->
+                ${chatHtml}
+            `;
+
+            // VIP Star Toggle inside modal
+            const modalVipBtn = document.getElementById("maModalVipBtn");
+            if (modalVipBtn) {
+                modalVipBtn.addEventListener("click", () => {
+                    toggleDonorVip(finalUsername, modalVipBtn);
+                });
+            }
+
+            // Quick Tag click handlers
+            const tagsWrap = document.getElementById("maDossierTagsWrap");
+            if (tagsWrap) {
+                tagsWrap.querySelectorAll(".ma-crm-tag-chip").forEach(chip => {
+                    chip.addEventListener("click", async () => {
+                        triggerHaptic("light");
+                        const tag = chip.getAttribute("data-tag");
+                        let activeTags = Array.isArray(currentDossierData.tags) ? [...currentDossierData.tags] : [];
+                        if (activeTags.includes(tag)) {
+                            activeTags = activeTags.filter(t => t !== tag);
+                            chip.classList.remove("active");
+                            chip.textContent = `#${tag} +`;
+                        } else {
+                            activeTags.push(tag);
+                            chip.classList.add("active");
+                            chip.textContent = `#${tag} ✓`;
+                        }
+                        currentDossierData.tags = activeTags;
+                        const notesVal = document.getElementById("maDossierNotesInput")?.value || "";
+                        await saveDonorCRM(finalUsername, currentDossierData.is_vip, activeTags, notesVal, true);
+                    });
+                });
+            }
+
+            // Save Notes Button
+            const btnSaveNotes = document.getElementById("maBtnSaveDossierNotes");
+            if (btnSaveNotes) {
+                btnSaveNotes.addEventListener("click", async () => {
+                    triggerHaptic("medium");
+                    const notesVal = document.getElementById("maDossierNotesInput")?.value || "";
+                    btnSaveNotes.disabled = true;
+                    btnSaveNotes.textContent = "⏳...";
+                    const success = await saveDonorCRM(finalUsername, currentDossierData.is_vip, currentDossierData.tags || [], notesVal);
+                    btnSaveNotes.disabled = false;
+                    btnSaveNotes.textContent = "💾 Notiz speichern";
+                    if (success) {
+                        showToast(`Notizen für @${finalUsername} gespeichert!`);
+                    }
+                });
+            }
+
+        } catch (e) {
+            console.error("Dossier Fetch Error:", e);
+            elements.dossierBody.innerHTML = `
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">⚠️</div>
+                    <div>Fehler beim Laden des Spender-Dossiers</div>
+                </div>
+            `;
+        }
+    }
+
+    // 6. VIP Toggle Action
+    async function toggleDonorVip(username, starEl, event) {
+        if (event) event.stopPropagation();
+        triggerHaptic("medium");
+
+        try {
+            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/toggle-vip`, {
+                method: "POST",
+                headers: getAuthHeaders(),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const isVip = !!(json.data && json.data.is_vip);
+
+            if (starEl) {
+                starEl.classList.toggle("is-vip", isVip);
+            }
+            const modalStar = document.getElementById("maModalVipBtn");
+            if (modalStar) {
+                modalStar.classList.toggle("is-vip", isVip);
+            }
+            if (currentDossierData && currentDossierData.username === username) {
+                currentDossierData.is_vip = isVip;
+            }
+
+            // Sync with any visible donor cards
+            if (elements.radarDonorsContainer) {
+                const card = elements.radarDonorsContainer.querySelector(`[data-donor-username="${username}"]`);
+                if (card) {
+                    const cardStar = card.querySelector("[data-action='toggle-vip']");
+                    if (cardStar) cardStar.classList.toggle("is-vip", isVip);
+                }
+            }
+
+            showToast(isVip ? `⭐ @${username} zur VIP-Watchlist hinzugefügt!` : `@${username} von VIP-Watchlist entfernt.`);
+            // Update KPI count
+            fetchRadarData(true);
+        } catch (e) {
+            console.error("Toggle VIP Error:", e);
+            showToast("Fehler beim Umschalten des VIP-Status", "error");
+        }
+    }
+
+    // 7. Save CRM Data Action
+    async function saveDonorCRM(username, isVip, tags, notes, silent = false) {
+        try {
+            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/crm`, {
+                method: "POST",
+                headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
+                body: JSON.stringify({
+                    is_vip: !!isVip,
+                    tags: tags || [],
+                    notes: notes || "",
+                }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (silent) triggerHaptic("light");
+            return true;
+        } catch (e) {
+            console.error("Save CRM Error:", e);
+            if (!silent) showToast("Fehler beim Speichern der Notizen", "error");
+            return false;
+        }
+    }
+
+    // 8. Sub-Tab Switcher for Radar
+    function switchRadarSubTab(subtab) {
+        if (subtab === radarSubTab) return;
+        triggerHaptic("light");
+        radarSubTab = subtab;
+
+        if (elements.subTabDonors) elements.subTabDonors.classList.toggle("active", subtab === "donors");
+        if (elements.subTabAlerts) elements.subTabAlerts.classList.toggle("active", subtab === "alerts");
+        if (elements.subTabLoyalty) elements.subTabLoyalty.classList.toggle("active", subtab === "loyalty");
+
+        if (elements.subViewDonors) elements.subViewDonors.style.display = subtab === "donors" ? "block" : "none";
+        if (elements.subViewAlerts) elements.subViewAlerts.style.display = subtab === "alerts" ? "block" : "none";
+        if (elements.subViewLoyalty) elements.subViewLoyalty.style.display = subtab === "loyalty" ? "block" : "none";
+
+        if (subtab === "donors") {
+            fetchRadarData();
+        } else if (subtab === "alerts") {
+            fetchWhaleAlerts();
+        } else if (subtab === "loyalty") {
+            fetchLoyaltyData();
+        }
     }
 
     // =====================================================================
@@ -2301,6 +3179,7 @@
             });
 
             if (targetTab === "tab-analytics") {
+                stopRadarPolling();
                 if (!analyticsLoadedOnce) {
                     analyticsLoadedOnce = true;
                     setTimeout(() => {
@@ -2311,8 +3190,15 @@
                 }
             } else if (targetTab === "tab-radar") {
                 fetchRadarData();
+                fetchWhaleTicker(true);
+                startRadarPolling();
+                if (radarSubTab === "alerts") fetchWhaleAlerts();
+                if (radarSubTab === "loyalty") fetchLoyaltyData();
             } else if (targetTab === "tab-admin") {
+                stopRadarPolling();
                 updateAdminUI();
+            } else {
+                stopRadarPolling();
             }
         });
     });
@@ -2422,6 +3308,30 @@
         });
     }
 
+    if (elements.btnToggleVipOnly) {
+        elements.btnToggleVipOnly.addEventListener("click", () => {
+            triggerHaptic("light");
+            radarVipOnly = !radarVipOnly;
+            elements.btnToggleVipOnly.classList.toggle("active", radarVipOnly);
+            if (elements.cardKpiVip) {
+                elements.cardKpiVip.classList.toggle("active-filter", radarVipOnly);
+            }
+            fetchRadarData();
+        });
+    }
+
+    if (elements.cardKpiVip) {
+        elements.cardKpiVip.addEventListener("click", () => {
+            triggerHaptic("medium");
+            radarVipOnly = !radarVipOnly;
+            if (elements.btnToggleVipOnly) {
+                elements.btnToggleVipOnly.classList.toggle("active", radarVipOnly);
+            }
+            elements.cardKpiVip.classList.toggle("active-filter", radarVipOnly);
+            fetchRadarData();
+        });
+    }
+
     if (elements.radarSearchInput) {
         elements.radarSearchInput.addEventListener("input", () => {
             const val = elements.radarSearchInput.value;
@@ -2446,6 +3356,86 @@
         });
     }
 
+    // =====================================================================
+    // RADAR SUB-TABS & ADVANCED CONTROLS
+    // =====================================================================
+    if (elements.subTabDonors) {
+        elements.subTabDonors.addEventListener("click", () => switchRadarSubTab("donors"));
+    }
+    if (elements.subTabAlerts) {
+        elements.subTabAlerts.addEventListener("click", () => switchRadarSubTab("alerts"));
+    }
+    if (elements.subTabLoyalty) {
+        elements.subTabLoyalty.addEventListener("click", () => switchRadarSubTab("loyalty"));
+    }
+
+    // Whale Sound Toggle
+    if (elements.btnToggleWhaleSound) {
+        elements.btnToggleWhaleSound.addEventListener("click", () => {
+            whaleSoundEnabled = !whaleSoundEnabled;
+            triggerHaptic("medium");
+            if (elements.whaleSoundIcon) {
+                elements.whaleSoundIcon.textContent = whaleSoundEnabled ? "🔊" : "🔇";
+            }
+            if (elements.btnToggleWhaleSound) {
+                elements.btnToggleWhaleSound.classList.toggle("active", whaleSoundEnabled);
+            }
+            if (whaleSoundEnabled) {
+                initAudioContext();
+                playWhaleAlertChime(true);
+                showToast("Whale-Sound aktiviert (Web Audio Chime)", "success");
+            } else {
+                showToast("Whale-Sound stummgeschaltet", "info");
+            }
+        });
+    }
+
+    // Whale Alert Threshold Pills
+    if (elements.alertThresholdPills) {
+        elements.alertThresholdPills.forEach(pill => {
+            pill.addEventListener("click", () => {
+                const min = parseInt(pill.getAttribute("data-min") || "1000", 10);
+                if (min === whaleAlertMinCoins) return;
+                triggerHaptic("light");
+                whaleAlertMinCoins = min;
+                elements.alertThresholdPills.forEach(p => p.classList.remove("active"));
+                pill.classList.add("active");
+                fetchWhaleAlerts();
+            });
+        });
+    }
+
+    // Refresh Whale Alerts
+    if (elements.btnRefreshWhaleAlerts) {
+        elements.btnRefreshWhaleAlerts.addEventListener("click", () => {
+            triggerHaptic("light");
+            fetchWhaleAlerts();
+        });
+    }
+
+    // Loyalty Days Pills
+    if (elements.loyaltyDaysPills) {
+        elements.loyaltyDaysPills.forEach(pill => {
+            pill.addEventListener("click", () => {
+                const days = parseInt(pill.getAttribute("data-days") || "14", 10);
+                if (days === loyaltyDaysRecent) return;
+                triggerHaptic("light");
+                loyaltyDaysRecent = days;
+                elements.loyaltyDaysPills.forEach(p => p.classList.remove("active"));
+                pill.classList.add("active");
+                fetchLoyaltyData();
+            });
+        });
+    }
+
+    // Refresh Loyalty
+    if (elements.btnRefreshLoyalty) {
+        elements.btnRefreshLoyalty.addEventListener("click", () => {
+            triggerHaptic("light");
+            fetchLoyaltyData();
+        });
+    }
+
     // Refresh Button Click
     if (elements.btnRefresh) {
         elements.btnRefresh.addEventListener("click", () => {
@@ -2453,7 +3443,12 @@
             lastAnalyticsFingerprint = null;
             fetchMiniAppData();
             if (activeTab === "tab-analytics") fetchAnalyticsData();
-            if (activeTab === "tab-radar") fetchRadarData();
+            if (activeTab === "tab-radar") {
+                fetchRadarData();
+                fetchWhaleTicker(true);
+                if (radarSubTab === "alerts") fetchWhaleAlerts();
+                if (radarSubTab === "loyalty") fetchLoyaltyData();
+            }
             if (activeTab === "tab-admin" && isAdmin) loadAdminData();
         });
     }
@@ -2463,13 +3458,19 @@
     fetchMiniAppData();
     pollInterval = setInterval(fetchMiniAppData, 8000);
 
-    // Visibility change handling
+    // Visibility change handling: smart conservation
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             if (pollInterval) clearInterval(pollInterval);
+            stopRadarPolling();
         } else {
             fetchMiniAppData();
             pollInterval = setInterval(fetchMiniAppData, 8000);
+            if (activeTab === "tab-radar") {
+                fetchRadarData();
+                fetchWhaleTicker(true);
+                startRadarPolling();
+            }
         }
     });
 

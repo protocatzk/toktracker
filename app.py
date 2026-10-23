@@ -233,6 +233,42 @@ def verify_admin_or_api_key(
     )
 
 
+def verify_radar_access(
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
+) -> Dict[str, Any]:
+    """
+    Erlaubt Zugriff auf das Spender-Radar für:
+    1. Authentifizierte Admins & freigeschaltete Telegram-Mini-App-Nutzer
+    2. API-Key-Inhaber
+    3. Öffentlichen Zugriff, falls telegram_access_mode == 'public'
+    """
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    if token:
+        session_payload = admin_auth_manager.verify_session_token(token)
+        if session_payload:
+            return session_payload
+
+    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
+    provided = (x_api_key or api_key or "").strip()
+    if configured_key and provided and provided == configured_key:
+        return {"sub": "api_key"}
+
+    if get_telegram_access_mode() == "public":
+        return {"role": "public", "is_allowed": True}
+
+    raise HTTPException(
+        status_code=401,
+        detail="Nicht autorisiert für Spender-Radar. Bitte im Telegram-Bot freischalten lassen.",
+    )
+
+
 def _set_admin_session_cookie(response: Response, admin_label: str) -> None:
     token = admin_auth_manager.create_session_token(admin_label=admin_label)
     response.set_cookie(
@@ -962,6 +998,8 @@ async def api_miniapp_radar(
     period: str = Query("24h", description="today | 24h | 7d | 30d | all"),
     min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
     cross_only: bool = Query(False, description="Nur Cross-Streamer Spender"),
+    vip_only: bool = Query(False, description="Nur VIP-Watchlist Spender"),
+    streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
     search: Optional[str] = Query(None, description="Suchbegriff für Spender"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -999,10 +1037,13 @@ async def api_miniapp_radar(
             "streamers": [],
         }
 
-    radar_data = get_donor_radar_data(
+    radar_data = await asyncio.to_thread(
+        get_donor_radar_data,
         period=period,
         min_tier=min_tier,
+        streamer_id=streamer_id,
         cross_streamer_only=cross_only,
+        vip_only=vip_only,
         search=search,
         limit=limit,
         offset=offset,
@@ -1287,13 +1328,13 @@ async def api_site_analytics(
     "/api/donor-radar",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert aggregierte Daten für das Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.get(
     "/api/v1/donor-radar",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert aggregierte Daten für das Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_donor_radar(
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
@@ -1306,7 +1347,8 @@ async def api_donor_radar(
     offset: int = Query(0, ge=0),
 ):
     init_db()
-    data = get_donor_radar_data(
+    data = await asyncio.to_thread(
+        get_donor_radar_data,
         period=period,
         min_tier=min_tier,
         streamer_id=streamer_id,
@@ -1323,17 +1365,17 @@ async def api_donor_radar(
     "/api/donor-radar/donors/{username}",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert ein detailliertes Spender-Dossier inkl. Streamer-Verteilung, Top-Gifts und Chat-Historie",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.get(
     "/api/v1/donor-radar/donors/{username}",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert ein detailliertes Spender-Dossier inkl. Streamer-Verteilung, Top-Gifts und Chat-Historie",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_donor_detail(username: str):
     init_db()
-    details = get_donor_details(username)
+    details = await asyncio.to_thread(get_donor_details, username)
     if not details:
         raise HTTPException(status_code=404, detail="Spender nicht gefunden")
     return {"ok": True, "data": details}
@@ -1343,17 +1385,23 @@ async def api_donor_detail(username: str):
     "/api/donor-radar/donors/{username}/crm",
     tags=["Spenderradar & Chatlog"],
     summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.post(
     "/api/v1/donor-radar/donors/{username}/crm",
     tags=["Spenderradar & Chatlog"],
     summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_update_donor_crm(username: str, req: DonorCRMUpdateRequest):
     init_db()
-    res = save_donor_crm(username=username, is_vip=req.is_vip, tags=req.tags, notes=req.notes)
+    res = await asyncio.to_thread(
+        save_donor_crm,
+        username=username,
+        is_vip=req.is_vip,
+        tags=req.tags,
+        notes=req.notes,
+    )
     return {"ok": True, "data": res}
 
 
@@ -1361,17 +1409,17 @@ async def api_update_donor_crm(username: str, req: DonorCRMUpdateRequest):
     "/api/donor-radar/donors/{username}/toggle-vip",
     tags=["Spenderradar & Chatlog"],
     summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.post(
     "/api/v1/donor-radar/donors/{username}/toggle-vip",
     tags=["Spenderradar & Chatlog"],
     summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_toggle_donor_vip(username: str):
     init_db()
-    res = toggle_donor_vip(username)
+    res = await asyncio.to_thread(toggle_donor_vip, username)
     return {"ok": True, "data": res}
 
 
@@ -1379,13 +1427,13 @@ async def api_toggle_donor_vip(username: str):
     "/api/donor-radar/whale-alerts",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert Echtzeit-Großspenden (Whale- & Shark-Events) für Live-Ticker und Audio-Alerts",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.get(
     "/api/v1/donor-radar/whale-alerts",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert Echtzeit-Großspenden (Whale- & Shark-Events) für Live-Ticker und Audio-Alerts",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_whale_alerts(
     min_coins: int = Query(1000, ge=50, le=100000, description="Mindestanzahl Coins für den Whale-Alert"),
@@ -1393,7 +1441,12 @@ async def api_whale_alerts(
     limit: int = Query(20, ge=1, le=100),
 ):
     init_db()
-    alerts = get_recent_whale_gifts(min_coins=min_coins, after_id=after_id, limit=limit)
+    alerts = await asyncio.to_thread(
+        get_recent_whale_gifts,
+        min_coins=min_coins,
+        after_id=after_id,
+        limit=limit,
+    )
     return {"ok": True, "alerts": alerts}
 
 
@@ -1401,20 +1454,24 @@ async def api_whale_alerts(
     "/api/donor-radar/loyalty-and-overlap",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert netzwerkweite Frontenwechsler-Analyse und Streamer-Überschneidungsmatrix",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.get(
     "/api/v1/donor-radar/loyalty-and-overlap",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert netzwerkweite Frontenwechsler-Analyse und Streamer-Überschneidungsmatrix",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_loyalty_and_overlap(
     min_coins: int = Query(50, ge=1, description="Mindestmünzen für Frontenwechsler"),
     days_recent: int = Query(14, ge=1, le=90, description="Zeitfenster für die aktuelle Periode in Tagen"),
 ):
     init_db()
-    data = get_network_loyalty_and_overlap(min_coins=min_coins, days_recent=days_recent)
+    data = await asyncio.to_thread(
+        get_network_loyalty_and_overlap,
+        min_coins=min_coins,
+        days_recent=days_recent,
+    )
     return {"ok": True, "data": data}
 
 
@@ -1422,13 +1479,13 @@ async def api_loyalty_and_overlap(
     "/api/chat-logs",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert Live- und historische Chatlogs pro Streamer oder global",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 @app.get(
     "/api/v1/chat-logs",
     tags=["Spenderradar & Chatlog"],
     summary="Liefert Live- und historische Chatlogs pro Streamer oder global",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(verify_radar_access)],
 )
 async def api_chat_logs(
     streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
@@ -1440,7 +1497,8 @@ async def api_chat_logs(
     limit: int = Query(100, ge=1, le=500),
 ):
     init_db()
-    messages = get_chat_messages(
+    messages = await asyncio.to_thread(
+        get_chat_messages,
         streamer_id=streamer_id,
         limit=limit,
         search=search,

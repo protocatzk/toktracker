@@ -1,3 +1,4 @@
+import copy
 import os
 import queue
 import re
@@ -4067,6 +4068,22 @@ def get_chat_messages(
         return result
 
 
+_radar_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_radar_cache_lock = threading.Lock()
+_RADAR_CACHE_TTL = 3.0
+
+_loyalty_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_loyalty_cache_lock = threading.Lock()
+_LOYALTY_CACHE_TTL = 10.0
+
+
+def invalidate_radar_cache() -> None:
+    with _radar_cache_lock:
+        _radar_cache.clear()
+    with _loyalty_cache_lock:
+        _loyalty_cache.clear()
+
+
 def get_donor_radar_data(
     period: str = "all",
     min_tier: Optional[str] = None,
@@ -4081,6 +4098,13 @@ def get_donor_radar_data(
     Aggregiert Spender und Wale über alle getrackten Streamer.
     Liefert KPI-Karten, Cross-Streamer-Erkennung und Top-Spender-Rangliste inkl. VIP/CRM-Status.
     """
+    cache_key = f"{period}:{min_tier}:{streamer_id}:{cross_streamer_only}:{vip_only}:{search}:{limit}:{offset}"
+    now = time.monotonic()
+    with _radar_cache_lock:
+        cached = _radar_cache.get(cache_key)
+        if cached and (now - cached[0]) < _RADAR_CACHE_TTL:
+            return copy.deepcopy(cached[1])
+
     cutoff = _get_period_cutoff(period)
 
     where_clauses = ["1=1"]
@@ -4216,12 +4240,15 @@ def get_donor_radar_data(
             "SELECT id, username, display_name, avatar_url, is_live FROM streamers ORDER BY display_name ASC"
         ).fetchall()
 
-        return {
+        result = {
             "period": period,
             "kpis": kpis,
             "donors": donors,
             "streamers": [dict(s) for s in streamers],
         }
+        with _radar_cache_lock:
+            _radar_cache[cache_key] = (now, result)
+        return copy.deepcopy(result)
 
 
 def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
@@ -4572,6 +4599,7 @@ def save_donor_crm(
                 (clean_uname, new_vip, new_tags, new_notes, now, now),
             )
 
+    invalidate_radar_cache()
     return get_donor_crm(clean_uname)
 
 
@@ -4639,6 +4667,13 @@ def get_network_loyalty_and_overlap(
     1. Frontenwechsler: Großspender, die ihren primären Streamer gewechselt haben.
     2. Overlap-Matrix: Paare von Streamern, die sich dieselben Großspender teilen.
     """
+    cache_key = f"{min_coins}:{days_recent}"
+    now = time.monotonic()
+    with _loyalty_cache_lock:
+        cached = _loyalty_cache.get(cache_key)
+        if cached and (now - cached[0]) < _LOYALTY_CACHE_TTL:
+            return copy.deepcopy(cached[1])
+
     with get_db() as conn:
         now_dt = datetime.now(timezone.utc)
         # Zeitspanne der vorhandenen Events prüfen für adaptive Fenster-Teilung
@@ -4911,7 +4946,7 @@ def get_network_loyalty_and_overlap(
             p_dict["shared_volume_eur"] = round(float(p_dict.get("shared_volume_eur") or 0.0), 2)
             overlap_matrix.append(p_dict)
 
-        return {
+        result = {
             "frontenwechsler": frontenwechsler,
             "overlap_matrix": overlap_matrix,
             "days_recent": days_recent,
@@ -4920,5 +4955,8 @@ def get_network_loyalty_and_overlap(
                 "total_overlap_pairs": len(overlap_matrix),
             },
         }
+        with _loyalty_cache_lock:
+            _loyalty_cache[cache_key] = (now, result)
+        return copy.deepcopy(result)
 
 

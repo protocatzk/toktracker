@@ -11,7 +11,7 @@
     <script src="/static/chart.umd.min.js"></script>
     
     <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <link rel="stylesheet" href="/static/miniapp.css?v=2.3.0" />
+    <link rel="stylesheet" href="/static/miniapp.css?v=2.5.1" />
 </head>
 <body>
 
@@ -287,7 +287,24 @@
 
         <!-- Radar Content (Visible when authenticated / authorized) -->
         <div id="maRadarContent">
-            <!-- Radar Mini-KPI Row (4 Cards) -->
+
+            <!-- Live Whale-Alert Ticker Bar -->
+            <div class="ma-whale-ticker-bar" id="maWhaleTickerBar">
+                <div class="ma-ticker-label">
+                    <span class="ma-ticker-pulse"></span>
+                    <span>WHALES</span>
+                </div>
+                <div class="ma-ticker-track" id="maWhaleTickerTrack">
+                    <span class="mono muted" style="font-size: 11px; padding: 0 8px;">Lade Großspenden (&ge; 1.000 Coins)...</span>
+                </div>
+                <div class="ma-ticker-controls">
+                    <button type="button" class="ma-ticker-btn" id="maBtnToggleWhaleSound" title="Ton bei Whale-Alerts">
+                        <span id="maWhaleSoundIcon">🔇</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Radar Mini-KPI Row (5 Cards) -->
             <div class="ma-radar-kpi-row">
                 <div class="ma-radar-kpi-card whale">
                     <div class="ma-radar-kpi-header">
@@ -321,35 +338,130 @@
                     <div class="ma-radar-kpi-val" id="maRadarKpiCross">0</div>
                     <div class="ma-radar-kpi-sub">Multi-Streamer</div>
                 </div>
-            </div>
-
-            <!-- Radar Filter Controls Strip -->
-            <div class="ma-radar-filters">
-                <div class="ma-radar-search-wrap">
-                    <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input type="text" id="maRadarSearchInput" class="ma-radar-search" placeholder="Spender suchen..." />
-                    <button type="button" id="maRadarSearchClear" class="search-clear-btn" style="display: none;">&times;</button>
-                </div>
-
-                <div class="ma-radar-pills-row">
-                    <button type="button" class="ma-tier-pill active" data-tier="all">Alle</button>
-                    <button type="button" class="ma-tier-pill tier-whale" data-tier="whale">🐋 Whales</button>
-                    <button type="button" class="ma-tier-pill tier-shark" data-tier="shark">🦈 Sharks</button>
-                    <button type="button" class="ma-tier-pill tier-dolphin" data-tier="dolphin">🐬 Dolphins</button>
-                    <button type="button" class="ma-tier-pill tier-cross" id="maBtnToggleCrossOnly">⚡ Cross-Only</button>
+                <div class="ma-radar-kpi-card vip" id="maCardKpiVip" style="cursor: pointer;" title="Nur VIP-Spender filtern">
+                    <div class="ma-radar-kpi-header">
+                        <span>⭐ VIP</span>
+                        <span class="mono" style="font-size: 9.5px; color: #fde047;">Fokus</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiVip" style="color: #fbbf24;">0</div>
+                    <div class="ma-radar-kpi-sub">Watchlist</div>
                 </div>
             </div>
 
-            <!-- Donors List Container -->
-            <div id="maRadarDonorsContainer" class="ma-radar-list">
-                <div class="ma-empty-state">
-                    <div class="ma-empty-icon">⏳</div>
-                    <div>Lade Spender-Radar...</div>
+            <!-- Radar Sub-Navigation (Segmented Control) -->
+            <div class="ma-radar-subnav">
+                <button type="button" class="ma-radar-subnav-btn active" data-subtab="donors" id="maSubTabDonors">
+                    <span>🐋 Spender-Rangliste</span>
+                </button>
+                <button type="button" class="ma-radar-subnav-btn" data-subtab="alerts" id="maSubTabAlerts">
+                    <span>⚡ Whale-Alerts</span>
+                    <span class="ma-subnav-badge" id="maWhaleAlertCountBadge" style="display: none;">0</span>
+                </button>
+                <button type="button" class="ma-radar-subnav-btn" data-subtab="loyalty" id="maSubTabLoyalty">
+                    <span>🔀 Loyalität &amp; Wechsel</span>
+                </button>
+            </div>
+
+            <!-- Sub-View 1: Spender-Rangliste -->
+            <div class="ma-radar-subview" id="maSubViewDonors">
+                <!-- Radar Filter Controls Strip -->
+                <div class="ma-radar-filters">
+                    <div class="ma-radar-search-wrap">
+                        <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="maRadarSearchInput" class="ma-radar-search" placeholder="Spender suchen..." />
+                        <button type="button" id="maRadarSearchClear" class="search-clear-btn" style="display: none;">&times;</button>
+                    </div>
+
+                    <div class="ma-radar-pills-row">
+                        <button type="button" class="ma-tier-pill active" data-tier="all">Alle</button>
+                        <button type="button" class="ma-tier-pill tier-whale" data-tier="whale">🐋 Whales</button>
+                        <button type="button" class="ma-tier-pill tier-shark" data-tier="shark">🦈 Sharks</button>
+                        <button type="button" class="ma-tier-pill tier-dolphin" data-tier="dolphin">🐬 Dolphins</button>
+                        <button type="button" class="ma-tier-pill tier-cross" id="maBtnToggleCrossOnly">⚡ Cross-Only</button>
+                        <button type="button" class="ma-tier-pill tier-vip" id="maBtnToggleVipOnly">⭐ VIP-Only</button>
+                    </div>
+                </div>
+
+                <!-- Donors List Container -->
+                <div id="maRadarDonorsContainer" class="ma-radar-list">
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">⏳</div>
+                        <div>Lade Spender-Radar...</div>
+                    </div>
                 </div>
             </div>
+
+            <!-- Sub-View 2: Live Whale-Alerts Feed -->
+            <div class="ma-radar-subview" id="maSubViewAlerts" style="display: none;">
+                <div class="ma-alerts-filters">
+                    <div class="ma-alerts-threshold-pills">
+                        <button type="button" class="ma-alert-pill" data-min="500">&ge; 500 Coins</button>
+                        <button type="button" class="ma-alert-pill active" data-min="1000">&ge; 1.000 Coins</button>
+                        <button type="button" class="ma-alert-pill" data-min="2500">&ge; 2.500 (Shark)</button>
+                        <button type="button" class="ma-alert-pill" data-min="10000">&ge; 10.000 (Whale)</button>
+                    </div>
+                    <button type="button" class="ma-btn ma-btn-secondary" id="maBtnRefreshWhaleAlerts" style="font-size: 11px; padding: 4px 8px; flex-shrink: 0;">
+                        ↻ Sync
+                    </button>
+                </div>
+
+                <div id="maWhaleAlertsContainer" class="ma-radar-list">
+                    <div class="ma-empty-state">
+                        <div class="ma-empty-icon">⏳</div>
+                        <div>Lade Live-Großspenden...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-View 3: Loyalität & Wechsel -->
+            <div class="ma-radar-subview" id="maSubViewLoyalty" style="display: none;">
+                <div class="ma-loyalty-header-bar">
+                    <div class="ma-loyalty-days-pills">
+                        <span class="mono muted" style="font-size: 10.5px; align-self: center; margin-right: 4px;">Zeitraum:</span>
+                        <button type="button" class="ma-loyalty-pill" data-days="3">3 Tage</button>
+                        <button type="button" class="ma-loyalty-pill" data-days="7">7 Tage</button>
+                        <button type="button" class="ma-loyalty-pill active" data-days="14">14 Tage</button>
+                        <button type="button" class="ma-loyalty-pill" data-days="30">30 Tage</button>
+                    </div>
+                    <button type="button" class="ma-btn ma-btn-secondary" id="maBtnRefreshLoyalty" style="font-size: 11px; padding: 4px 8px; flex-shrink: 0;">
+                        ↻ Sync
+                    </button>
+                </div>
+
+                <!-- Frontenwechsler Section -->
+                <div class="ma-loyalty-section">
+                    <div class="ma-loyalty-title-row">
+                        <span class="ma-loyalty-title">🔀 Frontenwechsler (Migrationen)</span>
+                        <span class="ma-loyalty-badge" id="maFrontenwechslerBadge">0 erkannt</span>
+                    </div>
+                    <div class="ma-loyalty-subtext">Großspender, die ihren Schwerpunkt auf einen neuen Streamer verlagert haben.</div>
+                    <div id="maFrontenwechslerContainer" class="ma-radar-list" style="margin-top: 8px;">
+                        <div class="ma-empty-state">
+                            <div class="ma-empty-icon">⏳</div>
+                            <div>Analysiere Frontenwechsler...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Overlap Matrix Section -->
+                <div class="ma-loyalty-section" style="margin-top: 16px;">
+                    <div class="ma-loyalty-title-row">
+                        <span class="ma-loyalty-title">⚡ Streamer-Überschneidungen</span>
+                        <span class="ma-loyalty-badge" id="maOverlapPairsBadge">0 Paare</span>
+                    </div>
+                    <div class="ma-loyalty-subtext">Kanal-Paare mit geteilten Großspendern und Coin-Verteilung.</div>
+                    <div id="maOverlapMatrixContainer" class="ma-radar-list" style="margin-top: 8px;">
+                        <div class="ma-empty-state">
+                            <div class="ma-empty-icon">⏳</div>
+                            <div>Berechne Überschneidungs-Matrix...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </section>
 
@@ -723,9 +835,30 @@
     </div>
 </div>
 
+<!-- Modal 5: Spender-Dossier & CRM Sheet -->
+<div class="ma-modal-backdrop" id="modalDonorDossier">
+    <div class="ma-modal-sheet ma-dossier-sheet">
+        <div class="ma-sheet-header">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                <div class="ma-sheet-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    Dossier: <span id="maDossierUsername">@username</span>
+                </div>
+                <span id="maDossierTierBadge"></span>
+            </div>
+            <button type="button" class="ma-sheet-close" data-close="modalDonorDossier">&times;</button>
+        </div>
+        <div class="ma-sheet-body" id="maDossierBody" style="padding: 14px 16px; max-height: 80vh; overflow-y: auto;">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Spender-Dossier...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Toast Container -->
 <div class="ma-toast-container" id="maToastContainer"></div>
 
-<script src="/static/miniapp.js?v=2.4.0"></script>
+<script src="/static/miniapp.js?v=2.5.1"></script>
 </body>
 </html>
