@@ -2717,13 +2717,29 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     loadOverview();
-    setInterval(() => {
-        loadOverview();
-        if (document.getElementById("tab-battles")?.classList.contains("active")) {
-            loadBattles(true);
-            loadBattleStats();
+    let overviewTimer = null;
+    function scheduleNextOverview() {
+        if (overviewTimer) clearTimeout(overviewTimer);
+        const delay = document.hidden ? 30000 : 5000;
+        overviewTimer = setTimeout(async () => {
+            if (!document.hidden) {
+                await loadOverview();
+                if (document.getElementById("tab-battles")?.classList.contains("active")) {
+                    loadBattles(true);
+                    loadBattleStats();
+                }
+            }
+            scheduleNextOverview();
+        }, delay);
+    }
+    scheduleNextOverview();
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            loadOverview();
+            scheduleNextOverview();
         }
-    }, 4000);
+    });
 
     document.getElementById("periodSelect").addEventListener("change", (e) => {
         currentPeriod = e.target.value;

@@ -320,6 +320,8 @@ class StreamerWorker:
         self._recent_logs: Deque[Dict[str, str]] = deque(maxlen=50)
         self._chat_buffer: List[Dict[str, Any]] = []
         self._chat_buffer_lock = threading.Lock()
+        self._last_viewer_db_update = 0.0
+        self._last_saved_viewers = 0
 
     def _log(self, level: str, message: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -612,7 +614,10 @@ class StreamerWorker:
 
             finally:
                 try:
-                    await client.close()
+                    if getattr(client, "connected", False):
+                        await client.disconnect(close_client=True)
+                    else:
+                        await client.close()
                 except Exception:
                     pass
                 with self._lock:
@@ -634,6 +639,14 @@ class StreamerWorker:
             await asyncio.sleep(2.0)
             self._flush_expired_streaks()
             self._flush_chat_buffer()
+
+    def _persist_viewer_stats(self, viewers: int, session_id: Optional[int]) -> None:
+        try:
+            update_streamer_runtime_state(self.username, current_viewers=viewers)
+            if session_id:
+                update_stream_session_metrics(session_id, viewer_count=viewers)
+        except Exception as exc:
+            logger.debug("[@%s] Fehler beim Persistieren der Zuschauerzahlen: %s", self.username, exc)
 
     def _register_handlers(self, client: Any) -> None:
         @client.on(ConnectEvent)
@@ -692,13 +705,21 @@ class StreamerWorker:
             now_iso = datetime.now().isoformat(timespec="seconds")
             with self._lock:
                 self.diag.current_viewers = viewers
+                is_new_peak = viewers > self.diag.peak_viewers
                 self.diag.peak_viewers = max(self.diag.peak_viewers, viewers)
                 self.diag.last_event_at = now_iso
                 sess_id = self.diag.session_id
 
-            update_streamer_runtime_state(self.username, current_viewers=viewers)
-            if sess_id:
-                update_stream_session_metrics(sess_id, viewer_count=viewers)
+            now_mono = time.monotonic()
+            should_update_db = (
+                (now_mono - self._last_viewer_db_update >= 25.0) or
+                is_new_peak or
+                (abs(viewers - self._last_saved_viewers) >= 50)
+            )
+            if should_update_db:
+                self._last_viewer_db_update = now_mono
+                self._last_saved_viewers = viewers
+                await asyncio.to_thread(self._persist_viewer_stats, viewers, sess_id)
 
         @client.on(LiveEndEvent)
         async def on_live_end(event: LiveEndEvent) -> None:

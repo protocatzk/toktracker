@@ -291,7 +291,25 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     loadPublicOverview();
-    setInterval(loadPublicOverview, 5000);
+    let publicTimer = null;
+    function scheduleNextPublicOverview() {
+        if (publicTimer) clearTimeout(publicTimer);
+        const delay = document.hidden ? 30000 : 5000;
+        publicTimer = setTimeout(async () => {
+            if (!document.hidden) {
+                await loadPublicOverview();
+            }
+            scheduleNextPublicOverview();
+        }, delay);
+    }
+    scheduleNextPublicOverview();
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            loadPublicOverview();
+            scheduleNextPublicOverview();
+        }
+    });
 
     document.getElementById("pubPeriodSelect").addEventListener("change", (e) => {
         currentPublicPeriod = e.target.value;

@@ -1,7 +1,9 @@
 import os
+import queue
 import re
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple, Union
@@ -115,7 +117,98 @@ class MySQLConnectionWrapper:
         self._conn.rollback()
 
     def close(self) -> None:
-        self._conn.close()
+        # Verbindung wird vom MySQLConnectionPool verwaltet
+        pass
+
+
+class MySQLConnectionPool:
+    """
+    Thread-sicherer Connection-Pool für MySQL/MariaDB.
+    Verhindert das ständige Neuaufbauen von TCP-Verbindungen (bis zu 8 Verb./Sekunde)
+    und senkt CPU-Last von MariaDB und Python drastisch.
+    """
+
+    def __init__(self, max_size: int = 25, timeout: float = 15.0):
+        self._pool: queue.Queue[Any] = queue.Queue(maxsize=max_size)
+        self._max_size = max_size
+        self._timeout = timeout
+        self._created = 0
+        self._lock = threading.Lock()
+
+    def get_connection(self) -> Any:
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+                try:
+                    conn.ping(reconnect=True)
+                    return conn
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    with self._lock:
+                        self._created = max(0, self._created - 1)
+            except queue.Empty:
+                break
+
+        with self._lock:
+            if self._created < self._max_size:
+                self._created += 1
+                can_create = True
+            else:
+                can_create = False
+
+        if can_create:
+            try:
+                return _open_mysql_connection(include_db=True)
+            except Exception:
+                with self._lock:
+                    self._created = max(0, self._created - 1)
+                raise
+
+        conn = self._pool.get(timeout=self._timeout)
+        try:
+            conn.ping(reconnect=True)
+            return conn
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with self._lock:
+                self._created = max(0, self._created - 1)
+            return _open_mysql_connection(include_db=True)
+
+    def release_connection(self, conn: Any) -> None:
+        if conn is None:
+            return
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            self._pool.put_nowait(conn)
+        except queue.Full:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with self._lock:
+                self._created = max(0, self._created - 1)
+
+
+_mysql_pool: Optional[MySQLConnectionPool] = None
+_mysql_pool_lock = threading.Lock()
+
+
+def get_mysql_pool() -> MySQLConnectionPool:
+    global _mysql_pool
+    if _mysql_pool is None:
+        with _mysql_pool_lock:
+            if _mysql_pool is None:
+                _mysql_pool = MySQLConnectionPool(max_size=25, timeout=15.0)
+    return _mysql_pool
 
 
 def _open_mysql_connection(include_db: bool = True) -> Any:
@@ -144,10 +237,11 @@ def get_db() -> Generator[Any, None, None]:
     """
     Universeller Datenbank-Context-Manager für `toktracker`:
     - Standard (`DB_ENGINE=sqlite`): Lokale SQLite-Datenbank im schnellen WAL-Modus.
-    - Externer SQL-Server (`DB_ENGINE=mysql`): MySQL / MariaDB über PyMySQL.
+    - Externer SQL-Server (`DB_ENGINE=mysql`): MySQL / MariaDB über Thread-sicheren Connection-Pool.
     """
     if config.is_mysql:
-        raw_conn = _open_mysql_connection(include_db=True)
+        pool = get_mysql_pool()
+        raw_conn = pool.get_connection()
         wrapper = MySQLConnectionWrapper(raw_conn)
         try:
             yield wrapper
@@ -156,7 +250,7 @@ def get_db() -> Generator[Any, None, None]:
             wrapper.rollback()
             raise
         finally:
-            wrapper.close()
+            pool.release_connection(raw_conn)
     else:
         conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -754,22 +848,45 @@ def init_db(force: bool = False) -> None:
         _db_initialized = True
 
 
-def get_settings() -> Dict[str, Any]:
-    with get_db() as conn:
-        rows = conn.execute("SELECT `key`, `value` FROM settings").fetchall()
-        data = {r["key"]: r["value"] for r in rows}
-    mode = str(data.get("telegram_access_mode", config.telegram_access_mode or "whitelist")).lower()
-    if mode not in ("whitelist", "public"):
-        mode = "whitelist"
-    return {
-        "usd_per_diamond": float(data.get("usd_per_diamond", 0.005)),
-        "gross_usd_per_coin": float(data.get("gross_usd_per_coin", 0.0106)),
-        "usd_to_eur_rate": float(data.get("usd_to_eur_rate", 0.92)),
-        "currency_primary": data.get("currency_primary", "EUR"),
-        "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
-        "api_key": str(data.get("api_key", "")),
-        "telegram_access_mode": mode,
-    }
+_settings_cache: Optional[Dict[str, Any]] = None
+_settings_cache_time: float = 0.0
+_settings_cache_lock = threading.Lock()
+_SETTINGS_TTL = 30.0  # Sekunden Cache gegen DB-Spamming
+
+
+def invalidate_settings_cache() -> None:
+    global _settings_cache_time
+    _settings_cache_time = 0.0
+
+
+def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
+    global _settings_cache, _settings_cache_time
+    now = time.monotonic()
+    if not force_refresh and _settings_cache is not None and (now - _settings_cache_time) < _SETTINGS_TTL:
+        return _settings_cache.copy()
+
+    with _settings_cache_lock:
+        if not force_refresh and _settings_cache is not None and (now - _settings_cache_time) < _SETTINGS_TTL:
+            return _settings_cache.copy()
+
+        with get_db() as conn:
+            rows = conn.execute("SELECT `key`, `value` FROM settings").fetchall()
+            data = {r["key"]: r["value"] for r in rows}
+        mode = str(data.get("telegram_access_mode", config.telegram_access_mode or "whitelist")).lower()
+        if mode not in ("whitelist", "public"):
+            mode = "whitelist"
+        res = {
+            "usd_per_diamond": float(data.get("usd_per_diamond", 0.005)),
+            "gross_usd_per_coin": float(data.get("gross_usd_per_coin", 0.0106)),
+            "usd_to_eur_rate": float(data.get("usd_to_eur_rate", 0.92)),
+            "currency_primary": data.get("currency_primary", "EUR"),
+            "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
+            "api_key": str(data.get("api_key", "")),
+            "telegram_access_mode": mode,
+        }
+        _settings_cache = res
+        _settings_cache_time = now
+        return res.copy()
 
 
 def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -785,7 +902,8 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     "INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
                     (key, val),
                 )
-    return get_settings()
+    invalidate_settings_cache()
+    return get_settings(force_refresh=True)
 
 
 # =====================================================================
@@ -1399,6 +1517,7 @@ def record_gift_event(
             """,
             (cur.lastrowid,),
         ).fetchone()
+        invalidate_overview_cache()
         return (dict(row) if row else None), True
 
 
@@ -1421,7 +1540,24 @@ def _get_period_cutoff(period: str) -> Optional[str]:
     return None
 
 
-def get_dashboard_overview(period: str = "all") -> Dict[str, Any]:
+_overview_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_overview_cache_lock = threading.Lock()
+_OVERVIEW_CACHE_TTL = 2.5  # 2.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
+
+
+def invalidate_overview_cache() -> None:
+    with _overview_cache_lock:
+        _overview_cache.clear()
+
+
+def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> Dict[str, Any]:
+    now = time.monotonic()
+    if not force_refresh:
+        with _overview_cache_lock:
+            cached = _overview_cache.get(period)
+            if cached and (now - cached[0]) < _OVERVIEW_CACHE_TTL:
+                return cached[1].copy()
+
     cutoff = _get_period_cutoff(period)
     cfg = get_settings()
 
@@ -1562,7 +1698,7 @@ def get_dashboard_overview(period: str = "all") -> Dict[str, Any]:
             gd["eur_net"] = round(gd["usd_net"] * cfg["usd_to_eur_rate"], 2)
             recent_gifts.append(gd)
 
-    return {
+    res = {
         "settings": cfg,
         "period": period,
         "totals": totals,
@@ -1570,6 +1706,9 @@ def get_dashboard_overview(period: str = "all") -> Dict[str, Any]:
         "recent_gifts": recent_gifts,
         "telegram_users": list_telegram_users(),
     }
+    with _overview_cache_lock:
+        _overview_cache[period] = (now, res)
+    return res
 
 
 def get_streamer_detail(streamer_id: int, period: str = "all") -> Optional[Dict[str, Any]]:

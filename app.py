@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import hashlib
 import io
@@ -269,8 +270,6 @@ async def public_panel(request: Request):
     """
     Startseite (/): Öffentliches User-Panel für Zuschauer (Read-Only).
     """
-    init_db()
-    monitor_manager.autostart_from_db()
     tg_diag = telegram_bot_service.get_diagnostics()
     return templates.TemplateResponse(
         request=request,
@@ -290,8 +289,6 @@ async def miniapp_page(request: Request):
     Mobile-First Telegram Mini-App & WebApp (/miniapp):
     Kompakte Übersicht über Live-Matches, Einnahmen, Streamer und Geschenke.
     """
-    init_db()
-    monitor_manager.autostart_from_db()
     tg_diag = telegram_bot_service.get_diagnostics()
     return templates.TemplateResponse(
         request=request,
@@ -516,9 +513,7 @@ async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
     summary="Öffentliche Read-Only Übersicht für das User-Panel (ohne interne Logs/Whitelist)",
 )
 async def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
-    init_db()
-    monitor_manager.autostart_from_db()
-    raw = get_dashboard_overview(period=period)
+    raw = await asyncio.to_thread(get_dashboard_overview, period=period)
 
     public_streamers = []
     for s in raw.get("streamers", []):
@@ -1221,9 +1216,7 @@ async def api_v1_streamer_single_report(
 @app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
-    init_db()
-    monitor_manager.autostart_from_db()
-    data = get_dashboard_overview(period=period)
+    data = await asyncio.to_thread(get_dashboard_overview, period=period)
     for s in data["streamers"]:
         uname = s["username"]
         s["is_tracking_active"] = monitor_manager.is_tracking(uname)
@@ -1231,7 +1224,6 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
         s["worker_diagnostics"] = monitor_manager.get_worker_diagnostics(uname)
     sys_diag = monitor_manager.get_all_diagnostics()
     sys_diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
-    sys_diag["system_health"] = get_system_health()
     data["system"] = sys_diag
     data["gift_catalog"] = TIKTOK_GIFT_CATALOG
     return data
@@ -1243,9 +1235,7 @@ async def api_analytics(
     streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID für Einzelanalyse (sonst alle Streamer)"),
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
 ):
-    init_db()
-    monitor_manager.autostart_from_db()
-    return get_analytics_data(streamer_id=streamer_id, period=period)
+    return await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
 
 
 @app.get(
