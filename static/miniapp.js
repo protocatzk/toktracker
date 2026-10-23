@@ -120,6 +120,26 @@
         diagActiveWorkers: document.getElementById("maDiagActiveWorkers"),
         diagBotStatus: document.getElementById("maDiagBotStatus"),
         diagTiktokSession: document.getElementById("maDiagTiktokSession"),
+        btnMaRefreshHealth: document.getElementById("btnMaRefreshHealth"),
+        healthStatusBadge: document.getElementById("maHealthStatusBadge"),
+        healthDiskPercent: document.getElementById("maHealthDiskPercent"),
+        healthDiskBar: document.getElementById("maHealthDiskBar"),
+        healthDiskUsed: document.getElementById("maHealthDiskUsed"),
+        healthDiskFree: document.getElementById("maHealthDiskFree"),
+        healthDiskTotal: document.getElementById("maHealthDiskTotal"),
+        healthRamPercent: document.getElementById("maHealthRamPercent"),
+        healthRamBar: document.getElementById("maHealthRamBar"),
+        healthRamUsed: document.getElementById("maHealthRamUsed"),
+        healthRamFree: document.getElementById("maHealthRamFree"),
+        healthRamTotal: document.getElementById("maHealthRamTotal"),
+        healthCpuPercent: document.getElementById("maHealthCpuPercent"),
+        healthCpuBar: document.getElementById("maHealthCpuBar"),
+        healthCpuLoad: document.getElementById("maHealthCpuLoad"),
+        healthCpuCores: document.getElementById("maHealthCpuCores"),
+        dockerConnBadge: document.getElementById("maDockerConnBadge"),
+        containersList: document.getElementById("maContainersList"),
+        volumesSummary: document.getElementById("maVolumesSummary"),
+        dbSummary: document.getElementById("maDbSummary"),
 
         // Admin Action Buttons
         btnOpenAddStreamer: document.getElementById("maBtnOpenAddStreamer"),
@@ -1725,28 +1745,216 @@
         });
     }
 
-    async function fetchSystemStatus() {
+    async function fetchSystemStatus(forceRefresh = false) {
+        if (elements.btnMaRefreshHealth) {
+            elements.btnMaRefreshHealth.disabled = true;
+            elements.btnMaRefreshHealth.textContent = "⏳ Lade...";
+        }
         try {
-            const res = await fetch("/api/system/status", {
+            const url = forceRefresh ? "/api/system/health?force_refresh=true" : "/api/system/status";
+            const res = await fetch(url, {
                 headers: getAuthHeaders()
             });
             if (!res.ok) return;
             const data = await res.json();
 
-            if (elements.diagDbEngine) elements.diagDbEngine.textContent = data.db_engine || "mariadb";
-            if (elements.diagActiveWorkers) {
+            // When calling /api/system/health directly, the payload is the health object itself
+            const health = data.system_health || (data.host ? data : null);
+
+            if (elements.diagDbEngine && (data.db_engine || health?.database?.engine)) {
+                elements.diagDbEngine.textContent = data.db_engine || health?.database?.engine || "mariadb";
+            }
+            if (elements.diagActiveWorkers && data.total_streamers !== undefined) {
                 const total = data.total_streamers || 0;
                 const active = data.active_workers || 0;
                 elements.diagActiveWorkers.textContent = `${active} von ${total} aktiv`;
             }
-            if (elements.diagBotStatus) {
+            if (elements.diagBotStatus && data.telegram_bot) {
                 const b = data.telegram_bot || {};
                 elements.diagBotStatus.textContent = `${b.state || 'ok'} (${b.username || '@toktrackeragent'})`;
             }
-            if (elements.diagTiktokSession) {
+            if (elements.diagTiktokSession && data.has_tiktok_session !== undefined) {
                 elements.diagTiktokSession.textContent = data.has_tiktok_session ? "✅ Aktiv" : "⚪ Keine Session";
             }
-        } catch (e) {}
+
+            if (health) {
+                renderMiniAppHealth(health);
+            }
+        } catch (e) {
+            console.error("Fehler beim Abrufen des System-Status:", e);
+        } finally {
+            if (elements.btnMaRefreshHealth) {
+                elements.btnMaRefreshHealth.disabled = false;
+                elements.btnMaRefreshHealth.textContent = "🔄 Aktualisieren";
+            }
+        }
+    }
+
+    function renderMiniAppHealth(health) {
+        if (!health) return;
+        const host = health.host || {};
+        const disk = host.disk || {};
+        const mem = host.memory || {};
+        const cpu = host.cpu || {};
+        const docker = health.docker || {};
+        const db = health.database || {};
+
+        const fmtMbOrGb = (mb) => {
+            if (!mb && mb !== 0) return "--";
+            return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+        };
+
+        // 1. Host Status Badge
+        if (elements.healthStatusBadge) {
+            const isCrit = disk.status === "critical" || mem.status === "critical" || cpu.status === "critical";
+            const isWarn = disk.status === "warning" || mem.status === "warning" || cpu.status === "warning";
+            if (isCrit) {
+                elements.healthStatusBadge.textContent = "KRITISCH";
+                elements.healthStatusBadge.className = "status-pill danger";
+            } else if (isWarn) {
+                elements.healthStatusBadge.textContent = "WARNUNG";
+                elements.healthStatusBadge.className = "status-pill warning";
+            } else {
+                elements.healthStatusBadge.textContent = "OPTIMAL";
+                elements.healthStatusBadge.className = "status-pill live";
+            }
+        }
+
+        // 2. Festplatte
+        const diskPct = typeof disk.percent === "number" ? disk.percent : 0;
+        if (elements.healthDiskPercent) {
+            elements.healthDiskPercent.textContent = `${diskPct.toFixed(1)}%`;
+            if (disk.status === "critical" || diskPct >= 85) elements.healthDiskPercent.style.color = "#ef4444";
+            else if (disk.status === "warning" || diskPct >= 75) elements.healthDiskPercent.style.color = "#f59e0b";
+            else elements.healthDiskPercent.style.color = "#10b981";
+        }
+        if (elements.healthDiskBar) {
+            elements.healthDiskBar.style.width = `${Math.min(diskPct, 100)}%`;
+            if (disk.status === "critical" || diskPct >= 85) elements.healthDiskBar.style.background = "#ef4444";
+            else if (disk.status === "warning" || diskPct >= 75) elements.healthDiskBar.style.background = "#f59e0b";
+            else elements.healthDiskBar.style.background = "#10b981";
+        }
+        if (elements.healthDiskUsed) elements.healthDiskUsed.textContent = `${disk.used_gb || 0} GB`;
+        if (elements.healthDiskFree) elements.healthDiskFree.textContent = `${disk.free_gb || 0} GB`;
+        if (elements.healthDiskTotal) elements.healthDiskTotal.textContent = `${disk.total_gb || 0} GB`;
+
+        // 3. RAM
+        const memPct = typeof mem.percent === "number" ? mem.percent : 0;
+        if (elements.healthRamPercent) {
+            elements.healthRamPercent.textContent = `${memPct.toFixed(1)}%`;
+            if (memPct >= 90) elements.healthRamPercent.style.color = "#ef4444";
+            else if (memPct >= 75) elements.healthRamPercent.style.color = "#f59e0b";
+            else elements.healthRamPercent.style.color = "#3b82f6";
+        }
+        if (elements.healthRamBar) {
+            elements.healthRamBar.style.width = `${Math.min(memPct, 100)}%`;
+            if (memPct >= 90) elements.healthRamBar.style.background = "#ef4444";
+            else if (memPct >= 75) elements.healthRamBar.style.background = "#f59e0b";
+            else elements.healthRamBar.style.background = "#3b82f6";
+        }
+        if (elements.healthRamUsed) elements.healthRamUsed.textContent = fmtMbOrGb(mem.used_mb);
+        if (elements.healthRamFree) elements.healthRamFree.textContent = fmtMbOrGb(mem.free_mb);
+        if (elements.healthRamTotal) elements.healthRamTotal.textContent = fmtMbOrGb(mem.total_mb);
+
+        // 4. CPU & Load
+        const cpuPct = typeof cpu.percent === "number" ? cpu.percent : 0;
+        if (elements.healthCpuPercent) {
+            elements.healthCpuPercent.textContent = `${cpuPct.toFixed(1)}%`;
+            if (cpuPct >= 85) elements.healthCpuPercent.style.color = "#ef4444";
+            else if (cpuPct >= 65) elements.healthCpuPercent.style.color = "#f59e0b";
+            else elements.healthCpuPercent.style.color = "#8b5cf6";
+        }
+        if (elements.healthCpuBar) {
+            elements.healthCpuBar.style.width = `${Math.min(cpuPct, 100)}%`;
+            if (cpuPct >= 85) elements.healthCpuBar.style.background = "#ef4444";
+            else if (cpuPct >= 65) elements.healthCpuBar.style.background = "#f59e0b";
+            else elements.healthCpuBar.style.background = "#8b5cf6";
+        }
+        if (elements.healthCpuLoad) {
+            const l1 = typeof cpu.load_1m === "number" ? cpu.load_1m.toFixed(2) : "-";
+            const l5 = typeof cpu.load_5m === "number" ? cpu.load_5m.toFixed(2) : "-";
+            elements.healthCpuLoad.textContent = `${l1} / ${l5}`;
+        }
+        if (elements.healthCpuCores) elements.healthCpuCores.textContent = `${cpu.cpu_count || 1}`;
+
+        // 5. Docker Connection Badge
+        if (elements.dockerConnBadge) {
+            if (docker.available) {
+                const count = (docker.containers || []).length;
+                const running = (docker.containers || []).filter(c => c.state === "running").length;
+                elements.dockerConnBadge.textContent = `${running}/${count} aktiv`;
+                elements.dockerConnBadge.className = "status-pill live";
+            } else {
+                elements.dockerConnBadge.textContent = "Host-Only";
+                elements.dockerConnBadge.className = "status-pill";
+            }
+        }
+
+        // 6. Docker Container Items
+        if (elements.containersList) {
+            const containers = docker.containers || [];
+            if (!docker.available) {
+                elements.containersList.innerHTML = `<div class="muted" style="font-size:10.5px;">Docker Socket nicht angebunden. Host-Ressourcen werden direkt über OS erfasst.</div>`;
+            } else if (containers.length === 0) {
+                elements.containersList.innerHTML = `<div class="muted" style="font-size:10.5px;">Keine Container gefunden.</div>`;
+            } else {
+                elements.containersList.innerHTML = containers.map(c => {
+                    const isRunning = c.state === "running";
+                    const cpuStr = typeof c.cpu_percent === "number" ? `${c.cpu_percent.toFixed(1)}%` : "--";
+                    const ramUsed = c.memory ? c.memory.used_mb : 0;
+                    const ramPct = c.memory ? c.memory.percent.toFixed(0) + '%' : '--';
+                    const rwSize = c.size_rw_mb !== undefined && c.size_rw_mb !== null ? `${c.size_rw_mb} MB` : "--";
+
+                    return `
+                        <div class="ma-container-item">
+                            <div class="ma-container-top">
+                                <div class="ma-container-name">
+                                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${isRunning ? '#10b981' : '#ef4444'};"></span>
+                                    <span>${escapeHtml(c.name)}</span>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <span class="mono" style="font-size:10px;font-weight:700;">${cpuStr}</span>
+                                    <span class="status-pill ${isRunning ? 'live' : 'danger'}" style="font-size:9px;padding:1px 5px;">${escapeHtml(c.status || c.state)}</span>
+                                </div>
+                            </div>
+                            <div class="ma-container-bottom">
+                                <span>RAM: <strong>${ramUsed} MB</strong> (${ramPct})</span>
+                                <span>Layer: <strong style="color:#38bdf8;">${rwSize}</strong></span>
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+            }
+        }
+
+        // 7. Volumes Summary
+        if (elements.volumesSummary) {
+            const vols = docker.volumes || [];
+            if (vols.length === 0) {
+                elements.volumesSummary.textContent = "Keine Daten";
+            } else {
+                elements.volumesSummary.textContent = vols.map(v => {
+                    const sz = v.size_mb > 0 ? `${v.size_mb} MB` : "aktiv";
+                    return `${v.name} (${sz})`;
+                }).join(" · ");
+            }
+        }
+
+        // 8. Database Summary
+        if (elements.dbSummary) {
+            const totalMb = db.total_mb || 0;
+            const engine = (db.engine || 'MySQL').toUpperCase();
+            elements.dbSummary.textContent = `${totalMb} MB (${engine} · ${(db.tables || []).length} Tabellen)`;
+        }
+    }
+
+    if (elements.btnMaRefreshHealth) {
+        elements.btnMaRefreshHealth.addEventListener("click", () => {
+            triggerHaptic("light");
+            fetchSystemStatus(true).then(() => {
+                showToast("System-Status aktualisiert");
+            });
+        });
     }
 
     // Modal Submissions

@@ -65,6 +65,7 @@ from schemas import (
     TelegramUserPermissionRequest,
     TrackActionRequest,
 )
+from system_service import get_system_health
 from telegram_service import (
     AdminAuthManager,
     admin_auth_manager,
@@ -1230,6 +1231,7 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
         s["worker_diagnostics"] = monitor_manager.get_worker_diagnostics(uname)
     sys_diag = monitor_manager.get_all_diagnostics()
     sys_diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
+    sys_diag["system_health"] = get_system_health()
     data["system"] = sys_diag
     data["gift_catalog"] = TIKTOK_GIFT_CATALOG
     return data
@@ -1520,7 +1522,14 @@ async def api_get_battle_detail(battle_id: int):
 async def api_system_status():
     diag = monitor_manager.get_all_diagnostics()
     diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
+    diag["system_health"] = get_system_health()
     return diag
+
+
+@app.get("/api/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/v1/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_system_health(force_refresh: bool = False):
+    return get_system_health(force_refresh=force_refresh)
 
 
 @app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])

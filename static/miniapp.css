@@ -2082,3 +2082,89 @@ code {
     font-weight: 700;
 }
 
+/* =====================================================================
+   SYSTEM DIAGNOSTICS & DOCKER MONITORING IN MINI-APP
+   ===================================================================== */
+
+.ma-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.ma-health-metric-row {
+    margin-bottom: 10px;
+}
+.ma-health-metric-row:last-child {
+    margin-bottom: 0;
+}
+
+.ma-health-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11.5px;
+    margin-bottom: 4px;
+}
+
+.ma-health-track {
+    height: 7px;
+    background: var(--bg-subtle);
+    border-radius: 3.5px;
+    overflow: hidden;
+    margin-bottom: 4px;
+    border: 1px solid var(--border-subtle);
+}
+
+.ma-health-fill {
+    height: 100%;
+    transition: width 0.4s ease, background 0.4s ease;
+    border-radius: 3.5px;
+}
+
+.ma-health-subtext {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+}
+
+.ma-container-item {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    font-family: var(--font-mono);
+}
+.ma-container-item:last-child {
+    margin-bottom: 0;
+}
+
+.ma-container-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.ma-container-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-strong);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ma-container-bottom {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9.5px;
+    color: var(--text-muted);
+}
+
+

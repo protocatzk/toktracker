@@ -117,6 +117,10 @@ function switchTab(tabId) {
             loadBattles();
             loadBattleStats();
         }, 50);
+    } else if (tabId === "tab-system") {
+        setTimeout(() => {
+            fetchSystemHealth();
+        }, 50);
     }
 }
 
@@ -162,6 +166,10 @@ async function loadOverview() {
             cachedWorkers = data.system.workers || [];
             cachedTgLogs = tg ? tg.logs || [] : [];
             renderServiceLogs();
+
+            if (data.system.system_health) {
+                renderSystemHealth(data.system.system_health);
+            }
         }
 
         if (data.settings) {
@@ -3098,4 +3106,221 @@ document.addEventListener("DOMContentLoaded", () => {
 
     btnInspect?.addEventListener("click", inspectSqliteDatabase);
     btnRunImport?.addEventListener("click", runSqliteImport);
+    document.getElementById("btnRefreshHealth")?.addEventListener("click", () => {
+        fetchSystemHealth(true);
+    });
 });
+
+async function fetchSystemHealth(forceRefresh = false) {
+    const btn = document.getElementById("btnRefreshHealth");
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Lade...";
+    }
+    try {
+        const url = `/api/system/health${forceRefresh ? "?force_refresh=true" : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const health = await res.json();
+        renderSystemHealth(health);
+    } catch (e) {
+        console.error("Fehler beim Abrufen der System-Health:", e);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "🔄 Aktualisieren";
+        }
+    }
+}
+
+function renderSystemHealth(health) {
+    if (!health) return;
+    const host = health.host || {};
+    const disk = host.disk || {};
+    const mem = host.memory || {};
+    const cpu = host.cpu || {};
+    const docker = health.docker || {};
+    const db = health.database || {};
+
+    const fmtMbOrGb = (mb) => {
+        if (!mb && mb !== 0) return "--";
+        return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+    };
+
+    // 1. Host Disk
+    const diskPct = typeof disk.percent === "number" ? disk.percent : 0;
+    const elDiskPct = document.getElementById("gaugeDiskPercent");
+    const elDiskBar = document.getElementById("gaugeDiskBar");
+    const elDiskUsed = document.getElementById("gaugeDiskUsed");
+    const elDiskFree = document.getElementById("gaugeDiskFree");
+    const elDiskTotal = document.getElementById("gaugeDiskTotal");
+
+    if (elDiskPct) elDiskPct.textContent = `${diskPct.toFixed(1)}%`;
+    if (elDiskBar) {
+        elDiskBar.style.width = `${Math.min(diskPct, 100)}%`;
+        if (disk.status === "critical" || diskPct >= 85) {
+            elDiskBar.style.background = "#ef4444";
+        } else if (disk.status === "warning" || diskPct >= 75) {
+            elDiskBar.style.background = "#f59e0b";
+        } else {
+            elDiskBar.style.background = "#10b981";
+        }
+    }
+    if (elDiskUsed) elDiskUsed.textContent = `${disk.used_gb || 0} GB`;
+    if (elDiskFree) elDiskFree.textContent = `${disk.free_gb || 0} GB`;
+    if (elDiskTotal) elDiskTotal.textContent = `${disk.total_gb || 0} GB`;
+
+    // 2. Host RAM
+    const memPct = typeof mem.percent === "number" ? mem.percent : 0;
+    const elRamPct = document.getElementById("gaugeRamPercent");
+    const elRamBar = document.getElementById("gaugeRamBar");
+    const elRamUsed = document.getElementById("gaugeRamUsed");
+    const elRamFree = document.getElementById("gaugeRamFree");
+    const elRamTotal = document.getElementById("gaugeRamTotal");
+
+    if (elRamPct) elRamPct.textContent = `${memPct.toFixed(1)}%`;
+    if (elRamBar) {
+        elRamBar.style.width = `${Math.min(memPct, 100)}%`;
+        if (memPct >= 90) elRamBar.style.background = "#ef4444";
+        else if (memPct >= 75) elRamBar.style.background = "#f59e0b";
+        else elRamBar.style.background = "#3b82f6";
+    }
+    if (elRamUsed) elRamUsed.textContent = fmtMbOrGb(mem.used_mb);
+    if (elRamFree) elRamFree.textContent = fmtMbOrGb(mem.free_mb);
+    if (elRamTotal) elRamTotal.textContent = fmtMbOrGb(mem.total_mb);
+
+    // 3. Host CPU & Load
+    const cpuPct = typeof cpu.percent === "number" ? cpu.percent : 0;
+    const elCpuPct = document.getElementById("gaugeCpuPercent");
+    const elCpuBar = document.getElementById("gaugeCpuBar");
+    const elCpuLoad = document.getElementById("gaugeCpuLoad");
+    const elCpuCores = document.getElementById("gaugeCpuCores");
+
+    if (elCpuPct) elCpuPct.textContent = `${cpuPct.toFixed(1)}%`;
+    if (elCpuBar) {
+        elCpuBar.style.width = `${Math.min(cpuPct, 100)}%`;
+        if (cpuPct >= 85) elCpuBar.style.background = "#ef4444";
+        else if (cpuPct >= 65) elCpuBar.style.background = "#f59e0b";
+        else elCpuBar.style.background = "#8b5cf6";
+    }
+    if (elCpuLoad) {
+        const l1 = typeof cpu.load_1m === "number" ? cpu.load_1m.toFixed(2) : "-";
+        const l5 = typeof cpu.load_5m === "number" ? cpu.load_5m.toFixed(2) : "-";
+        const l15 = typeof cpu.load_15m === "number" ? cpu.load_15m.toFixed(2) : "-";
+        elCpuLoad.textContent = `${l1} / ${l5} / ${l15}`;
+    }
+    if (elCpuCores) elCpuCores.textContent = `${cpu.cpu_count || 1} Kerne`;
+
+    // 4. Header Badge & Timestamp
+    const elBadge = document.getElementById("healthDockerBadge");
+    const elUpdated = document.getElementById("healthLastUpdated");
+    const elCount = document.getElementById("cntContainerCount");
+
+    if (elBadge) {
+        if (docker.available) {
+            const runningCount = (docker.containers || []).filter(c => c.state === "running").length;
+            elBadge.textContent = `Docker: Verbunden (${runningCount}/${(docker.containers || []).length} aktiv)`;
+            elBadge.className = "status-tag live";
+        } else {
+            elBadge.textContent = "Docker: Nicht verbunden (Host-Only)";
+            elBadge.className = "status-tag polling";
+        }
+    }
+    if (elUpdated) {
+        const d = health.timestamp ? new Date(health.timestamp * 1000) : new Date();
+        elUpdated.textContent = d.toLocaleTimeString("de-DE");
+    }
+    if (elCount) {
+        elCount.textContent = `(${ (docker.containers || []).length } Container)`;
+    }
+
+    // 5. Container Table
+    const elTbody = document.getElementById("tblContainersBody");
+    if (elTbody) {
+        const containers = docker.containers || [];
+        if (!docker.available) {
+            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Docker Socket (/var/run/docker.sock) ist nicht gemountet oder nicht erreichbar (${escapeHtml(docker.error || 'Host-Fallback aktiv')}).</td></tr>`;
+        } else if (containers.length === 0) {
+            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Keine überwachten TokTracker-Container gefunden.</td></tr>`;
+        } else {
+            elTbody.innerHTML = containers.map(c => {
+                const isRunning = c.state === "running";
+                const stateTag = `<span class="status-tag ${isRunning ? 'live' : 'danger'}" style="font-size: 10px;">${escapeHtml(c.status || c.state)}</span>`;
+                const memUsedMb = c.memory ? c.memory.used_mb : 0;
+                const memLimitMb = c.memory ? c.memory.limit_mb : 0;
+                const memPct = c.memory ? c.memory.percent : 0;
+                const memText = `${memUsedMb} MB / ${fmtMbOrGb(memLimitMb)}`;
+                const memBar = `
+                    <div style="display: flex; align-items: center; gap: 6px; width: 110px;">
+                        <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 3px; overflow: hidden;">
+                            <div style="width: ${Math.min(memPct, 100)}%; height: 100%; background: #3b82f6;"></div>
+                        </div>
+                        <span class="mono muted" style="font-size: 10px; width: 32px; text-align: right;">${memPct.toFixed(0)}%</span>
+                    </div>`;
+                const cpuVal = typeof c.cpu_percent === "number" ? `${c.cpu_percent.toFixed(1)}%` : "--";
+                const rwSize = c.size_rw_mb !== undefined && c.size_rw_mb !== null ? `${c.size_rw_mb} MB` : "--";
+                const rootFs = c.size_root_fs_mb ? `<span class="muted" style="font-size: 10px;"> (${c.size_root_fs_mb} MB)</span>` : "";
+
+                return `
+                    <tr>
+                        <td style="font-weight: 600;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${isRunning ? '#10b981' : '#ef4444'};"></span>
+                                <span>${escapeHtml(c.name)}</span>
+                            </div>
+                        </td>
+                        <td>${stateTag}</td>
+                        <td class="mono">${cpuVal}</td>
+                        <td class="mono">${memText}</td>
+                        <td>${memBar}</td>
+                        <td class="mono" style="font-weight: 600; color: #38bdf8;">${rwSize}${rootFs}</td>
+                        <td class="mono muted" style="font-size: 10px;">
+                            <span>${escapeHtml(c.id || '')}</span>
+                            <div style="font-size: 9.5px; opacity: 0.8;">${escapeHtml(c.image || '')}</div>
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+        }
+    }
+
+    // 6. Docker Volumes
+    const elVols = document.getElementById("listVolumesContainer");
+    if (elVols) {
+        const vols = docker.volumes || [];
+        if (vols.length === 0) {
+            elVols.innerHTML = `<span class="muted">Keine Docker-Volumes ermittelt.</span>`;
+        } else {
+            elVols.innerHTML = vols.map(v => {
+                const sz = v.size_mb > 0 ? `${v.size_mb} MB` : (v.usage_data && v.usage_data.Size ? `${(v.usage_data.Size / 1024 / 1024).toFixed(1)} MB` : 'Aktiv');
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed var(--border-subtle);">
+                        <span>📁 <strong>${escapeHtml(v.name)}</strong> <span class="muted" style="font-size: 9.5px;">(${escapeHtml(v.driver || 'local')})</span></span>
+                        <span class="mono" style="font-weight: 600; color: #34d399;">${sz}</span>
+                    </div>
+                `;
+            }).join("");
+        }
+    }
+
+    // 7. Database storage & tables
+    const elDbBadge = document.getElementById("dbTotalSizeBadge");
+    const elDbList = document.getElementById("listDbTablesContainer");
+    if (elDbBadge) {
+        const dbEngine = (db.engine || 'MySQL').toUpperCase();
+        elDbBadge.textContent = `${db.total_mb || 0} MB (${dbEngine})`;
+    }
+    if (elDbList) {
+        const tables = db.tables || [];
+        if (tables.length === 0) {
+            elDbList.innerHTML = `<span class="muted">Keine Tabellendaten verfügbar.</span>`;
+        } else {
+            elDbList.innerHTML = tables.slice(0, 6).map(t => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed var(--border-subtle);">
+                    <span>📊 <strong>${escapeHtml(t.table)}</strong> <span class="muted" style="font-size: 10px;">(${fmtNum(t.rows || 0)} Zeilen)</span></span>
+                    <span class="mono" style="color: #60a5fa;">${t.size_mb} MB</span>
+                </div>
+            `).join("");
+        }
+    }
+}

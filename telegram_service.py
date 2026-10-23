@@ -453,6 +453,8 @@ class TelegramBotService:
         self._bot_username_raw: str = ""
         self._started_at: Optional[str] = None
         self._last_report_sent_at: Optional[str] = None
+        self._last_disk_alert_time: float = 0.0
+        self._disk_alert_active: bool = False
         self._logs: Deque[Dict[str, str]] = deque(maxlen=40)
 
     def _log(self, level: str, msg: str) -> None:
@@ -571,6 +573,18 @@ class TelegramBotService:
                 self._log(
                     "INFO",
                     f"24h-Automatik-Bericht für Chat-ID {config.telegram_chat_id} geplant.",
+                )
+
+            if self._app.job_queue:
+                self._app.job_queue.run_repeating(
+                    self._scheduled_disk_health_monitor_job,
+                    interval=timedelta(minutes=15),
+                    first=timedelta(seconds=45),
+                    name="disk_health_monitor",
+                )
+                self._log(
+                    "INFO",
+                    "Speicherplatz-Überwachung aktiv (Intervall: alle 15 Min, Alarm bei >=85%).",
                 )
 
             self._state = "running"
@@ -1019,6 +1033,96 @@ class TelegramBotService:
         except Exception as exc:
             self._log("ERROR", f"Fehler im 24h-Report-Job: {exc}")
 
+    async def _scheduled_disk_health_monitor_job(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            from system_service import get_system_health
+
+            health = await asyncio.to_thread(get_system_health, True)
+            disk = health.get("host", {}).get("disk", {})
+            pct = float(disk.get("percent", 0.0))
+            free_gb = float(disk.get("free_gb", 0.0))
+            total_gb = float(disk.get("total_gb", 0.0))
+            used_gb = float(disk.get("used_gb", 0.0))
+
+            now = time.time()
+            if pct >= 85.0:
+                if not self._disk_alert_active or (now - self._last_disk_alert_time) > 14400:
+                    self._disk_alert_active = True
+                    self._last_disk_alert_time = now
+
+                    docker_info = health.get("docker", {})
+                    containers = docker_info.get("containers", [])
+                    volumes = docker_info.get("volumes", [])
+
+                    cont_lines = []
+                    for c in containers:
+                        cont_lines.append(
+                            f"• <b>{html.escape(c.get('name', ''))}</b>: "
+                            f"<code>{c.get('memory_used_mb', 0)} MB</code> RAM "
+                            f"({c.get('memory_percent', 0)}%) | "
+                            f"<code>{c.get('cpu_percent', 0)}%</code> CPU"
+                        )
+
+                    vol_lines = []
+                    for v in volumes[:4]:
+                        vol_lines.append(
+                            f"• <code>{html.escape(v.get('name', ''))}</code>: <b>{v.get('size_mb', 0):.1f} MB</b>"
+                        )
+
+                    msg = (
+                        "🚨 <b>WARNUNG: Kritischer Speicherplatz auf dem Server!</b>\n\n"
+                        f"💾 <b>Festplatte:</b> <code>{used_gb:.1f} GB</code> von <code>{total_gb:.1f} GB</code> (<b>{pct:.1f}%</b> belegt)\n"
+                        f"Freier Speicher: <b>{free_gb:.1f} GB</b>\n\n"
+                        "🐳 <b>Docker Container:</b>\n"
+                        + ("\n".join(cont_lines) if cont_lines else "<i>Keine Container erfasst</i>")
+                        + "\n\n"
+                        "📦 <b>Wichtige Volumes:</b>\n"
+                        + ("\n".join(vol_lines) if vol_lines else "<i>Keine Volumes</i>")
+                        + "\n\n"
+                        "⚠️ <i>Tipp: Bereinige ungenutzte Docker-Images/Build-Caches mit <code>docker system prune -a</code>.</i>"
+                    )
+
+                    admin_ids = self._resolve_admin_chat_ids()
+                    if config.telegram_chat_id:
+                        try:
+                            admin_ids.append(int(config.telegram_chat_id))
+                        except Exception:
+                            pass
+                    for target_id in set(admin_ids):
+                        try:
+                            await context.bot.send_message(
+                                chat_id=target_id,
+                                text=msg,
+                                parse_mode=ParseMode.HTML,
+                            )
+                        except Exception as send_err:
+                            self._log("DEBUG", f"Konnte Speicher-Warnung nicht an {target_id} senden: {send_err}")
+
+            elif pct < 78.0 and self._disk_alert_active:
+                self._disk_alert_active = False
+                recovery_msg = (
+                    "✅ <b>Entwarnung: Speicherplatz wieder normalisiert</b>\n\n"
+                    f"💾 Festplatte ist jetzt zu <b>{pct:.1f}%</b> belegt (Frei: <b>{free_gb:.1f} GB</b> von <code>{total_gb:.1f} GB</code>)."
+                )
+                admin_ids = self._resolve_admin_chat_ids()
+                if config.telegram_chat_id:
+                    try:
+                        admin_ids.append(int(config.telegram_chat_id))
+                    except Exception:
+                        pass
+                for target_id in set(admin_ids):
+                    try:
+                        await context.bot.send_message(
+                            chat_id=target_id,
+                            text=recovery_msg,
+                            parse_mode=ParseMode.HTML,
+                        )
+                    except Exception:
+                        pass
+
+        except Exception as exc:
+            self._log("DEBUG", f"Fehler im Disk-Health-Job: {exc}")
+
     # =================================================================
     # GRUPPEN-MENTION HANDLER
     # =================================================================
@@ -1414,6 +1518,23 @@ class TelegramBotService:
                 f"• <b>@{html.escape(w['username'])}</b>: <code>{w['state']}</code> "
                 f"(Viewers: {w['current_viewers']}, Session-Coins: {w['coins_received_session']:,})"
             )
+
+        try:
+            from system_service import get_system_health
+
+            h = get_system_health()
+            d = h.get("host", {}).get("disk", {})
+            m = h.get("host", {}).get("memory", {})
+            c = h.get("host", {}).get("cpu", {})
+            lines.append(
+                "\n🖥️ <b>Server-Ressourcen:</b>\n"
+                f"• Festplatte: <code>{d.get('used_gb', 0):.1f}/{d.get('total_gb', 0):.1f} GB</code> (<b>{d.get('percent', 0)}%</b>)\n"
+                f"• RAM: <code>{m.get('used_mb', 0):.0f}/{m.get('total_mb', 0):.0f} MB</code> (<b>{m.get('percent', 0)}%</b>)\n"
+                f"• CPU: <b>{c.get('percent', 0)}%</b> (Load: {c.get('load_1m', 0)})"
+            )
+        except Exception:
+            pass
+
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def _cmd_allow_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

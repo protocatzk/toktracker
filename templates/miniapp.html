@@ -11,7 +11,7 @@
     <script src="/static/chart.umd.min.js"></script>
     
     <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <link rel="stylesheet" href="/static/miniapp.css?v=2.2.2" />
+    <link rel="stylesheet" href="/static/miniapp.css?v=2.3.0" />
 </head>
 <body>
 
@@ -424,10 +424,15 @@
             </div>
 
             <!-- System Diagnostics & Health -->
-            <div class="section-head" style="margin-top: 18px;">
+            <div class="section-head" style="margin-top: 18px; display: flex; justify-content: space-between; align-items: center;">
                 <div class="section-title">🩺 System-Status &amp; Diagnostics</div>
+                <button type="button" id="btnMaRefreshHealth" class="btn-sm" style="font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); cursor: pointer;">
+                    🔄 Aktualisieren
+                </button>
             </div>
-            <div class="ma-card" id="maSystemDiagCard" style="font-size: 11px; line-height: 1.6;">
+
+            <!-- Service Status Summary Card -->
+            <div class="ma-card" id="maSystemDiagCard" style="font-size: 11px; line-height: 1.6; margin-bottom: 10px;">
                 <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; margin-bottom: 6px;">
                     <span style="color: var(--text-muted);">Datenbank-Engine:</span>
                     <span id="maDiagDbEngine" class="mono">--</span>
@@ -443,6 +448,84 @@
                 <div style="display: flex; justify-content: space-between;">
                     <span style="color: var(--text-muted);">TikTok Session:</span>
                     <span id="maDiagTiktokSession" class="mono">--</span>
+                </div>
+            </div>
+
+            <!-- Host Resource Gauges Card -->
+            <div class="ma-card" id="maHostHealthCard" style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <strong style="font-size: 12px; color: var(--text-strong);">🖥️ Server-Ressourcen (Host)</strong>
+                    <span id="maHealthStatusBadge" class="status-pill live" style="font-size: 9.5px; padding: 2px 6px;">OK</span>
+                </div>
+
+                <!-- Festplatte -->
+                <div class="ma-health-metric-row">
+                    <div class="ma-health-header">
+                        <span>💾 Festplatte</span>
+                        <span id="maHealthDiskPercent" class="mono" style="font-weight: 700; color: #10b981;">0%</span>
+                    </div>
+                    <div class="ma-health-track">
+                        <div id="maHealthDiskBar" class="ma-health-fill" style="width: 0%; background: #10b981;"></div>
+                    </div>
+                    <div class="ma-health-subtext">
+                        <span>Belegt: <span id="maHealthDiskUsed" class="text-main">--</span></span>
+                        <span>Frei: <span id="maHealthDiskFree" class="text-main">--</span> / <span id="maHealthDiskTotal">--</span></span>
+                    </div>
+                </div>
+
+                <!-- RAM -->
+                <div class="ma-health-metric-row" style="margin-top: 10px;">
+                    <div class="ma-health-header">
+                        <span>🧠 RAM</span>
+                        <span id="maHealthRamPercent" class="mono" style="font-weight: 700; color: #3b82f6;">0%</span>
+                    </div>
+                    <div class="ma-health-track">
+                        <div id="maHealthRamBar" class="ma-health-fill" style="width: 0%; background: #3b82f6;"></div>
+                    </div>
+                    <div class="ma-health-subtext">
+                        <span>Belegt: <span id="maHealthRamUsed" class="text-main">--</span></span>
+                        <span>Frei: <span id="maHealthRamFree" class="text-main">--</span> / <span id="maHealthRamTotal">--</span></span>
+                    </div>
+                </div>
+
+                <!-- CPU -->
+                <div class="ma-health-metric-row" style="margin-top: 10px;">
+                    <div class="ma-health-header">
+                        <span>⚡ CPU &amp; Load</span>
+                        <span id="maHealthCpuPercent" class="mono" style="font-weight: 700; color: #8b5cf6;">0%</span>
+                    </div>
+                    <div class="ma-health-track">
+                        <div id="maHealthCpuBar" class="ma-health-fill" style="width: 0%; background: #8b5cf6;"></div>
+                    </div>
+                    <div class="ma-health-subtext">
+                        <span>Load: <span id="maHealthCpuLoad" class="text-main">--</span></span>
+                        <span><span id="maHealthCpuCores">--</span> Kerne</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Docker Containers & Storage Card -->
+            <div class="ma-card" id="maDockerHealthCard" style="margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <strong style="font-size: 12px; color: var(--text-strong);">🐳 Docker Container &amp; Speicher</strong>
+                    <span id="maDockerConnBadge" class="status-pill" style="font-size: 9.5px; padding: 2px 6px;">Lade...</span>
+                </div>
+
+                <!-- Container List -->
+                <div id="maContainersList">
+                    <div class="muted" style="font-size: 11px;">Lade Container...</div>
+                </div>
+
+                <!-- Volumes & DB Footer in Mini-App -->
+                <div style="border-top: 1px solid var(--border-color); margin-top: 10px; padding-top: 8px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-muted); margin-bottom: 4px;">
+                        <span>📦 Docker Volumes:</span>
+                        <span id="maVolumesSummary" class="mono text-main">--</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-muted);">
+                        <span>🗄️ Datenbank-Größe:</span>
+                        <span id="maDbSummary" class="mono text-main">--</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -643,6 +726,6 @@
 <!-- Toast Container -->
 <div class="ma-toast-container" id="maToastContainer"></div>
 
-<script src="/static/miniapp.js?v=2.3.0"></script>
+<script src="/static/miniapp.js?v=2.4.0"></script>
 </body>
 </html>
