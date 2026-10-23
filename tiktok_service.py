@@ -27,6 +27,41 @@ try:
         CommentEvent,
     )
     TIKTOKLIVE_AVAILABLE = True
+
+    try:
+        from TikTokLive.client.web.routes.fetch_room_id_api import FetchRoomIdAPIRoute
+
+        _orig_parse_room_id = FetchRoomIdAPIRoute.parse_room_id
+
+        def _safe_parse_room_id(data: dict) -> str:
+            room_id = _orig_parse_room_id(data)
+            if not room_id or str(room_id).strip() in ("", "0"):
+                raise UserOfflineError("Streamer ist aktuell offline (leere Room-ID von TikTok Webcast API).")
+            return room_id
+
+        FetchRoomIdAPIRoute.parse_room_id = staticmethod(_safe_parse_room_id)
+
+        _orig_fetch_user_room_data = FetchRoomIdAPIRoute.fetch_user_room_data
+
+        async def _safe_fetch_user_room_data(web: Any, unique_id: str) -> dict:
+            resp: httpx.Response = await web.get(
+                url=WebDefaults.tiktok_app_url + "/api-live/user/room/",
+                extra_params={"uniqueId": unique_id, "sourceType": 54},
+            )
+            if not resp.content or not resp.content.strip():
+                raise UserOfflineError(f"Streamer @{unique_id} ist offline (leere Antwort von TikTok Live-API).")
+            try:
+                data = resp.json()
+            except Exception:
+                raise UserOfflineError(f"Streamer @{unique_id} ist offline (kein aktiver Live-JSON-Feed).")
+            if data.get("message") == "user_not_found":
+                raise UserOfflineError(f"Streamer @{unique_id} existiert nicht oder streamt nicht.")
+            return data
+
+        FetchRoomIdAPIRoute.fetch_user_room_data = staticmethod(_safe_fetch_user_room_data)
+    except Exception as _patch_err:
+        logging.getLogger("toktracker.tiktok").debug("TikTokLive Route-Patching Hinweis: %s", _patch_err)
+
 except ImportError:
     TIKTOKLIVE_AVAILABLE = False
     AgeRestrictedError = Exception  # type: ignore
@@ -35,6 +70,28 @@ except ImportError:
     LinkMicBattleEvent = None  # type: ignore
     LinkMicArmiesEvent = None  # type: ignore
     CommentEvent = None  # type: ignore
+
+
+def is_streamer_offline_error(exc: Exception) -> bool:
+    """
+    Erkennt zuverlässig, ob ein Fehler in Wirklichkeit bedeutet, dass der Streamer schlicht offline ist:
+    - UserOfflineError: Standard TikTokLive Exception.
+    - ValueError ('invalid literal for int() with base 10: \'\''): TikTok API liefert leere roomId für Offline-User.
+    - JSONDecodeError ('Expecting value: line 1 column 1 (char 0)'): TikTok liefert leeren Body für Offline-User.
+    - FailedParseRoomIdError: SIGI_STATE HTML-Tag fehlt, weil kein aktiver Stream existiert.
+    - UserNotFoundError: Streamer existiert nicht oder hat keinen aktiven Live-Stream.
+    """
+    if isinstance(exc, UserOfflineError):
+        return True
+    err_str = str(exc)
+    err_cls = type(exc).__name__
+    if isinstance(exc, ValueError) and "invalid literal for int()" in err_str:
+        return True
+    if "JSONDecodeError" in err_cls or ("Expecting value" in err_str and "column 1" in err_str):
+        return True
+    if err_cls in ("FailedParseRoomIdError", "UserNotFoundError"):
+        return True
+    return False
 
 from config import config
 from database import (
@@ -559,33 +616,35 @@ class StreamerWorker:
                     streak_watchdog.cancel()
                     self._flush_all_pending_streaks()
 
-            except UserOfflineError:
-                with self._lock:
-                    self.diag.state = "polling_offline"
-                    self.diag.current_viewers = 0
-                if self.diag.session_id:
-                    end_stream_session(self.streamer_id, self.diag.session_id)
-                    self.diag.session_id = None
+            except Exception as exc:
+                if is_streamer_offline_error(exc):
+                    with self._lock:
+                        self.diag.state = "polling_offline"
+                        self.diag.current_viewers = 0
+                        self.diag.last_error = ""
+                    if self.diag.session_id:
+                        end_stream_session(self.streamer_id, self.diag.session_id)
+                        self.diag.session_id = None
 
-                update_streamer_runtime_state(
-                    self.username,
-                    is_live=False,
-                    is_tracking=self.diag.auto_reconnect,
-                    current_viewers=0,
-                    last_error="",
-                )
+                    update_streamer_runtime_state(
+                        self.username,
+                        is_live=False,
+                        is_tracking=self.diag.auto_reconnect,
+                        current_viewers=0,
+                        last_error="",
+                    )
 
-                if not self.diag.auto_reconnect or self._stop_event.is_set():
-                    self._log("INFO", "Streamer ist offline (Einmal-Check beendet).")
-                    break
+                    if not self.diag.auto_reconnect or self._stop_event.is_set():
+                        self._log("INFO", "Streamer ist offline (Einmal-Check beendet).")
+                        break
 
-                poll_sec = max(15, int(get_settings().get("poll_interval_seconds", 45)))
-                self._log(
-                    "INFO",
-                    f"Streamer aktuell offline – nächster Live-Check in {poll_sec}s.",
-                )
-                await self._interruptible_sleep(float(poll_sec))
-                continue
+                    poll_sec = max(15, int(get_settings().get("poll_interval_seconds", 45)))
+                    self._log(
+                        "INFO",
+                        f"Streamer aktuell offline – nächster Live-Check in {poll_sec}s.",
+                    )
+                    await self._interruptible_sleep(float(poll_sec))
+                    continue
 
             except Exception as exc:
                 err_name = type(exc).__name__
