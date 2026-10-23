@@ -198,9 +198,16 @@ class AdminAuthManager:
 
         return None
 
-    def create_session_token(self, admin_label: str = "telegram_admin") -> str:
+    def create_session_token(
+        self,
+        admin_label: str = "telegram_admin",
+        role: str = "admin",
+        is_allowed: bool = True,
+    ) -> str:
         payload = {
             "sub": admin_label,
+            "role": role,
+            "is_allowed": is_allowed,
             "iat": int(time.time()),
             "exp": int(time.time()) + self.SESSION_TTL_SECONDS,
             "nonce": secrets.token_hex(8),
@@ -231,6 +238,8 @@ class AdminAuthManager:
             payload = json.loads(raw_bytes.decode("utf-8"))
             if int(payload.get("exp", 0)) < int(time.time()):
                 return None
+            payload.setdefault("role", "admin")
+            payload.setdefault("is_allowed", True)
             return payload
         except Exception:
             return None

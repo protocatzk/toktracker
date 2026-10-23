@@ -40,6 +40,7 @@ from database import (
     init_db,
     inspect_sqlite_database,
     import_from_sqlite_database,
+    check_telegram_user_access,
     list_telegram_users,
     record_bot_session,
     record_gift_event,
@@ -865,13 +866,33 @@ async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
     username = user.get("username")
     first_name = user.get("first_name", "")
 
-    is_admin = admin_auth_manager.is_admin_user(telegram_id=tg_id, username=username)
+    # DB-Prüfung auf Whitelist-Status und Admin-Rolle
+    if tg_id:
+        access_check = check_telegram_user_access(
+            telegram_id=int(tg_id),
+            username=username,
+            first_name=first_name,
+            chat_id=int(tg_id),
+        )
+    else:
+        access_check = {"allowed": False, "is_admin": False}
+
+    is_whitelisted = bool(access_check.get("allowed", False))
+    is_admin = bool(access_check.get("is_admin", False))
+    if not is_admin and admin_auth_manager.is_admin_user(telegram_id=tg_id, username=username):
+        is_admin = True
+        is_whitelisted = True
 
     token = None
-    admin_label = f"tg_{tg_id}" if tg_id else f"tg_{username or 'user'}"
-    if is_admin:
-        token = admin_auth_manager.create_session_token(admin_label=admin_label)
-        _set_admin_session_cookie(response, admin_label=admin_label)
+    user_label = f"tg_{tg_id}" if tg_id else f"tg_{username or 'user'}"
+    if is_admin or is_whitelisted:
+        token = admin_auth_manager.create_session_token(
+            admin_label=user_label,
+            role="admin" if is_admin else "user",
+            is_allowed=is_whitelisted,
+        )
+        if is_admin:
+            _set_admin_session_cookie(response, admin_label=user_label)
 
     try:
         record_bot_session(
@@ -879,8 +900,8 @@ async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
             telegram_id=tg_id,
             username=username or "",
             first_name=first_name or "",
-            status="admin" if is_admin else "user",
-            details_json=json.dumps({"is_admin": is_admin}),
+            status="admin" if is_admin else ("whitelisted" if is_whitelisted else "user"),
+            details_json=json.dumps({"is_admin": is_admin, "is_whitelisted": is_whitelisted}),
         )
     except Exception:
         pass
@@ -889,13 +910,14 @@ async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
         "ok": True,
         "authenticated": True,
         "is_admin": is_admin,
+        "is_whitelisted": is_whitelisted,
         "user": {
             "id": tg_id,
             "username": username,
             "first_name": first_name,
         },
         "token": token,
-        "admin_label": admin_label if is_admin else None,
+        "admin_label": user_label if (is_admin or is_whitelisted) else None,
     }
 
 
@@ -915,16 +937,90 @@ async def api_miniapp_auth_status(
 
     session_payload = admin_auth_manager.verify_session_token(token)
     if session_payload:
+        role = session_payload.get("role", "admin")
+        is_admin = (role == "admin")
+        is_allowed = bool(session_payload.get("is_allowed", True))
         return {
             "authenticated": True,
-            "is_admin": True,
+            "is_admin": is_admin,
+            "is_whitelisted": is_allowed or is_admin,
+            "role": role,
             "admin_label": session_payload.get("sub", "admin"),
             "exp": session_payload.get("exp"),
         }
+    is_public = (get_telegram_access_mode() == "public")
     return {
         "authenticated": False,
         "is_admin": False,
+        "is_whitelisted": is_public,
         "admin_label": None,
+    }
+
+
+@app.get(
+    "/api/miniapp/radar",
+    tags=["Telegram Mini-App", "Spenderradar & Chatlog"],
+    summary="Liefert aggregierte Daten für das Mini-App Spender-Radar (Whales, Sharks, Dolphins & Cross-Streamer)",
+)
+async def api_miniapp_radar(
+    period: str = Query("24h", description="today | 24h | 7d | 30d | all"),
+    min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
+    cross_only: bool = Query(False, description="Nur Cross-Streamer Spender"),
+    search: Optional[str] = Query(None, description="Suchbegriff für Spender"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    init_db()
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    is_authorized = False
+    is_admin = False
+
+    if token:
+        payload = admin_auth_manager.verify_session_token(token)
+        if payload:
+            is_admin = (payload.get("role") == "admin")
+            is_allowed = bool(payload.get("is_allowed", True))
+            if is_admin or is_allowed:
+                is_authorized = True
+
+    if not is_authorized and get_telegram_access_mode() == "public":
+        is_authorized = True
+
+    if not is_authorized:
+        return {
+            "ok": False,
+            "authorized": False,
+            "error": "unauthorized",
+            "message": "Dieser Bereich ist exklusiv für freigeschaltete Telegram-Nutzer verfügbar.",
+            "kpis": {},
+            "donors": [],
+            "streamers": [],
+        }
+
+    radar_data = get_donor_radar_data(
+        period=period,
+        min_tier=min_tier,
+        cross_streamer_only=cross_only,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "ok": True,
+        "authorized": True,
+        "is_admin": is_admin,
+        "period": period,
+        "kpis": radar_data.get("kpis", {}),
+        "donors": radar_data.get("donors", []),
+        "streamers": radar_data.get("streamers", []),
+        "total_donors": len(radar_data.get("donors", [])),
     }
 
 

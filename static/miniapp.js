@@ -29,6 +29,7 @@
     let pollInterval = null;
     let isFetching = false;
     let isAdmin = false;
+    let isWhitelisted = false;
     let authUser = null;
     let sessionToken = localStorage.getItem("toktracker_admin_token") || "";
     let cachedStreamers = [];
@@ -38,6 +39,14 @@
     let cachedAnalyticsData = null;
     let analyticsLoadedOnce = false;
     let lastAnalyticsFingerprint = null;
+
+    // Radar State
+    let radarTier = "all";
+    let radarCrossOnly = false;
+    let radarSearch = "";
+    let radarSearchDebounceTimer = null;
+    let radarLoadedOnce = false;
+    let cachedRadarData = null;
 
     // Chart.js Instances
     let chartTimelineInstance = null;
@@ -150,6 +159,21 @@
         btnSubmitAddTgUser: document.getElementById("btnSubmitAddTgUser"),
         whitelistUsersContainer: document.getElementById("maWhitelistUsersContainer"),
 
+        // Radar Elements
+        radarTotalBadge: document.getElementById("maRadarTotalBadge"),
+        radarAuthGate: document.getElementById("maRadarAuthGate"),
+        radarAuthGateMsg: document.getElementById("maRadarAuthGateMsg"),
+        radarContent: document.getElementById("maRadarContent"),
+        radarKpiWhales: document.getElementById("maRadarKpiWhales"),
+        radarKpiSharks: document.getElementById("maRadarKpiSharks"),
+        radarKpiDolphins: document.getElementById("maRadarKpiDolphins"),
+        radarKpiCross: document.getElementById("maRadarKpiCross"),
+        radarSearchInput: document.getElementById("maRadarSearchInput"),
+        radarSearchClear: document.getElementById("maRadarSearchClear"),
+        radarTierPills: document.querySelectorAll(".ma-tier-pill"),
+        btnToggleCrossOnly: document.getElementById("maBtnToggleCrossOnly"),
+        radarDonorsContainer: document.getElementById("maRadarDonorsContainer"),
+
         toastContainer: document.getElementById("maToastContainer"),
     };
 
@@ -251,12 +275,14 @@
                 if (res.ok) {
                     const data = await res.json();
                     isAdmin = !!data.is_admin;
+                    isWhitelisted = !!data.is_whitelisted || isAdmin;
                     authUser = data.user;
                     if (data.token) {
                         sessionToken = data.token;
                         localStorage.setItem("toktracker_admin_token", sessionToken);
                     }
                     updateAdminUI();
+                    updateRadarAuthUI();
                     return;
                 }
             } catch (err) {
@@ -272,14 +298,18 @@
             if (res.ok) {
                 const data = await res.json();
                 isAdmin = !!data.is_admin;
+                isWhitelisted = !!data.is_whitelisted || isAdmin;
                 authUser = { username: data.admin_label || "Admin" };
             } else {
                 isAdmin = false;
+                isWhitelisted = false;
             }
         } catch (e) {
             isAdmin = false;
+            isWhitelisted = false;
         }
         updateAdminUI();
+        updateRadarAuthUI();
     }
 
     function updateAdminUI() {
@@ -307,6 +337,17 @@
                     elements.authGateMsg.textContent = "Dieser Bereich erfordert Administrator-Rechte.";
                 }
             }
+        }
+    }
+
+    function updateRadarAuthUI() {
+        if (!elements.radarAuthGate || !elements.radarContent) return;
+        if (isWhitelisted || isAdmin) {
+            elements.radarAuthGate.style.display = "none";
+            elements.radarContent.style.display = "block";
+        } else {
+            elements.radarAuthGate.style.display = "block";
+            elements.radarContent.style.display = "none";
         }
     }
 
@@ -1443,6 +1484,130 @@
     }
 
     // =====================================================================
+    // 4b. SPENDER-RADAR & WHALES (TAB 4)
+    // =====================================================================
+    async function fetchRadarData() {
+        if (!elements.radarDonorsContainer) return;
+
+        let url = `/api/miniapp/radar?period=${encodeURIComponent(currentPeriod)}`;
+        if (radarTier && radarTier !== "all") {
+            url += `&min_tier=${encodeURIComponent(radarTier)}`;
+        }
+        if (radarCrossOnly) {
+            url += `&cross_only=true`;
+        }
+        if (radarSearch && radarSearch.trim()) {
+            url += `&search=${encodeURIComponent(radarSearch.trim())}`;
+        }
+
+        try {
+            const res = await fetch(url, { headers: getAuthHeaders() });
+            if (!res.ok) {
+                if (res.status === 401 || res.status === 403) {
+                    isWhitelisted = false;
+                    updateRadarAuthUI();
+                    return;
+                }
+                throw new Error(`HTTP ${res.status}`);
+            }
+            const data = await res.json();
+            if (!data.authorized) {
+                isWhitelisted = false;
+                updateRadarAuthUI();
+                return;
+            }
+            isWhitelisted = true;
+            updateRadarAuthUI();
+            cachedRadarData = data;
+            renderRadarData(data);
+        } catch (err) {
+            console.error("Fehler beim Laden des Spender-Radars:", err);
+            elements.radarDonorsContainer.innerHTML = `
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">⚠️</div>
+                    <div>Fehler beim Laden der Radar-Daten</div>
+                </div>
+            `;
+        }
+    }
+
+    function renderRadarData(data) {
+        const kpis = data.kpis || {};
+        const donors = data.donors || [];
+
+        // Update KPIs
+        if (elements.radarKpiWhales) elements.radarKpiWhales.textContent = formatNumber(kpis.whales || 0);
+        if (elements.radarKpiSharks) elements.radarKpiSharks.textContent = formatNumber(kpis.sharks || 0);
+        if (elements.radarKpiDolphins) elements.radarKpiDolphins.textContent = formatNumber(kpis.dolphins || 0);
+        if (elements.radarKpiCross) elements.radarKpiCross.textContent = formatNumber(kpis.cross_streamer_whales || 0);
+        if (elements.radarTotalBadge) elements.radarTotalBadge.textContent = `${donors.length} erfasst`;
+
+        if (!donors.length) {
+            elements.radarDonorsContainer.innerHTML = `
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">🔍</div>
+                    <div>Keine Spender in dieser Auswahl gefunden</div>
+                </div>
+            `;
+            return;
+        }
+
+        let html = "";
+        donors.forEach((d, idx) => {
+            const rank = idx + 1;
+            const rankClass = rank === 1 ? "rank-1" : (rank === 2 ? "rank-2" : (rank === 3 ? "rank-3" : ""));
+            const tier = (d.tier || "dolphin").toLowerCase();
+            const tierEmoji = tier === "whale" ? "🐋" : (tier === "shark" ? "🦈" : "🐬");
+            const tierLabel = tier.toUpperCase();
+
+            const isVip = !!d.is_vip;
+            const isCross = !!d.is_cross_streamer;
+            const streamerCount = parseInt(d.streamer_count || 1, 10);
+
+            const displayUname = escapeHtml(d.username || "anonym");
+            const displayNick = (d.display_name && d.display_name !== d.username) ? escapeHtml(d.display_name) : "";
+
+            const coins = formatNumber(d.total_coins || 0);
+            const eurNet = formatCurrency(d.total_eur_net || 0, "EUR");
+            const giftsCount = formatNumber(d.total_gifts || 0);
+
+            html += `
+                <div class="ma-donor-card tier-${tier}">
+                    <div class="ma-donor-header">
+                        <div class="ma-donor-ident">
+                            <div class="ma-donor-rank ${rankClass}">#${rank}</div>
+                            <div class="ma-donor-names">
+                                <div class="ma-donor-uname">
+                                    <span>${displayUname}</span>
+                                    ${isVip ? `<span class="ma-donor-vip-badge" title="VIP-Spender">⭐</span>` : ""}
+                                </div>
+                                ${displayNick ? `<div class="ma-donor-nick">${displayNick}</div>` : ""}
+                            </div>
+                        </div>
+                        <div class="ma-donor-finance">
+                            <div class="ma-donor-coins">💎 ${coins}</div>
+                            <div class="ma-donor-eur">+${eurNet}</div>
+                        </div>
+                    </div>
+
+                    <div class="ma-donor-meta-row">
+                        <div class="ma-donor-tags">
+                            <span class="ma-tier-tag ${tier}">${tierEmoji} ${tierLabel}</span>
+                            ${isCross ? `<span class="ma-cross-tag">⚡ ${streamerCount} Kanäle</span>` : ""}
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <span>🎁 ${giftsCount} Gifts</span>
+                            ${d.last_seen ? `<span>· ${getRelativeTime(d.last_seen)}</span>` : ""}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        elements.radarDonorsContainer.innerHTML = html;
+    }
+
+    // =====================================================================
     // 5. ADMIN CONTROL PANEL
     // =====================================================================
     async function loadAdminData() {
@@ -1853,10 +2018,12 @@
                     sessionToken = data.token;
                     localStorage.setItem("toktracker_admin_token", sessionToken);
                     isAdmin = true;
+                    isWhitelisted = true;
                     authUser = { username: data.admin_label };
                     showToast("Erfolgreich als Admin angemeldet!");
                     elements.otpCodeInput.value = "";
                     updateAdminUI();
+                    updateRadarAuthUI();
                 } else {
                     showToast("Ungültiger oder abgelaufener Code", "error");
                 }
@@ -1877,8 +2044,10 @@
             sessionToken = "";
             localStorage.removeItem("toktracker_admin_token");
             isAdmin = false;
+            isWhitelisted = false;
             showToast("Erfolgreich abgemeldet");
             updateAdminUI();
+            updateRadarAuthUI();
         });
     }
 
@@ -1898,6 +2067,8 @@
             fetchMiniAppData();
             if (activeTab === "tab-analytics") {
                 fetchAnalyticsData();
+            } else if (activeTab === "tab-radar") {
+                fetchRadarData();
             }
         });
     });
@@ -1930,6 +2101,8 @@
                 } else {
                     fetchAnalyticsData();
                 }
+            } else if (targetTab === "tab-radar") {
+                fetchRadarData();
             } else if (targetTab === "tab-admin") {
                 updateAdminUI();
             }
@@ -2015,6 +2188,56 @@
         });
     }
 
+    // =====================================================================
+    // RADAR FILTER CONTROLS (TIER PILLS, CROSS-ONLY, SEARCH)
+    // =====================================================================
+    if (elements.radarTierPills) {
+        elements.radarTierPills.forEach(pill => {
+            pill.addEventListener("click", () => {
+                const tier = pill.getAttribute("data-tier");
+                if (tier === radarTier) return;
+                triggerHaptic("light");
+                radarTier = tier;
+                elements.radarTierPills.forEach(p => p.classList.remove("active"));
+                pill.classList.add("active");
+                fetchRadarData();
+            });
+        });
+    }
+
+    if (elements.btnToggleCrossOnly) {
+        elements.btnToggleCrossOnly.addEventListener("click", () => {
+            triggerHaptic("light");
+            radarCrossOnly = !radarCrossOnly;
+            elements.btnToggleCrossOnly.classList.toggle("active", radarCrossOnly);
+            fetchRadarData();
+        });
+    }
+
+    if (elements.radarSearchInput) {
+        elements.radarSearchInput.addEventListener("input", () => {
+            const val = elements.radarSearchInput.value;
+            radarSearch = val;
+            if (elements.radarSearchClear) {
+                elements.radarSearchClear.style.display = val ? "block" : "none";
+            }
+            if (radarSearchDebounceTimer) clearTimeout(radarSearchDebounceTimer);
+            radarSearchDebounceTimer = setTimeout(() => {
+                fetchRadarData();
+            }, 250);
+        });
+    }
+
+    if (elements.radarSearchClear) {
+        elements.radarSearchClear.addEventListener("click", () => {
+            triggerHaptic("light");
+            elements.radarSearchInput.value = "";
+            radarSearch = "";
+            elements.radarSearchClear.style.display = "none";
+            fetchRadarData();
+        });
+    }
+
     // Refresh Button Click
     if (elements.btnRefresh) {
         elements.btnRefresh.addEventListener("click", () => {
@@ -2022,6 +2245,7 @@
             lastAnalyticsFingerprint = null;
             fetchMiniAppData();
             if (activeTab === "tab-analytics") fetchAnalyticsData();
+            if (activeTab === "tab-radar") fetchRadarData();
             if (activeTab === "tab-admin" && isAdmin) loadAdminData();
         });
     }

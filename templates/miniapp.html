@@ -265,6 +265,95 @@
     </section>
 
     <!-- ============================================================== -->
+    <!-- TAB 4: SPENDER-RADAR (WHALES & GROSS-SPENDER)                   -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-radar">
+        <div class="section-head">
+            <div class="section-title">🐋 Spender-Radar &amp; Whales</div>
+            <div class="section-badge" id="maRadarTotalBadge">0 erfasst</div>
+        </div>
+
+        <!-- Auth Gate for Non-Whitelisted Users -->
+        <div id="maRadarAuthGate" class="ma-card" style="display: none; text-align: center; padding: 24px 16px;">
+            <div style="font-size: 36px; margin-bottom: 8px;">🔐</div>
+            <h3 style="font-size: 16px; margin-bottom: 6px;">Spender-Radar exklusiv</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;" id="maRadarAuthGateMsg">
+                Dieser Bereich ist exklusiv für freigeschaltete Mitglieder unserer Telegram-Community zugänglich.
+            </p>
+            <p style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5;">
+                Starte den Bot <strong>@TokTrackerBot</strong> im Telegram-Chat mit <code>/start</code>, um Zugang zu erhalten, oder logge dich im Admin-Tab ein.
+            </p>
+        </div>
+
+        <!-- Radar Content (Visible when authenticated / authorized) -->
+        <div id="maRadarContent">
+            <!-- Radar Mini-KPI Row (4 Cards) -->
+            <div class="ma-radar-kpi-row">
+                <div class="ma-radar-kpi-card whale">
+                    <div class="ma-radar-kpi-header">
+                        <span>🐋 Whales</span>
+                        <span class="mono" style="font-size: 9.5px;">&ge; 10k</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiWhales">0</div>
+                    <div class="ma-radar-kpi-sub">~50€+ Netto</div>
+                </div>
+                <div class="ma-radar-kpi-card shark">
+                    <div class="ma-radar-kpi-header">
+                        <span>🦈 Sharks</span>
+                        <span class="mono" style="font-size: 9.5px;">&ge; 2.5k</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiSharks">0</div>
+                    <div class="ma-radar-kpi-sub">~12.50€+ Netto</div>
+                </div>
+                <div class="ma-radar-kpi-card dolphin">
+                    <div class="ma-radar-kpi-header">
+                        <span>🐬 Dolphins</span>
+                        <span class="mono" style="font-size: 9.5px;">&ge; 500</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiDolphins">0</div>
+                    <div class="ma-radar-kpi-sub">~2.50€+ Netto</div>
+                </div>
+                <div class="ma-radar-kpi-card cross">
+                    <div class="ma-radar-kpi-header">
+                        <span>⚡ Cross</span>
+                        <span class="mono" style="font-size: 9.5px;">2+ Kanäle</span>
+                    </div>
+                    <div class="ma-radar-kpi-val" id="maRadarKpiCross">0</div>
+                    <div class="ma-radar-kpi-sub">Multi-Streamer</div>
+                </div>
+            </div>
+
+            <!-- Radar Filter Controls Strip -->
+            <div class="ma-radar-filters">
+                <div class="ma-radar-search-wrap">
+                    <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="maRadarSearchInput" class="ma-radar-search" placeholder="Spender suchen..." />
+                    <button type="button" id="maRadarSearchClear" class="search-clear-btn" style="display: none;">&times;</button>
+                </div>
+
+                <div class="ma-radar-pills-row">
+                    <button type="button" class="ma-tier-pill active" data-tier="all">Alle</button>
+                    <button type="button" class="ma-tier-pill tier-whale" data-tier="whale">🐋 Whales</button>
+                    <button type="button" class="ma-tier-pill tier-shark" data-tier="shark">🦈 Sharks</button>
+                    <button type="button" class="ma-tier-pill tier-dolphin" data-tier="dolphin">🐬 Dolphins</button>
+                    <button type="button" class="ma-tier-pill tier-cross" id="maBtnToggleCrossOnly">⚡ Cross-Only</button>
+                </div>
+            </div>
+
+            <!-- Donors List Container -->
+            <div id="maRadarDonorsContainer" class="ma-radar-list">
+                <div class="ma-empty-state">
+                    <div class="ma-empty-icon">⏳</div>
+                    <div>Lade Spender-Radar...</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
     <!-- TAB 5: ADMIN PANEL                                            -->
     <!-- ============================================================== -->
     <section class="ma-tab-view" id="tab-admin">
@@ -393,6 +482,16 @@
             <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
         </svg>
         <span>Gifts</span>
+    </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-radar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6a6 6 0 1 0 6 6"/>
+            <path d="M12 10a2 2 0 1 0 2 2"/>
+            <line x1="12" y1="12" x2="19" y2="5"/>
+        </svg>
+        <span>Radar</span>
     </button>
 
     <button type="button" class="nav-tab-btn" data-tab="tab-admin">
