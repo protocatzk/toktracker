@@ -11,7 +11,7 @@ import time
 import urllib.parse
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Any, Deque, Dict, List, Optional, Set
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 try:
     from telegram import (
@@ -46,12 +46,20 @@ from config import BASE_DIR, config
 from database import (
     build_streamer_bot_report,
     check_telegram_user_access,
+    get_all_streamers_summary,
+    get_dashboard_overview,
     get_db,
+    get_donor_details,
+    get_donor_radar_data,
+    get_network_loyalty_and_overlap,
+    get_recent_whale_gifts,
     get_settings,
     get_streamer_by_id_or_username,
     get_telegram_access_mode,
     list_telegram_users,
+    save_donor_crm,
     set_telegram_access_mode,
+    toggle_donor_vip,
     upsert_streamer,
     upsert_telegram_user_permission,
 )
@@ -518,10 +526,18 @@ class TelegramBotService:
             builder = Application.builder().token(token)
             self._app = builder.build()
 
-            # Lese-Befehle
+            # Lese- & Analyse-Befehle
             self._app.add_handler(CommandHandler(["start", "help"], self._cmd_help))
             self._app.add_handler(CommandHandler(["app", "miniapp"], self._cmd_miniapp))
             self._app.add_handler(CommandHandler(["id", "whoami"], self._cmd_whoami))
+            self._app.add_handler(CommandHandler(["overview", "dashboard", "finanzen"], self._cmd_overview))
+            self._app.add_handler(CommandHandler(["radar", "whales_radar"], self._cmd_radar))
+            self._app.add_handler(CommandHandler(["whales", "whale_alerts", "alerts"], self._cmd_whales))
+            self._app.add_handler(CommandHandler(["donor", "dossier", "spender"], self._cmd_donor))
+            self._app.add_handler(CommandHandler(["vip", "vips"], self._cmd_vip))
+            self._app.add_handler(CommandHandler(["loyalty", "switchers", "frontenwechsler"], self._cmd_loyalty))
+            self._app.add_handler(CommandHandler(["streamers", "channels", "liste"], self._cmd_streamers))
+            self._app.add_handler(CommandHandler(["gifts", "geschenke", "ticker"], self._cmd_gifts))
             self._app.add_handler(CommandHandler("report", self._cmd_report))
             self._app.add_handler(CommandHandler(["streamer", "stats"], self._cmd_streamer))
             self._app.add_handler(CommandHandler("status", self._cmd_status))
@@ -539,6 +555,13 @@ class TelegramBotService:
             # Callback-Handler für 1-Klick Admin-Login-Freigabe
             self._app.add_handler(
                 CallbackQueryHandler(self._on_login_callback, pattern=r"^admin_login_(approve|reject):")
+            )
+            # Callback-Handler für interaktive Buttons (Overview, Radar, Whales, Donor VIP, Loyalty etc.)
+            self._app.add_handler(
+                CallbackQueryHandler(
+                    self._on_interactive_callback,
+                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|overview_streamer):"
+                )
             )
 
             # Gruppen-Mention-Handler
@@ -608,11 +631,19 @@ class TelegramBotService:
             return
         commands = [
             BotCommand("start", "Hauptmenü & Befehlsübersicht öffnen"),
+            BotCommand("overview", "Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
+            BotCommand("radar", "Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
+            BotCommand("whales", "Live-Stream der neuesten Großspenden"),
+            BotCommand("donor", "Spender-Dossier, Stammkanal & VIP (<username>)"),
+            BotCommand("vip", "VIP-Watchlist anzeigen oder Spender markieren"),
+            BotCommand("loyalty", "Frontenwechsler & Streamer-Überschneidungen"),
+            BotCommand("streamers", "Alle Kanäle mit Live-Status (🟢/⚪) & Zuschauern"),
+            BotCommand("gifts", "Live Gift-Ticker der letzten Geschenke"),
+            BotCommand("streamer", "Einzelabfrage für einen Streamer (<username>)"),
+            BotCommand("report", "24h-Gesamtbericht aller überwachten Streamer"),
+            BotCommand("status", "Laufzeit-Status aller aktiven TikTokLive-Worker"),
             BotCommand("app", "📱 toktracker Mini-App (Live-Matches & Einnahmen)"),
-            BotCommand("report", "24h-Gesamtbericht aller überwachten Streamer abrufen"),
-            BotCommand("streamer", "Einzelabfrage für einen Streamer"),
-            BotCommand("status", "Laufzeit-Status aller aktiven TikTokLive-Worker prüfen"),
-            BotCommand("id", "Eigene Telegram-ID, Gruppen-ID & Berechtigungsstatus anzeigen"),
+            BotCommand("id", "Eigene Telegram-ID, Gruppen-ID & Berechtigung"),
             BotCommand("login", "[Admin] Einmal-Code für das Web-Admin-Panel erzeugen"),
             BotCommand("add", "[Admin] Streamer hinzufügen & Live-Worker starten"),
             BotCommand("track", "[Admin] Live-Überwachung für einen Streamer starten"),
@@ -1158,6 +1189,22 @@ class TelegramBotService:
 
         if cmd in ("report", "bericht"):
             await self._cmd_report(update, context)
+        elif cmd in ("overview", "dashboard", "finanzen"):
+            await self._cmd_overview(update, context)
+        elif cmd in ("radar", "whales_radar"):
+            await self._cmd_radar(update, context)
+        elif cmd in ("whales", "whale_alerts", "alerts"):
+            await self._cmd_whales(update, context)
+        elif cmd in ("donor", "dossier", "spender"):
+            await self._cmd_donor(update, context)
+        elif cmd in ("vip", "vips"):
+            await self._cmd_vip(update, context)
+        elif cmd in ("loyalty", "switchers", "frontenwechsler"):
+            await self._cmd_loyalty(update, context)
+        elif cmd in ("streamers", "channels", "liste"):
+            await self._cmd_streamers(update, context)
+        elif cmd in ("gifts", "geschenke", "ticker"):
+            await self._cmd_gifts(update, context)
         elif cmd in ("streamer", "stats", "info"):
             await self._cmd_streamer(update, context)
         elif cmd in ("status", "worker", "workers"):
@@ -1251,11 +1298,19 @@ class TelegramBotService:
             "(Coins &amp; Diamonds) und berechnet die Netto-Creator-Auszahlung in <b>EUR (€)</b> und <b>USD ($)</b>.\n\n"
             f"{id_info} | <b>Modus:</b> <code>{access['mode'].upper()}</code>\n\n"
             "<b>📋 Abfrage-Befehle (Privatchat &amp; Gruppe):</b>\n"
-            "• <code>/app</code> – 📱 toktracker Mini-App (Live-Matches &amp; Einnahmen) öffnen\n"
-            "• <code>/report [stunden]</code> – Gesamtbericht aller Streamer\n"
-            "• <code>/streamer &lt;username&gt; [stunden]</code> – Einzelabfrage pro Streamer\n"
-            "• <code>/status</code> – Laufzeit-Status aller TikTokLive-Worker\n"
-            "• <code>/id</code> – Eigene User-ID &amp; Gruppen-ID prüfen"
+            "• <code>/overview [heute|24h|7d|30d|all]</code> – 📊 Finanz- &amp; Performance-Dashboard\n"
+            "• <code>/radar [all|whale|shark|dolphin|vip]</code> – 🐋 Spender-Radar &amp; Rangliste\n"
+            "• <code>/whales [min_coins]</code> – ⚡ Live-Feed der neuesten Großspenden\n"
+            "• <code>/donor &lt;username&gt;</code> – 👤 Spender-Dossier, Stammkanal &amp; 1-Klick VIP\n"
+            "• <code>/vip [add|remove &lt;user&gt;]</code> – ⭐ VIP-Watchlist &amp; Spender-Markierungen\n"
+            "• <code>/loyalty [tage]</code> – 🔀 Frontenwechsler &amp; Streamer-Überschneidungen\n"
+            "• <code>/streamers</code> – 👥 Alle Kanäle mit Live-Status (🟢/⚪) &amp; Zuschauern\n"
+            "• <code>/gifts [streamer]</code> – 🎁 Live Gift-Ticker der letzten Geschenke\n"
+            "• <code>/streamer &lt;username&gt; [stunden]</code> – 📊 Detail-Bericht pro Streamer\n"
+            "• <code>/report [stunden]</code> – 📑 24h-Gesamtbericht aller Streamer\n"
+            "• <code>/status</code> – ⚙️ Laufzeit-Status aller TikTokLive-Worker\n"
+            "• <code>/app</code> – 📱 toktracker Mini-App öffnen\n"
+            "• <code>/id</code> – 📌 Eigene User-ID &amp; Gruppen-ID prüfen"
             f"{admin_section}"
         )
 
@@ -1436,6 +1491,731 @@ class TelegramBotService:
             f"<b>Gesamt (All-Time):</b> <code>{card['alltime_eur_net']:,.2f} €</code> (<code>{card['alltime_coins']:,}</code> Coins)"
         )
         await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+    @staticmethod
+    def _format_relative_time(dt_val: Any) -> str:
+        if not dt_val:
+            return "nie"
+        try:
+            now = datetime.utcnow()
+            if isinstance(dt_val, (int, float)):
+                dt = datetime.utcfromtimestamp(dt_val)
+            elif isinstance(dt_val, datetime):
+                dt = dt_val.replace(tzinfo=None) if dt_val.tzinfo else dt_val
+            elif isinstance(dt_val, str):
+                clean = dt_val.replace("T", " ").replace("Z", "").split("+")[0].split(".")[0]
+                dt = datetime.strptime(clean, "%Y-%m-%d %H:%M:%S")
+            else:
+                return str(dt_val)
+
+            diff = now - dt
+            secs = max(0, int(diff.total_seconds()))
+            if secs < 60:
+                return f"vor {secs}s"
+            mins = secs // 60
+            if mins < 60:
+                return f"vor {mins}m"
+            hours = mins // 60
+            if hours < 24:
+                return f"vor {hours}h"
+            days = hours // 24
+            return f"vor {days}d"
+        except Exception:
+            return str(dt_val)
+
+    # -----------------------------------------------------------------
+    # INTERAKTIVE DASHBOARD & FINANZ-ÜBERSICHT (/overview)
+    # -----------------------------------------------------------------
+    def _format_overview_view(self, period: str = "today") -> Tuple[str, InlineKeyboardMarkup]:
+        norm_period = period if period in ("today", "24h", "7d", "30d", "all") else "today"
+        data = get_dashboard_overview(period=norm_period, force_refresh=True)
+        totals = data.get("totals", {})
+        streamers = data.get("streamers", [])
+
+        period_labels = {
+            "today": "Heute (seit 00:00 Uhr)",
+            "24h": "Letzte 24 Stunden",
+            "7d": "Letzte 7 Tage",
+            "30d": "Letzte 30 Tage",
+            "all": "Gesamt (All-Time)",
+        }
+        p_label = period_labels.get(norm_period, norm_period)
+
+        eur_net = totals.get("eur_net", 0.0)
+        usd_net = totals.get("usd_net", 0.0)
+        eur_gross = totals.get("eur_gross", 0.0)
+        usd_gross = totals.get("usd_gross", 0.0)
+        total_coins = totals.get("total_coins", 0)
+        live_count = totals.get("live_count", 0)
+        streamer_count = totals.get("streamer_count", 0)
+        total_gifts = totals.get("total_gifts_sent", 0)
+
+        lines = [
+            "<b>📊 toktracker · Finanzübersicht</b>",
+            f"Zeitraum: <b>{html.escape(p_label)}</b>",
+            "────────────────────────",
+            f"💰 <b>Creator Netto-Auszahlung:</b> <b>{eur_net:,.2f} €</b> (<code>${usd_net:,.2f}</code>)",
+            f"🛒 <b>Viewer Brutto-Kaufwert:</b> <code>{eur_gross:,.2f} €</code> (<code>${usd_gross:,.2f}</code>)",
+            f"💎 <b>Coins / Diamonds:</b> <b>{total_coins:,}</b> ({total_gifts:,} Geschenke)",
+            f"📡 <b>Streamer:</b> <b>{live_count} live</b> von {streamer_count} überwachten",
+            "────────────────────────",
+            f"<b>🏆 Top Streamer ({p_label}):</b>",
+        ]
+
+        sorted_streamers = sorted(streamers, key=lambda s: int(s.get("total_coins") or 0), reverse=True)
+        active_sorted = [s for s in sorted_streamers if int(s.get("total_coins") or 0) > 0]
+        if not active_sorted:
+            lines.append("<i>Keine Einnahmen in diesem Zeitraum verzeichnet.</i>")
+        else:
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            for idx, s in enumerate(active_sorted[:5]):
+                medal = medals[idx] if idx < len(medals) else f"{idx+1}."
+                live_badge = " 🟢" if s.get("is_live") else ""
+                s_coins = int(s.get("total_coins") or 0)
+                s_eur = float(s.get("eur_net") or 0.0)
+                lines.append(
+                    f"{medal} <b>{html.escape(s.get('display_name') or s['username'])}</b>{live_badge}: "
+                    f"<b>{s_eur:,.2f} €</b> (<code>{s_coins:,} Coins</code>)"
+                )
+
+        lines.append("\n💡 <i>Wechsle den Zeitraum mit den Buttons unten:</i>")
+        text = "\n".join(lines)
+
+        buttons = [
+            [
+                InlineKeyboardButton(f"{'✓ ' if norm_period == 'today' else ''}Heute", callback_data="overview_period:today"),
+                InlineKeyboardButton(f"{'✓ ' if norm_period == '24h' else ''}24h", callback_data="overview_period:24h"),
+                InlineKeyboardButton(f"{'✓ ' if norm_period == '7d' else ''}7 Tage", callback_data="overview_period:7d"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✓ ' if norm_period == '30d' else ''}30 Tage", callback_data="overview_period:30d"),
+                InlineKeyboardButton(f"{'✓ ' if norm_period == 'all' else ''}Gesamt", callback_data="overview_period:all"),
+                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"overview_period:{norm_period}"),
+            ],
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_overview(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        period = "today"
+        if context.args:
+            arg = context.args[0].lower().strip()
+            if arg in ("today", "24h", "7d", "30d", "all"):
+                period = arg
+            elif arg in ("heute", "day"):
+                period = "today"
+            elif arg in ("woche", "week"):
+                period = "7d"
+            elif arg in ("monat", "month"):
+                period = "30d"
+            elif arg in ("gesamt", "total"):
+                period = "all"
+
+        text, markup = await asyncio.to_thread(self._format_overview_view, period)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # SPENDER-RADAR & CRM (/radar)
+    # -----------------------------------------------------------------
+    def _format_radar_view(self, tier: str = "all", period: str = "all") -> Tuple[str, InlineKeyboardMarkup]:
+        norm_tier = tier if tier in ("all", "whale", "shark", "dolphin") else "all"
+        min_tier_param = None if norm_tier == "all" else norm_tier
+        data = get_donor_radar_data(period=period, min_tier=min_tier_param, limit=10, offset=0)
+        kpis = data.get("kpis", {})
+        donors = data.get("donors", [])
+
+        tier_labels = {
+            "all": "Alle Spender",
+            "whale": "🐋 Whales (≥ 10k Coins)",
+            "shark": "🦈 Sharks (≥ 2.5k Coins)",
+            "dolphin": "🐬 Dolphins (≥ 500 Coins)",
+        }
+        tier_title = tier_labels.get(norm_tier, "Alle Spender")
+        tier_icons = {"whale": "🐋", "shark": "🦈", "dolphin": "🐬", "fish": "🐟"}
+
+        lines = [
+            "<b>🎯 toktracker · Spender-Radar</b>",
+            f"Filter: <b>{html.escape(tier_title)}</b>",
+            "────────────────────────",
+            "📊 <b>Netzwerk-Metriken:</b>",
+            f"• 🐋 Whales: <b>{kpis.get('whales', 0)}</b> | 🦈 Sharks: <b>{kpis.get('sharks', 0)}</b> | 🐬 Dolphins: <b>{kpis.get('dolphins', 0)}</b>",
+            f"• 🔀 Multi-Streamer Spender: <b>{kpis.get('cross_streamer_whales', 0)}</b>",
+            f"• ⭐ VIP Spender: <b>{kpis.get('vip_donors', 0)}</b>",
+            f"• 💰 Wal-Volumen: <b>{kpis.get('whale_eur_net', 0.0):,.2f} €</b> (<code>{kpis.get('whale_coins', 0):,} Coins</code>)",
+            "────────────────────────",
+            "<b>Top Spender:</b>",
+        ]
+
+        if not donors:
+            lines.append("<i>Keine Spender in dieser Kategorie erfasst.</i>")
+        else:
+            for idx, d in enumerate(donors[:8], 1):
+                icon = tier_icons.get(d.get("tier"), "🐟")
+                vip_star = " ⭐VIP" if d.get("is_vip") else ""
+                d_coins = int(d.get("total_coins") or 0)
+                d_eur = float(d.get("total_net_eur") or 0.0)
+                s_count = int(d.get("streamer_count") or 1)
+                lines.append(
+                    f"{idx}. {icon} <b>@{html.escape(d['username'])}</b>{vip_star}\n"
+                    f"   └ <b>{d_coins:,} Coins</b> (<code>{d_eur:,.2f} €</code> Netto) · {s_count} Streamer"
+                )
+
+        lines.append("\n💡 <i>Dossier anzeigen:</i> <code>/donor &lt;username&gt;</code>")
+        text = "\n".join(lines)
+
+        buttons = [
+            [
+                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'all' else ''}Alle", callback_data="radar_tier:all"),
+                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'whale' else ''}🐋 Whales", callback_data="radar_tier:whale"),
+                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'shark' else ''}🦈 Sharks", callback_data="radar_tier:shark"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'dolphin' else ''}🐬 Dolphins", callback_data="radar_tier:dolphin"),
+                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"radar_tier:{norm_tier}"),
+            ],
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_radar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        tier = "all"
+        if context.args:
+            arg = context.args[0].lower().strip()
+            if arg in ("whale", "whales", "wal", "wale"):
+                tier = "whale"
+            elif arg in ("shark", "sharks", "hai", "haie"):
+                tier = "shark"
+            elif arg in ("dolphin", "dolphins", "delfin", "delfine"):
+                tier = "dolphin"
+
+        text, markup = await asyncio.to_thread(self._format_radar_view, tier)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # WHALE GIFT TICKER (/whales)
+    # -----------------------------------------------------------------
+    def _format_whales_view(self, min_coins: int = 1000) -> Tuple[str, InlineKeyboardMarkup]:
+        val_min = min_coins if min_coins in (1000, 5000, 10000, 30000) else min_coins
+        alerts = get_recent_whale_gifts(min_coins=val_min, limit=10)
+        tier_icons = {"whale": "🐋", "shark": "🦈", "dolphin": "🐬", "fish": "🐟"}
+
+        lines = [
+            f"<b>🚨 toktracker · Whale Gift Ticker (≥ {val_min:,} Coins)</b>",
+            "────────────────────────",
+        ]
+
+        if not alerts:
+            lines.append(f"<i>Keine Geschenke ab {val_min:,} Coins in der Historie verzeichnet.</i>")
+        else:
+            for a in alerts[:8]:
+                rel = self._format_relative_time(a.get("created_at"))
+                vip_star = " ⭐VIP" if a.get("is_vip") else ""
+                icon = tier_icons.get(a.get("tier"), "🐋")
+                a_coins = int(a.get("total_coins") or 0)
+                a_eur = float(a.get("eur_net") or 0.0)
+                repeat = f" x{a['repeat_count']}" if int(a.get("repeat_count") or 1) > 1 else ""
+                lines.append(
+                    f"{icon} <b>@{html.escape(a['sender_username'])}</b>{vip_star} ➔ <b>@{html.escape(a['streamer_username'])}</b>\n"
+                    f"   └ <b>{html.escape(a['gift_name'])}</b>{repeat} · <b>{a_coins:,} Coins</b> (<code>{a_eur:,.2f} €</code>) · <i>{rel}</i>"
+                )
+
+        lines.append("\n💡 <i>Spender analysieren:</i> <code>/donor &lt;username&gt;</code>")
+        text = "\n".join(lines)
+
+        buttons = [
+            [
+                InlineKeyboardButton(f"{'✓ ' if val_min == 1000 else ''}≥ 1k", callback_data="whales_min:1000"),
+                InlineKeyboardButton(f"{'✓ ' if val_min == 5000 else ''}≥ 5k", callback_data="whales_min:5000"),
+                InlineKeyboardButton(f"{'✓ ' if val_min == 10000 else ''}≥ 10k", callback_data="whales_min:10000"),
+                InlineKeyboardButton(f"{'✓ ' if val_min == 30000 else ''}≥ 30k", callback_data="whales_min:30000"),
+            ],
+            [
+                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"whales_min:{val_min}"),
+            ],
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_whales(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        min_coins = 1000
+        if context.args:
+            try:
+                val = int(context.args[0].strip().replace(".", "").replace(",", ""))
+                if val > 0:
+                    min_coins = val
+            except Exception:
+                pass
+
+        text, markup = await asyncio.to_thread(self._format_whales_view, min_coins)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # SPENDER-DOSSIER & CRM (/donor)
+    # -----------------------------------------------------------------
+    def _format_donor_view(self, username: str) -> Tuple[str, InlineKeyboardMarkup]:
+        clean_uname = username.strip().lstrip("@").lower()
+        data = get_donor_details(clean_uname)
+        if not data or not data.get("profile"):
+            text = (
+                f"❌ <b>Spender nicht gefunden</b>\n\n"
+                f"Für <code>@{html.escape(clean_uname)}</code> liegen noch keine Geschenke-Daten vor.\n"
+                "Sobald dieser Nutzer in einem überwachten Livestream schenkt, wird sein Dossier automatisch angelegt."
+            )
+            buttons = [
+                [InlineKeyboardButton("🎯 Zum Spender-Radar", callback_data="radar_tier:all")]
+            ]
+            return text, InlineKeyboardMarkup(buttons)
+
+        p = data["profile"]
+        tier = p.get("tier", "fish")
+        tier_icons = {"whale": "🐋", "shark": "🦈", "dolphin": "🐬", "fish": "🐟"}
+        tier_icon = tier_icons.get(tier, "🐟")
+        is_vip = bool(p.get("is_vip"))
+        vip_str = "⭐ VIP Spender" if is_vip else "Standard-Spender"
+
+        rel_first = self._format_relative_time(p.get("first_seen"))
+        rel_last = self._format_relative_time(p.get("last_seen"))
+
+        loyalty = data.get("loyalty") or {}
+        loyalty_badge = loyalty.get("badge", "Keine Einstufung")
+        loyalty_label = loyalty.get("label", "")
+
+        lines = [
+            "<b>👤 toktracker · Spender-Dossier</b>",
+            f"Name: <b>{html.escape(p.get('display_name') or p['username'])}</b> (@{html.escape(p['username'])})",
+            f"Status: {tier_icon} <b>{tier.upper()}</b> | <b>{vip_str}</b>",
+            "────────────────────────",
+            "💰 <b>Finanz- & Spenden-Volumen:</b>",
+            f"• Coins: <b>{int(p.get('total_coins') or 0):,}</b>",
+            f"• Creator-Netto: <b>{float(p.get('total_eur_net') or 0.0):,.2f} €</b> (<code>${float(p.get('total_usd_net') or 0.0):,.2f}</code>)",
+            f"• Geschenke gesamt: <code>{int(p.get('total_gifts') or 0):,}</code>",
+            f"• Aktivität: Zuerst {rel_first} · Zuletzt {rel_last}",
+            "────────────────────────",
+            f"🔀 <b>Netzwerk-Loyalität:</b> {loyalty_badge}",
+        ]
+        if loyalty_label:
+            lines.append(f"<i>{html.escape(loyalty_label)}</i>")
+
+        streamers = data.get("streamers", [])
+        if streamers:
+            lines.append(f"\n<b>Unterstützte Streamer ({len(streamers)} Kanäle):</b>")
+            total_coins = max(1, int(p.get("total_coins") or 0))
+            for s in streamers[:4]:
+                c_given = int(s.get("coins_given") or 0)
+                pct = round((c_given / total_coins) * 100, 1)
+                lines.append(
+                    f"• <b>@{html.escape(s['streamer_username'])}</b>: <b>{c_given:,} Coins</b> ({pct}%) · <code>{float(s.get('eur_net') or 0.0):,.2f} €</code>"
+                )
+
+        top_gifts = data.get("top_gifts", [])
+        if top_gifts:
+            lines.append("\n<b>Lieblings-Geschenke:</b>")
+            g_strs = [
+                f"{html.escape(g['gift_name'])} ({int(g.get('total_coins') or 0):,})"
+                for g in top_gifts[:3]
+            ]
+            lines.append("• " + ", ".join(g_strs))
+
+        if p.get("notes"):
+            lines.append(f"\n📝 <b>CRM-Notiz:</b> <i>{html.escape(p['notes'])}</i>")
+
+        text = "\n".join(lines)
+
+        vip_btn_label = "⭐ VIP-Status entfernen" if is_vip else "⭐ Als VIP markieren"
+        buttons = [
+            [
+                InlineKeyboardButton(vip_btn_label, callback_data=f"donor_vip_toggle:{p['username']}"),
+                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"donor_refresh:{p['username']}"),
+            ],
+            [
+                InlineKeyboardButton("🎯 Zum Spender-Radar", callback_data="radar_tier:all"),
+            ],
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_donor(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        if not context.args:
+            await update.effective_message.reply_text(
+                "Verwendung: <code>/donor &lt;username&gt;</code>\n"
+                "Beispiel: <code>/donor montanablack</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        uname = context.args[0].strip().lstrip("@").lower()
+        text, markup = await asyncio.to_thread(self._format_donor_view, uname)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # VIP MANAGEMENT (/vip)
+    # -----------------------------------------------------------------
+    async def _cmd_vip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        args = context.args or []
+        if not args:
+            radar_data = await asyncio.to_thread(
+                get_donor_radar_data,
+                vip_only=True,
+                limit=25,
+            )
+            vips = radar_data.get("donors", [])
+            if not vips:
+                msg = (
+                    "<b>⭐ toktracker · VIP Spender-Liste</b>\n"
+                    "────────────────────────\n"
+                    "Es sind aktuell keine Spender als VIP markiert.\n\n"
+                    "<i>Spender als VIP hinzufügen:</i> <code>/vip add &lt;username&gt;</code>"
+                )
+            else:
+                lines = [
+                    "<b>⭐ toktracker · VIP Spender-Liste</b>",
+                    "────────────────────────",
+                    f"Gesamtanzahl: <b>{len(vips)} VIPs</b>\n",
+                ]
+                for idx, v in enumerate(vips, 1):
+                    lines.append(
+                        f"{idx}. ⭐ <b>@{html.escape(v['username'])}</b> · <b>{v['total_coins']:,} Coins</b> "
+                        f"(<code>{v['total_net_eur']:,.2f} €</code> Netto, {v['streamer_count']} Streamer)"
+                    )
+                lines.append("\n💡 <i>Dossier anzeigen:</i> <code>/donor &lt;username&gt;</code>")
+                msg = "\n".join(lines)
+            await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+            return
+
+        if not await self._authorize(update, require_admin=True):
+            return
+
+        first = args[0].lower().strip()
+        if first in ("add", "set") and len(args) > 1:
+            target_uname = args[1].strip().lstrip("@").lower()
+            await asyncio.to_thread(save_donor_crm, target_uname, is_vip=True)
+            await update.effective_message.reply_text(
+                f"✅ Spender <b>@{html.escape(target_uname)}</b> wurde als <b>⭐ VIP</b> markiert.",
+                parse_mode=ParseMode.HTML,
+            )
+        elif first in ("remove", "delete", "del") and len(args) > 1:
+            target_uname = args[1].strip().lstrip("@").lower()
+            await asyncio.to_thread(save_donor_crm, target_uname, is_vip=False)
+            await update.effective_message.reply_text(
+                f"ℹ️ VIP-Status für <b>@{html.escape(target_uname)}</b> wurde <b>entfernt</b>.",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            target_uname = first.lstrip("@").lower()
+            new_status = await asyncio.to_thread(toggle_donor_vip, target_uname)
+            st_str = "⭐ VIP" if new_status else "Standard"
+            await update.effective_message.reply_text(
+                f"Status für <b>@{html.escape(target_uname)}</b> geändert auf: <b>{st_str}</b>.",
+                parse_mode=ParseMode.HTML,
+            )
+
+    # -----------------------------------------------------------------
+    # LOYALITÄT & FRONTENWECHSLER (/loyalty)
+    # -----------------------------------------------------------------
+    def _format_loyalty_view(self, days: int = 14) -> Tuple[str, InlineKeyboardMarkup]:
+        norm_days = days if days in (7, 14, 30) else 14
+        data = get_network_loyalty_and_overlap(days_recent=norm_days)
+        shifters = data.get("frontenwechsler", [])
+        overlaps = data.get("overlap_matrix", [])
+
+        lines = [
+            f"<b>🔀 toktracker · Loyalität & Frontenwechsler ({norm_days} Tage)</b>",
+            "────────────────────────",
+            f"Erfasste Wechsel: <b>{len(shifters)}</b> | Streamer-Overlaps: <b>{len(overlaps)}</b>\n",
+            "<b>⚡ Top Frontenwechsler (Streamer-Wechsel):</b>",
+        ]
+
+        if not shifters:
+            lines.append("<i>Keine markanten Wechsel im gewählten Zeitraum festgestellt.</i>")
+        else:
+            for s in shifters[:5]:
+                fw = s.get("frontenwechsel", {})
+                old_s = fw.get("old_streamer", "?")
+                new_s = fw.get("new_streamer", "?")
+                vol_coins = int(s.get("shift_volume_coins") or 0)
+                vol_eur = float(s.get("shift_volume_eur") or 0.0)
+                vip = " ⭐VIP" if s.get("is_vip") else ""
+                lines.append(
+                    f"• <b>@{html.escape(s['username'])}</b>{vip}: <code>{s.get('migration_type', 'Wechsel')}</code>\n"
+                    f"   @{html.escape(old_s)} ➔ <b>@{html.escape(new_s)}</b> (<b>{vol_coins:,} Coins</b> · <code>{vol_eur:,.2f} €</code>)"
+                )
+
+        lines.append("\n<b>🤝 Top Streamer-Overlaps (Geteilte Großspender):</b>")
+        if not overlaps:
+            lines.append("<i>Keine geteilten Spender verzeichnet.</i>")
+        else:
+            for o in overlaps[:4]:
+                s1 = o.get("s1_username", "?")
+                s2 = o.get("s2_username", "?")
+                count = int(o.get("shared_donors_count") or 0)
+                vol = float(o.get("shared_volume_eur") or 0.0)
+                lines.append(
+                    f"• <b>@{html.escape(s1)}</b> & <b>@{html.escape(s2)}</b>: <b>{count} gemeinsame Spender</b> (<code>{vol:,.2f} €</code>)"
+                )
+
+        text = "\n".join(lines)
+
+        buttons = [
+            [
+                InlineKeyboardButton(f"{'✓ ' if norm_days == 7 else ''}7 Tage", callback_data="loyalty_days:7"),
+                InlineKeyboardButton(f"{'✓ ' if norm_days == 14 else ''}14 Tage", callback_data="loyalty_days:14"),
+                InlineKeyboardButton(f"{'✓ ' if norm_days == 30 else ''}30 Tage", callback_data="loyalty_days:30"),
+            ],
+            [
+                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"loyalty_days:{norm_days}"),
+            ],
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_loyalty(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        days = 14
+        if context.args:
+            try:
+                val = int(context.args[0].strip())
+                if val in (7, 14, 30, 60, 90):
+                    days = val
+            except Exception:
+                pass
+
+        text, markup = await asyncio.to_thread(self._format_loyalty_view, days)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # STREAMER-MONITOR & LISTE (/streamers)
+    # -----------------------------------------------------------------
+    def _format_streamers_view(self) -> Tuple[str, InlineKeyboardMarkup]:
+        streamers = get_all_streamers_summary()
+        lines = [
+            f"<b>📺 toktracker · Streamer-Monitor ({len(streamers)} Kanäle)</b>",
+            "────────────────────────",
+        ]
+
+        if not streamers:
+            lines.append("<i>Keine Streamer hinterlegt. Füge einen mit <code>/add &lt;username&gt;</code> hinzu.</i>")
+        else:
+            for s in streamers[:12]:
+                is_live = bool(s.get("is_live"))
+                status_icon = "🟢 LIVE" if is_live else "⚪ OFFLINE"
+                viewers = f" ({int(s.get('current_viewers') or 0):,} Viewers)" if is_live else ""
+                coins = int(s.get("today_coins") or 0)
+                eur = float(s.get("today_eur_net") or 0.0)
+                lines.append(
+                    f"• {status_icon}{viewers} <b>{html.escape(s.get('display_name') or s['username'])}</b> (@{html.escape(s['username'])})\n"
+                    f"   └ Heute: <b>{coins:,} Coins</b> · <code>{eur:,.2f} €</code> Netto"
+                )
+
+        lines.append("\n💡 <i>Einzelabfrage:</i> <code>/streamer &lt;username&gt;</code>")
+        text = "\n".join(lines)
+
+        buttons = [
+            [InlineKeyboardButton("🔄 Aktualisieren", callback_data="streamers_list:all")]
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_streamers(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        text, markup = await asyncio.to_thread(self._format_streamers_view)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # GESCHENKE-FEED (/gifts)
+    # -----------------------------------------------------------------
+    def _format_gifts_view(self, streamer_ident: Optional[str] = None) -> Tuple[str, InlineKeyboardMarkup]:
+        streamer_row = None
+        if streamer_ident:
+            streamer_row = get_streamer_by_id_or_username(streamer_ident)
+
+        if streamer_row:
+            s_id = streamer_row["id"]
+            gifts = get_recent_whale_gifts(min_coins=1, streamer_id=s_id, limit=10)
+            header = f"<b>🎁 toktracker · Geschenke-Feed: {html.escape(streamer_row.get('display_name') or streamer_row['username'])}</b> (@{html.escape(streamer_row['username'])})"
+        else:
+            gifts = get_recent_whale_gifts(min_coins=100, limit=10)
+            header = "<b>🎁 toktracker · Geschenke-Feed (Netzwerkweit ≥ 100 Coins)</b>"
+
+        lines = [
+            header,
+            "────────────────────────",
+        ]
+
+        if not gifts:
+            lines.append("<i>Noch keine Geschenke im Erfassungszeitraum eingetroffen.</i>")
+        else:
+            for g in gifts[:8]:
+                rel = self._format_relative_time(g.get("created_at"))
+                vip = " ⭐VIP" if g.get("is_vip") else ""
+                coins = int(g.get("total_coins") or 0)
+                eur = float(g.get("eur_net") or 0.0)
+                repeat = f" x{g['repeat_count']}" if int(g.get("repeat_count") or 1) > 1 else ""
+                lines.append(
+                    f"• <b>@{html.escape(g['sender_username'])}</b>{vip} ➔ <b>@{html.escape(g['streamer_username'])}</b>\n"
+                    f"   └ <b>{html.escape(g['gift_name'])}</b>{repeat} · <b>{coins:,} Coins</b> (<code>{eur:,.2f} €</code>) · <i>{rel}</i>"
+                )
+
+        lines.append("\n💡 <i>Spender analysieren:</i> <code>/donor &lt;username&gt;</code>")
+        text = "\n".join(lines)
+
+        val = streamer_row["username"] if streamer_row else "all"
+        buttons = [
+            [InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"gifts_refresh:{val}")]
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
+    async def _cmd_gifts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_admin=False):
+            return
+
+        streamer_ident = context.args[0].strip().lstrip("@") if context.args else None
+        text, markup = await asyncio.to_thread(self._format_gifts_view, streamer_ident)
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
+    # INTERAKTIVE CALLBACK DISPATCHER
+    # -----------------------------------------------------------------
+    async def _on_interactive_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query or not query.data or not update.effective_user:
+            return
+
+        tg_user = update.effective_user
+        access = await asyncio.to_thread(
+            check_telegram_user_access,
+            int(tg_user.id),
+            tg_user.username or "",
+            tg_user.first_name or "",
+            int(update.effective_chat.id) if update.effective_chat else int(tg_user.id),
+            update.effective_chat.title if update.effective_chat else "",
+        )
+        if not access.get("allowed"):
+            await query.answer("⛔ Kein Zugriff (Whitelist aktiv).", show_alert=True)
+            return
+
+        data = query.data
+        parts = data.split(":", 1)
+        action = parts[0]
+        val = parts[1] if len(parts) > 1 else ""
+
+        text = None
+        markup = None
+
+        if action == "overview_period":
+            await query.answer()
+            period = val or "today"
+            text, markup = await asyncio.to_thread(self._format_overview_view, period)
+        elif action == "radar_tier":
+            await query.answer()
+            tier = val or "all"
+            text, markup = await asyncio.to_thread(self._format_radar_view, tier)
+        elif action == "whales_min":
+            await query.answer()
+            try:
+                min_coins = int(val)
+            except Exception:
+                min_coins = 1000
+            text, markup = await asyncio.to_thread(self._format_whales_view, min_coins)
+        elif action == "donor_vip_toggle":
+            uname = val.strip().lower()
+            new_vip = await asyncio.to_thread(toggle_donor_vip, uname)
+            alert_msg = f"⭐ @{uname} ist jetzt VIP!" if new_vip else f"ℹ️ VIP-Status für @{uname} entfernt."
+            await query.answer(alert_msg)
+            text, markup = await asyncio.to_thread(self._format_donor_view, uname)
+        elif action == "donor_refresh":
+            await query.answer("Aktualisiert")
+            uname = val.strip().lower()
+            text, markup = await asyncio.to_thread(self._format_donor_view, uname)
+        elif action == "loyalty_days":
+            await query.answer()
+            try:
+                days = int(val)
+            except Exception:
+                days = 14
+            text, markup = await asyncio.to_thread(self._format_loyalty_view, days)
+        elif action == "streamers_list":
+            await query.answer("Aktualisiert")
+            text, markup = await asyncio.to_thread(self._format_streamers_view)
+        elif action == "gifts_refresh":
+            await query.answer("Aktualisiert")
+            ident = None if val == "all" else val
+            text, markup = await asyncio.to_thread(self._format_gifts_view, ident)
+
+        if text and markup:
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=markup,
+                    disable_web_page_preview=True,
+                )
+            except Exception as exc:
+                if "not modified" not in str(exc).lower():
+                    logger.warning(f"Fehler beim Aktualisieren der Telegram-Nachricht: {exc}")
 
     async def _cmd_add_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:

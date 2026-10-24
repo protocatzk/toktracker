@@ -4615,9 +4615,11 @@ def get_recent_whale_gifts(
     min_coins: int = 1000,
     after_id: Optional[int] = None,
     limit: int = 20,
+    streamer_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Liefert aktuelle Großspenden (Whale- & Shark-Events) für den Live-Ticker und Audio-Alerts.
+    Optional gefiltert nach Mindest-Coins und/oder streamer_id.
     """
     query = """
     SELECT 
@@ -4633,6 +4635,9 @@ def get_recent_whale_gifts(
     WHERE g.total_coins >= ?
     """
     params: List[Any] = [min_coins]
+    if streamer_id is not None:
+        query += " AND g.streamer_id = ?"
+        params.append(streamer_id)
     if after_id is not None:
         query += " AND g.id > ? ORDER BY g.id ASC LIMIT ?"
         params.extend([after_id, max(1, min(limit, 100))])
@@ -4656,6 +4661,29 @@ def get_recent_whale_gifts(
             d["tags"] = [t.strip() for t in raw_tags.split(",") if t.strip()]
             alerts.append(d)
         return alerts
+
+
+def get_all_streamers_summary() -> List[Dict[str, Any]]:
+    """
+    Liefert alle registrierten Streamer sortiert nach Live-Status und heutigem Umsatz.
+    """
+    cutoff = _get_period_cutoff("today")
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT 
+                s.id, s.username, s.display_name, s.avatar_url, s.is_live,
+                s.is_tracking, s.current_viewers, s.last_seen_at,
+                COALESCE(SUM(g.total_coins), 0) as today_coins,
+                COALESCE(SUM(g.eur_net), 0.0) as today_eur_net
+            FROM streamers s
+            LEFT JOIN gift_events g ON g.streamer_id = s.id AND (? IS NULL OR g.created_at >= ?)
+            GROUP BY s.id
+            ORDER BY s.is_live DESC, today_coins DESC, s.username ASC
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_network_loyalty_and_overlap(
