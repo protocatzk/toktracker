@@ -510,6 +510,25 @@ def _init_mysql_schema() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_calls (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                endpoint VARCHAR(191) NOT NULL,
+                method VARCHAR(16) NOT NULL DEFAULT 'GET',
+                status_code INT NOT NULL DEFAULT 200,
+                response_time_ms FLOAT NOT NULL DEFAULT 0.0,
+                client_ip VARCHAR(64) DEFAULT '',
+                ip_hash VARCHAR(64) DEFAULT '',
+                user_agent VARCHAR(500) DEFAULT '',
+                auth_type VARCHAR(32) DEFAULT 'none',
+                api_key_name VARCHAR(64) DEFAULT '',
+                is_external TINYINT NOT NULL DEFAULT 1,
+                query_params VARCHAR(500) DEFAULT '',
+                created_at VARCHAR(64) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
 
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
@@ -532,6 +551,10 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_session", "session_id")
         _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_username", "username")
         _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_vip", "is_vip")
+        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_created", "created_at")
+        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_endpoint", "endpoint")
+        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_external", "is_external, created_at")
+        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_status", "status_code")
 
         _ensure_column_mysql(conn, "tiktok_battles", "battle_mode", "VARCHAR(32) DEFAULT '1v1'")
         _ensure_column_mysql(conn, "tiktok_battles", "teammate_user_id", "VARCHAR(128) DEFAULT ''")
@@ -713,6 +736,22 @@ def _init_sqlite_schema() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS api_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                endpoint TEXT NOT NULL,
+                method TEXT NOT NULL DEFAULT 'GET',
+                status_code INTEGER NOT NULL DEFAULT 200,
+                response_time_ms REAL NOT NULL DEFAULT 0.0,
+                client_ip TEXT DEFAULT '',
+                ip_hash TEXT DEFAULT '',
+                user_agent TEXT DEFAULT '',
+                auth_type TEXT DEFAULT 'none',
+                api_key_name TEXT DEFAULT '',
+                is_external INTEGER NOT NULL DEFAULT 1,
+                query_params TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
             """
         )
 
@@ -792,6 +831,14 @@ def _init_sqlite_schema() -> None:
                 ON donor_crm(username);
             CREATE INDEX IF NOT EXISTS idx_donor_crm_vip
                 ON donor_crm(is_vip);
+            CREATE INDEX IF NOT EXISTS idx_api_calls_created
+                ON api_calls(created_at);
+            CREATE INDEX IF NOT EXISTS idx_api_calls_endpoint
+                ON api_calls(endpoint);
+            CREATE INDEX IF NOT EXISTS idx_api_calls_external
+                ON api_calls(is_external, created_at);
+            CREATE INDEX IF NOT EXISTS idx_api_calls_status
+                ON api_calls(status_code);
             """
         )
 
@@ -3749,6 +3796,273 @@ def record_bot_session(
         )
 
 
+def record_api_call(
+    endpoint: str,
+    method: str = "GET",
+    status_code: int = 200,
+    response_time_ms: float = 0.0,
+    client_ip: str = "",
+    ip_hash: str = "",
+    user_agent: str = "",
+    auth_type: str = "none",
+    api_key_name: str = "",
+    is_external: int = 1,
+    query_params: str = "",
+) -> None:
+    """
+    Protokolliert einen API-Aufruf (insbesondere externe API-Aufrufe) für Audits und Performance-Analysen.
+    Arbeitet extrem schnell (< 1ms) und blockiert keine Requests.
+    """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO api_calls (
+                endpoint, method, status_code, response_time_ms, client_ip, ip_hash,
+                user_agent, auth_type, api_key_name, is_external, query_params, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                (endpoint or "")[:191],
+                (method or "GET").upper()[:16],
+                int(status_code),
+                round(float(response_time_ms), 2),
+                (client_ip or "")[:64],
+                (ip_hash or "")[:64],
+                (user_agent or "")[:500],
+                (auth_type or "none")[:32],
+                (api_key_name or "")[:64],
+                int(is_external),
+                (query_params or "")[:500],
+                now_str,
+            ),
+        )
+
+
+def get_api_analytics_overview(
+    period: str = "today",
+    only_external: bool = True,
+    conn: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Aggregiert API-Aufrufe, externe Consumer, Statuscodes, Latenzen und Endpunkt-Verteilungen.
+    """
+    cutoff = _get_period_cutoff(period)
+    ext_condition = "AND is_external = 1" if only_external else ""
+
+    def _execute_queries(db_conn):
+        # 1. KPIs
+        row_kpi = db_conn.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total_calls,
+                COUNT(DISTINCT ip_hash) AS unique_callers,
+                COALESCE(AVG(response_time_ms), 0.0) AS avg_latency,
+                SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END) AS status_2xx,
+                SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS status_4xx,
+                SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS status_5xx,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_calls,
+                SUM(CASE WHEN auth_type = 'api_key' THEN 1 ELSE 0 END) AS auth_api_key,
+                SUM(CASE WHEN auth_type = 'bearer' THEN 1 ELSE 0 END) AS auth_bearer,
+                SUM(CASE WHEN auth_type = 'session' THEN 1 ELSE 0 END) AS auth_session,
+                SUM(CASE WHEN auth_type = 'none' OR auth_type = '' THEN 1 ELSE 0 END) AS auth_none
+            FROM api_calls
+            WHERE (? IS NULL OR created_at >= ?) {ext_condition}
+            """,
+            (cutoff, cutoff),
+        ).fetchone()
+
+        total_calls = int(row_kpi["total_calls"] or 0) if row_kpi else 0
+        unique_callers = int(row_kpi["unique_callers"] or 0) if row_kpi else 0
+        avg_latency = round(float(row_kpi["avg_latency"] or 0.0), 1) if row_kpi else 0.0
+        status_2xx = int(row_kpi["status_2xx"] or 0) if row_kpi else 0
+        status_4xx = int(row_kpi["status_4xx"] or 0) if row_kpi else 0
+        status_5xx = int(row_kpi["status_5xx"] or 0) if row_kpi else 0
+        error_calls = int(row_kpi["error_calls"] or 0) if row_kpi else 0
+        error_rate_pct = round((error_calls / total_calls * 100), 1) if total_calls > 0 else 0.0
+
+        auth_breakdown = {
+            "api_key": int(row_kpi["auth_api_key"] or 0) if row_kpi else 0,
+            "bearer": int(row_kpi["auth_bearer"] or 0) if row_kpi else 0,
+            "session": int(row_kpi["auth_session"] or 0) if row_kpi else 0,
+            "none": int(row_kpi["auth_none"] or 0) if row_kpi else 0,
+        }
+
+        # 2. Timeline
+        is_hourly = period in ("24h", "today")
+        substr_len = 13 if is_hourly else 10
+        timeline_rows = db_conn.execute(
+            f"""
+            SELECT
+                SUBSTR(created_at, 1, {substr_len}) AS bucket,
+                COUNT(*) AS calls,
+                COUNT(DISTINCT ip_hash) AS callers,
+                ROUND(AVG(response_time_ms), 1) AS avg_ms,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errors
+            FROM api_calls
+            WHERE (? IS NULL OR created_at >= ?) {ext_condition}
+            GROUP BY SUBSTR(created_at, 1, {substr_len})
+            ORDER BY bucket ASC
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+
+        timeline = []
+        for tr in timeline_rows:
+            b = tr["bucket"]
+            c = int(tr["calls"] or 0)
+            vis = int(tr["callers"] or 0)
+            ms = float(tr["avg_ms"] or 0.0)
+            errs = int(tr["errors"] or 0)
+
+            if is_hourly:
+                parts = b.replace("T", " ").split(" ")
+                time_part = f"{parts[1]}:00" if len(parts) > 1 else b
+                label = time_part if period == "today" else f"{parts[0][5:]} {time_part}"
+            else:
+                label = f"{b[8:10]}.{b[5:7]}." if len(b) >= 10 else b
+
+            timeline.append({
+                "bucket": b,
+                "label": label,
+                "calls": c,
+                "callers": vis,
+                "avg_ms": ms,
+                "errors": errs,
+            })
+
+        # 3. Top Endpoints
+        endpoint_rows = db_conn.execute(
+            f"""
+            SELECT
+                endpoint,
+                method,
+                COUNT(*) AS count,
+                COUNT(DISTINCT ip_hash) AS unique_callers,
+                ROUND(AVG(response_time_ms), 1) AS avg_ms,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errors
+            FROM api_calls
+            WHERE (? IS NULL OR created_at >= ?) {ext_condition}
+            GROUP BY endpoint, method
+            ORDER BY count DESC
+            LIMIT 25
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        endpoints = [
+            {
+                "endpoint": r["endpoint"],
+                "method": r["method"],
+                "count": int(r["count"] or 0),
+                "unique_callers": int(r["unique_callers"] or 0),
+                "avg_ms": float(r["avg_ms"] or 0.0),
+                "errors": int(r["errors"] or 0),
+            }
+            for r in endpoint_rows
+        ]
+
+        # 4. Top Consumers (by IP Hash / User-Agent)
+        consumer_rows = db_conn.execute(
+            f"""
+            SELECT
+                ip_hash,
+                MAX(user_agent) AS user_agent,
+                MAX(auth_type) AS auth_type,
+                MAX(api_key_name) AS api_key_name,
+                COUNT(*) AS call_count,
+                MAX(created_at) AS last_seen,
+                ROUND(AVG(response_time_ms), 1) AS avg_ms,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count
+            FROM api_calls
+            WHERE (? IS NULL OR created_at >= ?) {ext_condition}
+            GROUP BY ip_hash
+            ORDER BY call_count DESC
+            LIMIT 20
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        consumers = [
+            {
+                "ip_hash": r["ip_hash"],
+                "user_agent": r["user_agent"] or "Unbekannt",
+                "auth_type": r["auth_type"] or "none",
+                "api_key_name": r["api_key_name"] or "-",
+                "call_count": int(r["call_count"] or 0),
+                "last_seen": r["last_seen"],
+                "avg_ms": float(r["avg_ms"] or 0.0),
+                "error_count": int(r["error_count"] or 0),
+            }
+            for r in consumer_rows
+        ]
+
+        # 5. Recent API Calls (Latest 50 calls)
+        recent_call_rows = db_conn.execute(
+            f"""
+            SELECT
+                id, endpoint, method, status_code, response_time_ms,
+                client_ip, ip_hash, user_agent, auth_type, api_key_name,
+                is_external, query_params, created_at
+            FROM api_calls
+            WHERE (? IS NULL OR created_at >= ?) {ext_condition}
+            ORDER BY id DESC
+            LIMIT 50
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+        recent_calls = []
+        for r in recent_call_rows:
+            ip = r["client_ip"] or ""
+            if "." in ip:
+                ip_parts = ip.split(".")
+                masked_ip = f"{ip_parts[0]}.{ip_parts[1]}.***.***" if len(ip_parts) >= 2 else ip
+            elif ":" in ip:
+                ip_parts = ip.split(":")
+                masked_ip = f"{ip_parts[0]}:{ip_parts[1]}:***" if len(ip_parts) >= 2 else ip
+            else:
+                masked_ip = ip or "-"
+
+            recent_calls.append({
+                "id": r["id"],
+                "endpoint": r["endpoint"],
+                "method": r["method"],
+                "status_code": int(r["status_code"] or 200),
+                "response_time_ms": float(r["response_time_ms"] or 0.0),
+                "client_ip_masked": masked_ip,
+                "ip_hash": r["ip_hash"],
+                "user_agent": r["user_agent"] or "-",
+                "auth_type": r["auth_type"] or "none",
+                "api_key_name": r["api_key_name"] or "-",
+                "is_external": int(r["is_external"] or 1),
+                "query_params": r["query_params"] or "",
+                "created_at": r["created_at"],
+            })
+
+        return {
+            "period": period,
+            "only_external": only_external,
+            "kpis": {
+                "total_calls": total_calls,
+                "unique_callers": unique_callers,
+                "avg_latency": avg_latency,
+                "status_2xx": status_2xx,
+                "status_4xx": status_4xx,
+                "status_5xx": status_5xx,
+                "error_calls": error_calls,
+                "error_rate_pct": error_rate_pct,
+                "auth_breakdown": auth_breakdown,
+            },
+            "timeline": timeline,
+            "endpoints": endpoints,
+            "consumers": consumers,
+            "recent_calls": recent_calls,
+        }
+
+    if conn is not None:
+        return _execute_queries(conn)
+    with get_db() as c:
+        return _execute_queries(c)
+
+
 def get_site_analytics_overview(period: str = "today") -> Dict[str, Any]:
     """
     Aggregiert Web-Traffic, Seitenbesucher, Latenz und Bot-Sessions für das Analyse-Dashboard.
@@ -3916,6 +4230,9 @@ def get_site_analytics_overview(period: str = "today") -> Dict[str, Any]:
         # 8. Telegram Users Overview
         tg_users = list_telegram_users()
 
+        # 9. Externe API-Statistiken
+        api_analytics = get_api_analytics_overview(period=period, only_external=True, conn=conn)
+
         return {
             "period": period,
             "kpis": {
@@ -3933,6 +4250,7 @@ def get_site_analytics_overview(period: str = "today") -> Dict[str, Any]:
             "recent_views": recent_views,
             "bot_sessions": bot_sessions,
             "telegram_users": tg_users,
+            "api_analytics": api_analytics,
         }
 
 

@@ -4,7 +4,9 @@ import hashlib
 import io
 import json
 import os
+import re
 import time
+import urllib.parse
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -23,6 +25,7 @@ from database import (
     delete_streamer,
     delete_telegram_user,
     get_analytics_data,
+    get_api_analytics_overview,
     get_battles_list,
     get_battle_stats,
     get_battle_details,
@@ -47,6 +50,7 @@ from database import (
     import_from_sqlite_database,
     check_telegram_user_access,
     list_telegram_users,
+    record_api_call,
     record_bot_session,
     record_gift_event,
     record_page_view,
@@ -200,6 +204,84 @@ async def track_page_views_middleware(request: Request, call_next):
                 status_code=response.status_code,
                 response_time_ms=duration_ms,
             )
+        except Exception:
+            pass
+    elif path.startswith(("/api", "/api/v1")):
+        try:
+            ref = request.headers.get("referer", "")
+            host = request.headers.get("host", "").lower()
+            ua = request.headers.get("user-agent", "")
+            ua_lower = ua.lower()
+            sec_site = request.headers.get("sec-fetch-site", "").lower()
+
+            x_api_key = request.headers.get("x-api-key", "").strip()
+            query_api_key = request.query_params.get("api_key", "").strip()
+            auth_header = request.headers.get("authorization", "").strip()
+            session_cookie = request.cookies.get("toktracker_admin_session", "")
+            x_admin_sess = request.headers.get("x-admin-session", "")
+
+            # 1. Auth-Klassifikation
+            configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
+            if x_api_key or query_api_key:
+                auth_type = "api_key"
+                provided_k = x_api_key or query_api_key
+                api_key_name = "configured" if (configured_key and provided_k == configured_key) else "custom"
+            elif auth_header.lower().startswith("bearer "):
+                auth_type = "bearer"
+                api_key_name = ""
+            elif session_cookie or x_admin_sess:
+                auth_type = "session"
+                api_key_name = ""
+            else:
+                auth_type = "none"
+                api_key_name = ""
+
+            # 2. Externe vs Interne Erkennung
+            # Skripte/CLI-Tools, API-Keys oder Aufrufe von außerhalb (ohne App-Referer) gelten als extern.
+            is_cli_or_script = any(tool in ua_lower for tool in (
+                "curl", "wget", "python", "postman", "aiohttp", "httpx",
+                "go-http-client", "node-fetch", "axios", "insomnia", "httpie", "powershell"
+            ))
+
+            is_external = 1
+            if auth_type in ("api_key", "bearer") or is_cli_or_script:
+                is_external = 1
+            elif ref:
+                try:
+                    ref_netloc = urllib.parse.urlparse(ref).netloc.lower()
+                    if ref_netloc and (ref_netloc == host or ref_netloc.split(":")[0] == host.split(":")[0]):
+                        # Aufruf aus dem internen Browser-Frontend
+                        is_external = 0
+                except Exception:
+                    pass
+            elif not ref and not is_cli_or_script and "mozilla" in ua_lower and sec_site == "same-origin":
+                is_external = 0
+
+            # Internes Polling von /api/site-analytics überspringen, um DB nicht aufzublähen
+            if not (is_external == 0 and path in ("/api/site-analytics", "/api/v1/site-analytics")):
+                client_ip = _extract_client_ip(request)
+                salt = config.session_secret or "toktracker_salt_2026"
+                ip_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
+
+                # Sensible Query-Parameter wie Passwörter/API-Keys im Log maskieren
+                q_str = str(request.url.query)
+                if q_str:
+                    q_str = re.sub(r'(api_key=[^&]{3})[^&]+', r'\1***', q_str)
+                    q_str = re.sub(r'(password=[^&]{2})[^&]+', r'\1***', q_str)
+
+                record_api_call(
+                    endpoint=path,
+                    method=request.method,
+                    status_code=response.status_code,
+                    response_time_ms=duration_ms,
+                    client_ip=client_ip,
+                    ip_hash=ip_hash,
+                    user_agent=ua,
+                    auth_type=auth_type,
+                    api_key_name=api_key_name,
+                    is_external=is_external,
+                    query_params=q_str,
+                )
         except Exception:
             pass
 
@@ -1535,6 +1617,25 @@ async def api_site_analytics(
     data["telegram_diagnostics"] = telegram_bot_service.get_diagnostics()
     return data
 
+
+@app.get(
+    "/api/site-analytics/api-calls",
+    tags=["Site & Bot Analytics"],
+    summary="Liefert detaillierte Statistiken und Logs zu externen API-Aufrufen",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+@app.get(
+    "/api/v1/site-analytics/api-calls",
+    tags=["Site & Bot Analytics"],
+    summary="Liefert detaillierte Statistiken und Logs zu externen API-Aufrufen",
+    dependencies=[Depends(verify_admin_or_api_key)],
+)
+async def api_site_analytics_api_calls(
+    period: str = Query("today", description="all | today | 24h | 7d | 30d"),
+    only_external: bool = Query(True, description="Nur externe API-Calls oder alle protokollieren"),
+):
+    init_db()
+    return await asyncio.to_thread(get_api_analytics_overview, period=period, only_external=only_external)
 
 
 @app.get(

@@ -145,6 +145,80 @@
             font-weight: 700;
             font-family: var(--font-mono, monospace);
         }
+        .badge-method-get {
+            background: rgba(14, 165, 233, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(14, 165, 233, 0.3);
+            font-family: var(--font-mono, monospace);
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .badge-method-post {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            font-family: var(--font-mono, monospace);
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .badge-method-delete {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            font-family: var(--font-mono, monospace);
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .badge-method-other {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            font-family: var(--font-mono, monospace);
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .badge-auth-key {
+            background: rgba(168, 85, 247, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+        .badge-auth-none {
+            background: rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 3px;
+        }
+        .badge-auth-session {
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 3px;
+        }
+        .badge-auth-bearer {
+            background: rgba(236, 72, 153, 0.15);
+            color: #f472b6;
+            border: 1px solid rgba(236, 72, 153, 0.3);
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -255,6 +329,15 @@
             <div class="analytics-kpi-val" id="kpiActiveWorkers">0 aktiv</div>
             <div class="analytics-kpi-sub" id="kpiActiveWorkersSub">Streamer im Monitoring</div>
         </div>
+
+        <div class="analytics-kpi-card" style="cursor: pointer;" onclick="switchSection('sectionApiCalls')" title="Klicken für externe API-Statistiken">
+            <div class="analytics-kpi-header">
+                <span>🔌 Externe API-Aufrufe</span>
+                <span style="color: #c084fc;">API Traffic</span>
+            </div>
+            <div class="analytics-kpi-val" id="kpiApiTotalCalls" style="color: #c084fc;">0</div>
+            <div class="analytics-kpi-sub" id="kpiApiSub">0 ms Ø · 0% Fehler</div>
+        </div>
     </div>
 
     <!-- Charts Section -->
@@ -295,6 +378,9 @@
         <button type="button" class="tab-btn active" id="tabBtnPaths" onclick="switchSection('sectionPaths')">
             📑 Seiten-Statistik
         </button>
+        <button type="button" class="tab-btn" id="tabBtnApiCalls" onclick="switchSection('sectionApiCalls')">
+            🔌 Externe API-Aufrufe &amp; Logs
+        </button>
         <button type="button" class="tab-btn" id="tabBtnLog" onclick="switchSection('sectionLog')">
             ⚡ Live-Traffic Log (50)
         </button>
@@ -329,6 +415,180 @@
                     </thead>
                     <tbody id="tbodyPaths">
                         <tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section: Externe API-Aufrufe & Statistiken -->
+    <section id="sectionApiCalls" class="analytics-section" style="display: none;">
+        <!-- Sub-KPI Grid für API -->
+        <div class="analytics-grid-kpis" style="margin-bottom: 20px;">
+            <div class="analytics-kpi-card">
+                <div class="analytics-kpi-header">
+                    <span>🔌 Externe Calls</span>
+                    <span style="color: #c084fc;">Gesamt</span>
+                </div>
+                <div class="analytics-kpi-val" id="apiKpiCalls" style="color: #c084fc;">0</div>
+                <div class="analytics-kpi-sub" id="apiKpiCallsSub">Gefilterte externe API-Anfragen</div>
+            </div>
+
+            <div class="analytics-kpi-card">
+                <div class="analytics-kpi-header">
+                    <span>👤 Unique Consumer</span>
+                    <span style="color: #38bdf8;">Clients</span>
+                </div>
+                <div class="analytics-kpi-val" id="apiKpiUnique" style="color: #38bdf8;">0</div>
+                <div class="analytics-kpi-sub">Eindeutige IP-Hashes / Skripte</div>
+            </div>
+
+            <div class="analytics-kpi-card">
+                <div class="analytics-kpi-header">
+                    <span>⚡ Antwortzeit (Ø)</span>
+                    <span style="color: #f59e0b;">Latenz</span>
+                </div>
+                <div class="analytics-kpi-val" id="apiKpiLatency" style="color: #f59e0b;">0 ms</div>
+                <div class="analytics-kpi-sub">Server Processing Time</div>
+            </div>
+
+            <div class="analytics-kpi-card">
+                <div class="analytics-kpi-header">
+                    <span>🚨 Fehlerquote</span>
+                    <span style="color: #ef4444;" id="apiKpiErrorBadge">4xx / 5xx</span>
+                </div>
+                <div class="analytics-kpi-val" id="apiKpiErrorRate" style="color: #ef4444;">0%</div>
+                <div class="analytics-kpi-sub" id="apiKpiErrorSub">0 fehlerhafte Aufrufe</div>
+            </div>
+
+            <div class="analytics-kpi-card">
+                <div class="analytics-kpi-header">
+                    <span>🔑 Auth-Verteilung</span>
+                    <span style="color: #10b981;">Methoden</span>
+                </div>
+                <div class="analytics-kpi-val" id="apiKpiAuth" style="font-size: 20px;">-</div>
+                <div class="analytics-kpi-sub" id="apiKpiAuthSub">API-Key vs Public / Bearer</div>
+            </div>
+        </div>
+
+        <!-- API Charts Grid -->
+        <div class="analytics-charts-grid">
+            <div class="chart-box">
+                <div class="chart-box-header">
+                    <div class="chart-box-title">
+                        <span>📊</span> Externe API-Aufrufe &amp; Fehler im Zeitverlauf
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted);" id="chartApiTimelineSub">
+                        Anfragen pro Intervall
+                    </div>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartApiTimeline"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-box">
+                <div class="chart-box-header">
+                    <div class="chart-box-title">
+                        <span>🎯</span> Beliebteste API-Endpunkte
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted);">
+                        Verteilung nach Route
+                    </div>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartApiEndpoints"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Toggle Bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md, 6px); padding: 10px 16px; flex-wrap: wrap; gap: 10px;">
+            <div style="font-size: 12.5px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                <span>🛡️ Externe API-Audit</span>
+                <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">(Calls von Skripten, curl, externen Tools &amp; API-Keys)</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="chkOnlyExternalApi" checked style="accent-color: #a855f7;" />
+                    <span>Nur externe Anfragen anzeigen (ohne Web-Dashboard Polling)</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Table 1: Endpunkte Statistik -->
+        <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 20px;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Beliebteste API-Routen &amp; Latenzen</span>
+                <span class="pill" id="badgeApiEndpointsCount">0 Endpunkte</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Methode</th>
+                            <th>API-Endpunkt</th>
+                            <th>Aufrufe</th>
+                            <th class="hide-sm">Eindeutige Clients</th>
+                            <th class="hide-sm">Ø Antwortzeit</th>
+                            <th>Fehler (4xx/5xx)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyApiEndpoints">
+                        <tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Endpunkt-Statistiken...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Table 2: Top API-Consumer / User-Agents -->
+        <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 20px;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Top Externe Consumer &amp; Clients</span>
+                <span class="pill" id="badgeApiConsumersCount">0 Consumer</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Client IP-Hash</th>
+                            <th>User-Agent / Tool</th>
+                            <th>Auth-Typ</th>
+                            <th class="hide-sm">API-Key Profil</th>
+                            <th>Aufrufe</th>
+                            <th class="hide-sm">Ø Latenz</th>
+                            <th class="hide-md">Zuletzt aktiv</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyApiConsumers">
+                        <tr><td colspan="7" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade Consumer-Statistiken...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Table 3: Live API Call Log (Last 50) -->
+        <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 700; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Echtzeit-Audit: Die letzten 50 externen API-Aufrufe</span>
+                <span class="pill" style="color: #c084fc;">Live-Log</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Zeitpunkt</th>
+                            <th>Methode</th>
+                            <th>Endpunkt / Pfad</th>
+                            <th>Status</th>
+                            <th>Latenz</th>
+                            <th class="hide-sm">Auth</th>
+                            <th class="hide-md">Client (IP / Hash)</th>
+                            <th class="hide-sm">User-Agent</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyRecentApiCalls">
+                        <tr><td colspan="8" style="text-align:center; padding: 20px; color: var(--text-muted);">Lade API-Logs...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -479,6 +739,6 @@
 
 </footer>
 
-<script src="/static/site_analytics.js?v=1.0.2"></script>
+<script src="/static/site_analytics.js?v=1.1.0"></script>
 </body>
 </html>

@@ -11,6 +11,10 @@
     let autoRefreshTimer = null;
     let trafficChartInstance = null;
     let pathsChartInstance = null;
+    let apiTimelineChartInstance = null;
+    let apiEndpointsChartInstance = null;
+    let onlyExternalApi = true;
+    let cachedApiAnalytics = null;
 
     // Hilfsfunktionen
     function escapeHtml(str) {
@@ -53,6 +57,29 @@
             return `<span class="status-badge-redirect">${c} REDIR</span>`;
         }
         return `<span class="status-badge-err">${c} ERR</span>`;
+    }
+
+    function getMethodBadge(method) {
+        const m = (method || "GET").toUpperCase();
+        if (m === "GET") return `<span class="badge-method-get">GET</span>`;
+        if (m === "POST") return `<span class="badge-method-post">POST</span>`;
+        if (m === "DELETE") return `<span class="badge-method-delete">DELETE</span>`;
+        return `<span class="badge-method-other">${escapeHtml(m)}</span>`;
+    }
+
+    function getAuthBadge(authType, keyName) {
+        const a = (authType || "none").toLowerCase();
+        if (a === "api_key") {
+            const kn = keyName && keyName !== "-" ? ` (${escapeHtml(keyName)})` : "";
+            return `<span class="badge-auth-key">🔑 API-Key${kn}</span>`;
+        }
+        if (a === "bearer") {
+            return `<span class="badge-auth-bearer">🛡️ Bearer</span>`;
+        }
+        if (a === "session") {
+            return `<span class="badge-auth-session">👤 Session</span>`;
+        }
+        return `<span class="badge-auth-none">🌐 Public</span>`;
     }
 
     // Daten vom Server laden
@@ -121,6 +148,11 @@
         // Charts rendern
         renderTrafficChart(data.timeline || []);
         renderPathsChart(data.paths || []);
+
+        // API-Analytics rendern
+        const apiAnalytics = data.api_analytics || {};
+        cachedApiAnalytics = apiAnalytics;
+        renderApiAnalytics(apiAnalytics);
 
         // Tabellen rendern
         renderPathsTable(data.paths || [], totalViews);
@@ -494,6 +526,326 @@
         }).join("");
     }
 
+    // =========================================================================
+    // API-ANALYTICS & EXTERNE LOGS
+    // =========================================================================
+
+    function renderApiAnalytics(apiData) {
+        if (!apiData) return;
+        const kpis = apiData.kpis || {};
+        const totalCalls = kpis.total_calls || 0;
+        const uniqueCallers = kpis.unique_callers || 0;
+        const avgLatency = kpis.avg_latency || 0;
+        const errorCalls = kpis.error_calls || 0;
+        const errorRate = kpis.error_rate_pct || 0.0;
+        const auth = kpis.auth_breakdown || {};
+        const status4xx = kpis.status_4xx || 0;
+        const status5xx = kpis.status_5xx || 0;
+
+        // Top-Card im Haupt-Dashboard
+        const elTopCalls = document.getElementById("kpiApiTotalCalls");
+        if (elTopCalls) elTopCalls.textContent = formatNumber(totalCalls);
+        const elTopSub = document.getElementById("kpiApiSub");
+        if (elTopSub) elTopSub.textContent = `${avgLatency} ms Ø · ${errorRate}% Fehler`;
+
+        // Sub-KPIs in der API-Sektion
+        const elApiCalls = document.getElementById("apiKpiCalls");
+        if (elApiCalls) elApiCalls.textContent = formatNumber(totalCalls);
+        const elApiCallsSub = document.getElementById("apiKpiCallsSub");
+        if (elApiCallsSub) {
+            elApiCallsSub.textContent = onlyExternalApi ? "Gefilterte externe API-Anfragen" : "Alle erfassten API-Anfragen";
+        }
+
+        const elApiUnique = document.getElementById("apiKpiUnique");
+        if (elApiUnique) elApiUnique.textContent = formatNumber(uniqueCallers);
+
+        const elApiLatency = document.getElementById("apiKpiLatency");
+        if (elApiLatency) elApiLatency.textContent = `${avgLatency} ms`;
+
+        const elApiErrorRate = document.getElementById("apiKpiErrorRate");
+        if (elApiErrorRate) {
+            elApiErrorRate.textContent = `${errorRate}%`;
+            elApiErrorRate.style.color = errorRate > 5 ? "#ef4444" : (errorRate > 0 ? "#f59e0b" : "#10b981");
+        }
+        const elApiErrorSub = document.getElementById("apiKpiErrorSub");
+        if (elApiErrorSub) {
+            elApiErrorSub.textContent = `${errorCalls} Fehler (4xx: ${status4xx}, 5xx: ${status5xx})`;
+        }
+
+        const elApiAuth = document.getElementById("apiKpiAuth");
+        if (elApiAuth) {
+            elApiAuth.textContent = `${formatNumber(auth.api_key || 0)} Key / ${formatNumber(auth.none || 0)} Public`;
+        }
+
+        // Charts
+        renderApiTimelineChart(apiData.timeline || []);
+        renderApiEndpointsChart(apiData.endpoints || []);
+
+        // Tabellen
+        renderApiEndpointsTable(apiData.endpoints || []);
+        renderApiConsumersTable(apiData.consumers || []);
+        renderRecentApiCallsTable(apiData.recent_calls || []);
+    }
+
+    // Chart: API Timeline
+    function renderApiTimelineChart(timeline) {
+        const canvas = document.getElementById("chartApiTimeline");
+        if (!canvas) return;
+        if (typeof Chart === "undefined") return;
+
+        const hasData = timeline && timeline.length > 0;
+        const labels = hasData ? timeline.map(t => t.label || t.bucket) : ["Keine Daten"];
+        const callsData = hasData ? timeline.map(t => t.calls || 0) : [0];
+        const errorsData = hasData ? timeline.map(t => t.errors || 0) : [0];
+        const callersData = hasData ? timeline.map(t => t.callers || 0) : [0];
+
+        if (apiTimelineChartInstance) {
+            apiTimelineChartInstance.data.labels = labels;
+            apiTimelineChartInstance.data.datasets[0].data = callsData;
+            apiTimelineChartInstance.data.datasets[1].data = errorsData;
+            apiTimelineChartInstance.data.datasets[2].data = callersData;
+            apiTimelineChartInstance.update();
+            return;
+        }
+
+        const ctx = canvas.getContext("2d");
+        apiTimelineChartInstance = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Aufrufe (Calls)",
+                        data: callsData,
+                        borderColor: "#a855f7",
+                        backgroundColor: "rgba(168, 85, 247, 0.12)",
+                        borderWidth: 2,
+                        tension: 0.35,
+                        fill: true,
+                        pointRadius: 3,
+                        pointHoverRadius: 6,
+                    },
+                    {
+                        label: "Fehler (4xx/5xx)",
+                        data: errorsData,
+                        borderColor: "#ef4444",
+                        backgroundColor: "rgba(239, 68, 68, 0.12)",
+                        borderWidth: 2,
+                        tension: 0.35,
+                        fill: true,
+                        pointRadius: 3,
+                        pointHoverRadius: 6,
+                    },
+                    {
+                        label: "Eindeutige Clients",
+                        data: callersData,
+                        borderColor: "#38bdf8",
+                        backgroundColor: "transparent",
+                        borderWidth: 1.5,
+                        borderDash: [4, 4],
+                        tension: 0.35,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: "index",
+                },
+                plugins: {
+                    legend: {
+                        position: "top",
+                        labels: {
+                            color: "#94a3b8",
+                            font: { family: "inherit", size: 11, weight: "bold" },
+                        },
+                    },
+                    tooltip: {
+                        backgroundColor: "rgba(18, 23, 31, 0.95)",
+                        titleColor: "#f0f6fc",
+                        bodyColor: "#e6edf3",
+                        borderColor: "#30363d",
+                        borderWidth: 1,
+                        padding: 10,
+                    },
+                },
+                scales: {
+                    x: {
+                        grid: { color: "rgba(255, 255, 255, 0.05)" },
+                        ticks: { color: "#64748b", font: { size: 10.5 } },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: "rgba(255, 255, 255, 0.05)" },
+                        ticks: { color: "#64748b", font: { size: 10.5 }, precision: 0 },
+                    },
+                },
+            },
+        });
+    }
+
+    // Chart: API Endpoints
+    function renderApiEndpointsChart(endpoints) {
+        const canvas = document.getElementById("chartApiEndpoints");
+        if (!canvas) return;
+        if (typeof Chart === "undefined") return;
+
+        const topEndpoints = (endpoints || []).slice(0, 6);
+        const hasData = topEndpoints.length > 0;
+        const labels = hasData ? topEndpoints.map(e => e.endpoint.replace(/^\/api(\/v1)?/, "") || e.endpoint) : ["Keine Daten"];
+        const dataValues = hasData ? topEndpoints.map(e => e.count || 0) : [0];
+
+        const colors = [
+            "#a855f7", "#38bdf8", "#10b981", "#f59e0b", "#ec4899", "#6366f1"
+        ];
+
+        if (apiEndpointsChartInstance) {
+            apiEndpointsChartInstance.data.labels = labels;
+            apiEndpointsChartInstance.data.datasets[0].data = dataValues;
+            apiEndpointsChartInstance.update();
+            return;
+        }
+
+        const ctx = canvas.getContext("2d");
+        apiEndpointsChartInstance = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        data: dataValues,
+                        backgroundColor: colors.slice(0, Math.max(1, topEndpoints.length)),
+                        borderColor: "#181f2a",
+                        borderWidth: 2,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: "right",
+                        labels: {
+                            color: "#94a3b8",
+                            font: { family: "inherit", size: 11 },
+                            boxWidth: 12,
+                        },
+                    },
+                    tooltip: {
+                        backgroundColor: "rgba(18, 23, 31, 0.95)",
+                        titleColor: "#f0f6fc",
+                        bodyColor: "#e6edf3",
+                        borderColor: "#30363d",
+                        borderWidth: 1,
+                        padding: 10,
+                    },
+                },
+                cutout: "65%",
+            },
+        });
+    }
+
+    // Tabelle: Top API Endpunkte
+    function renderApiEndpointsTable(endpoints) {
+        const tbody = document.getElementById("tbodyApiEndpoints");
+        if (!tbody) return;
+
+        const countBadge = document.getElementById("badgeApiEndpointsCount");
+        if (countBadge) countBadge.textContent = `${endpoints.length} Routen`;
+
+        if (!endpoints || endpoints.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Keine API-Aufrufe im ausgewählten Zeitraum</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = endpoints.map(e => {
+            const errBadge = e.errors > 0
+                ? `<span class="status-badge-err">${formatNumber(e.errors)}</span>`
+                : `<span style="color: #10b981; font-size: 11px;">0</span>`;
+            return `
+                <tr>
+                    <td style="width: 70px;">${getMethodBadge(e.method)}</td>
+                    <td style="font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; color: var(--text-main);">${escapeHtml(e.endpoint)}</td>
+                    <td style="font-weight: 700; color: #c084fc;">${formatNumber(e.count)}</td>
+                    <td class="hide-sm" style="font-size: 12px; color: var(--text-muted);">${formatNumber(e.unique_callers)}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono, monospace); font-size: 11.5px; color: #f59e0b;">${e.avg_ms} ms</td>
+                    <td>${errBadge}</td>
+                </tr>
+            `;
+        }).join("");
+    }
+
+    // Tabelle: Top API Consumers
+    function renderApiConsumersTable(consumers) {
+        const tbody = document.getElementById("tbodyApiConsumers");
+        if (!tbody) return;
+
+        const countBadge = document.getElementById("badgeApiConsumersCount");
+        if (countBadge) countBadge.textContent = `${consumers.length} Clients`;
+
+        if (!consumers || consumers.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 20px; color: var(--text-muted);">Keine externen Clients im ausgewählten Zeitraum</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = consumers.map(c => {
+            return `
+                <tr>
+                    <td><span class="ip-hash-badge">${escapeHtml(c.ip_hash || "-")}</span></td>
+                    <td style="font-size: 11.5px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(c.user_agent)}">${escapeHtml(c.user_agent || "Unbekannt")}</td>
+                    <td>${getAuthBadge(c.auth_type, c.api_key_name)}</td>
+                    <td class="hide-sm" style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.api_key_name || "-")}</td>
+                    <td style="font-weight: 700; color: #38bdf8;">${formatNumber(c.call_count)}</td>
+                    <td class="hide-sm" style="font-family: var(--font-mono, monospace); font-size: 11.5px; color: #f59e0b;">${c.avg_ms} ms</td>
+                    <td class="hide-md" style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.last_seen || "-")}</td>
+                </tr>
+            `;
+        }).join("");
+    }
+
+    // Tabelle: Recent API Calls Log
+    function renderRecentApiCallsTable(calls) {
+        const tbody = document.getElementById("tbodyRecentApiCalls");
+        if (!tbody) return;
+
+        if (!calls || calls.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 20px; color: var(--text-muted);">Keine API-Logs vorhanden</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = calls.map(call => {
+            const timeStr = formatTime(call.created_at);
+            const queryTooltip = call.query_params ? ` title="Query: ?${escapeHtml(call.query_params)}"` : "";
+            const queryIndicator = call.query_params ? ` <span style="color: var(--text-muted); font-size: 10px;">(?...)</span>` : "";
+
+            return `
+                <tr>
+                    <td style="font-size: 11.5px; color: var(--text-muted); white-space: nowrap;">${escapeHtml(timeStr)}</td>
+                    <td style="width: 60px;">${getMethodBadge(call.method)}</td>
+                    <td style="font-family: var(--font-mono, monospace); font-size: 11.5px; color: var(--text-main);" ${queryTooltip}>
+                        ${escapeHtml(call.endpoint)}${queryIndicator}
+                    </td>
+                    <td>${getStatusBadge(call.status_code)}</td>
+                    <td style="font-family: var(--font-mono, monospace); font-size: 11px; color: #f59e0b;">${call.response_time_ms} ms</td>
+                    <td class="hide-sm">${getAuthBadge(call.auth_type, call.api_key_name)}</td>
+                    <td class="hide-md">
+                        <span style="font-size: 11px; color: var(--text-muted);">${escapeHtml(call.client_ip_masked)}</span>
+                        <span class="ip-hash-badge" style="margin-left: 4px;">${escapeHtml(call.ip_hash || "-")}</span>
+                    </td>
+                    <td class="hide-sm" style="font-size: 11px; color: var(--text-muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(call.user_agent)}">
+                        ${escapeHtml(call.user_agent || "-")}
+                    </td>
+                </tr>
+            `;
+        }).join("");
+    }
+
     // Globaler Tab-Wechsler
     window.switchSection = function (sectionId) {
         document.querySelectorAll(".analytics-section").forEach(s => s.style.display = "none");
@@ -502,6 +854,7 @@
 
         const btnMap = {
             "sectionPaths": "tabBtnPaths",
+            "sectionApiCalls": "tabBtnApiCalls",
             "sectionLog": "tabBtnLog",
             "sectionBotSessions": "tabBtnBotSessions",
             "sectionWorkers": "tabBtnWorkers",
@@ -515,6 +868,11 @@
 
         const activeBtn = document.getElementById(btnMap[sectionId]);
         if (activeBtn) activeBtn.classList.add("active");
+
+        if (sectionId === "sectionApiCalls") {
+            if (apiTimelineChartInstance) apiTimelineChartInstance.resize();
+            if (apiEndpointsChartInstance) apiEndpointsChartInstance.resize();
+        }
     };
 
     // Initialisierung & Event Listener
@@ -522,6 +880,7 @@
         // Tab Navigation Listeners
         const tabMappings = {
             "tabBtnPaths": "sectionPaths",
+            "tabBtnApiCalls": "sectionApiCalls",
             "tabBtnLog": "sectionLog",
             "tabBtnBotSessions": "sectionBotSessions",
             "tabBtnWorkers": "sectionWorkers",
@@ -533,6 +892,25 @@
                 btn.addEventListener("click", () => window.switchSection(secId));
             }
         });
+
+        // Filter Checkbox: Nur externe API-Calls
+        const chkExternal = document.getElementById("chkOnlyExternalApi");
+        if (chkExternal) {
+            chkExternal.addEventListener("change", async () => {
+                onlyExternalApi = chkExternal.checked;
+                try {
+                    const resp = await fetch(`/api/site-analytics/api-calls?period=${currentPeriod}&only_external=${onlyExternalApi}`, {
+                        headers: { "Accept": "application/json" },
+                    });
+                    if (resp.ok) {
+                        const apiData = await resp.json();
+                        renderApiAnalytics(apiData);
+                    }
+                } catch (e) {
+                    console.error("Fehler beim Laden der gefilterten API-Daten:", e);
+                }
+            });
+        }
 
         // Period Buttons
         document.querySelectorAll("[data-period]").forEach(btn => {
