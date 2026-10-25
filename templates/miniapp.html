@@ -96,6 +96,29 @@
     </section>
 
     <!-- ============================================================== -->
+    <!-- TAB 2: LIVE BATTLES & DUELLE                                   -->
+    <!-- ============================================================== -->
+    <section class="ma-tab-view" id="tab-battles">
+        <div class="section-head">
+            <div class="section-title">⚔️ Live-Battles &amp; Match-Center</div>
+        </div>
+
+        <!-- Live Duelle Container -->
+        <div id="maLiveBattlesContainer"></div>
+
+        <div class="section-head" style="margin-top: 14px;">
+            <div class="section-title">📜 Kürzliche Matches</div>
+        </div>
+        <!-- Kürzliche Duelle Container -->
+        <div id="maRecentBattlesContainer">
+            <div class="ma-empty-state">
+                <div class="ma-empty-icon">⏳</div>
+                <div>Lade Matches...</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================== -->
     <!-- TAB 3: ANALYTICS & GRAPHEN (ÖFFENTLICH)                       -->
     <!-- ============================================================== -->
     <section class="ma-tab-view" id="tab-analytics">
@@ -657,6 +680,15 @@
             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
         <span>Streamer</span>
+    </button>
+
+    <button type="button" class="nav-tab-btn" data-tab="tab-battles">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 17.5L3 6V3h3l11.5 11.5"/>
+            <path d="M13 19l6 2 2-6-2-6-6 2"/>
+            <path d="M19 5l-4 4"/>
+        </svg>
+        <span>Battles</span>
     </button>
 
     <button type="button" class="nav-tab-btn" data-tab="tab-analytics">

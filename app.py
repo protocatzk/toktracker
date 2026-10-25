@@ -788,6 +788,71 @@ def consolidate_live_battles(
 
     return consolidated
 
+
+@app.get(
+    "/api/public/battles",
+    tags=["Public Panel API"],
+    summary="Öffentliche Read-Only Liste von TikTok Battles inkl. aktiver Live-Battles",
+)
+async def api_public_battles(
+    streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
+    period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
+    result: Optional[str] = Query(None, description="WIN | LOSE | DRAW | ONGOING"),
+    mode: Optional[str] = Query(None, description="1v1 | 2v2 | 1v1v1 | 1v1v1v1"),
+    search: Optional[str] = Query(None, description="Suche nach Gegner-Name"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    init_db()
+    data = await asyncio.to_thread(
+        get_battles_list,
+        streamer_id=streamer_id,
+        period=period,
+        result_filter=result,
+        mode_filter=mode,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    diag = monitor_manager.get_all_diagnostics()
+    overview = await asyncio.to_thread(get_dashboard_overview, period=period)
+    streamer_map = {s["id"]: s for s in overview.get("streamers", [])}
+    for s in overview.get("streamers", []):
+        streamer_map[s["username"].lower()] = s
+    data["live_active_battles"] = consolidate_live_battles(
+        diag.get("workers", []),
+        streamer_map,
+        filter_streamer_id=streamer_id,
+    )
+    return data
+
+
+@app.get(
+    "/api/public/battles/stats",
+    tags=["Public Panel API"],
+    summary="Öffentliche Battle-Statistiken (Winrate, Einnahmen, Bestwerte)",
+)
+async def api_public_battle_stats(
+    streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
+    period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
+):
+    init_db()
+    return await asyncio.to_thread(get_battle_stats, streamer_id=streamer_id, period=period)
+
+
+@app.get(
+    "/api/public/analytics",
+    tags=["Public Panel API"],
+    summary="Öffentliche Einnahmen-Analytics, Zeitreihen & Verteilungen für interaktive Charts",
+)
+async def api_public_analytics(
+    streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID"),
+    period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
+):
+    init_db()
+    return await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+
+
 @app.get(
     "/api/miniapp/data",
     tags=["Telegram Mini-App"],
@@ -1535,7 +1600,10 @@ async def api_get_battles(
     )
     # Laufende Battles aus aktiven Workern erfassen (konsolidiert)
     diag = monitor_manager.get_all_diagnostics()
-    streamers_summary = {s["id"]: s for s in get_streamers_summary()}
+    overview = get_dashboard_overview(period=period)
+    streamers_summary = {s["id"]: s for s in overview.get("streamers", [])}
+    for s in overview.get("streamers", []):
+        streamers_summary[s["username"].lower()] = s
     data["live_active_battles"] = consolidate_live_battles(
         diag.get("workers", []),
         streamers_summary,
