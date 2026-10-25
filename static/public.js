@@ -497,7 +497,55 @@ function renderPublicLiveActiveBattles(liveBattles) {
     container.style.display = "block";
     list.innerHTML = validLive.map(item => {
         const b = item.battle || {};
+        const bMode = b.battle_mode || "1v1";
         const isInternal = Boolean(b.is_internal);
+        const isFfa = b.is_ffa || bMode === "1v1v1" || bMode === "1v1v1v1";
+
+        if (isFfa) {
+            const players = (b.participants && b.participants.length > 0) ? b.participants : [
+                { username: item.username, display_name: item.display_name, avatar_url: item.avatar_url, score: b.streamer_score || 0, is_tracked: true },
+                { username: b.opponent_username || "Gegner 1", display_name: b.opponent_display_name || b.opponent_username || "Gegner 1", avatar_url: b.opponent_avatar_url, score: b.opponent_score || 0 },
+                { username: b.opponent2_username || "Gegner 2", display_name: b.opponent2_display_name || b.opponent2_username || "Gegner 2", avatar_url: b.opponent2_avatar_url, score: b.opponent2_score || 0 },
+            ];
+            if ((bMode === "1v1v1v1" || b.opponent3_username) && (!b.participants || b.participants.length < 4)) {
+                players.push({ username: b.opponent3_username || "Gegner 3", display_name: b.opponent3_display_name || b.opponent3_username || "Gegner 3", avatar_url: b.opponent3_avatar_url, score: b.opponent3_score || 0 });
+            }
+            players.sort((x, y) => (y.score || 0) - (x.score || 0));
+
+            const rankBadges = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
+            const modeLabel = bMode === "1v1v1v1" ? "⚡ 4ER-EINZEL LIVE" : "🔺 1 VS 1 VS 1 (3ER) LIVE";
+
+            return `
+                <div class="live-active-card card-ffa" style="background:var(--bg-card); border:1px solid #f59e0b; border-left:4px solid #f59e0b; border-radius:8px; padding:12px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="live-pulse" style="background:#f59e0b;"></span>
+                            <span class="mode-badge mode-${bMode}" style="font-size:11px; padding:2px 8px;">${modeLabel}</span>
+                            <span class="muted" style="font-size:11px;">Battle #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</span>
+                        </div>
+                        <div>
+                            <span class="pct-pill" style="border-color:#f59e0b; color:#f59e0b; font-weight:700;">🔥 +${fmtNum(b.total_coins || b.coins_earned || 0)} Coins</span>
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">
+                        ${players.map((p, idx) => `
+                            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; text-align:center;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; font-weight:700; margin-bottom:4px;">
+                                    <span style="color:#f59e0b;">${rankBadges[idx] || `#${idx+1}`}</span>
+                                    ${p.is_tracked ? '<span style="color:#10b981;">● Getrackt</span>' : ''}
+                                </div>
+                                <div style="width:38px; height:38px; margin:0 auto 4px; border-radius:50%; overflow:hidden;">
+                                    <img src="${escapeHtml(p.avatar_url || '/pictures/bot_avatar.jpg')}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                                </div>
+                                <div style="font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.display_name || p.username || '')}</div>
+                                <div class="mono" style="font-size:10px; color:var(--text-muted);">@${escapeHtml(p.username || '')}</div>
+                                <div class="mono" style="font-size:15px; font-weight:800; color:#38bdf8; margin-top:4px;">${fmtNum(p.score || 0)} <span style="font-size:9px; color:var(--text-muted);">Pkt</span></div>
+                            </div>
+                        `).join("")}
+                    </div>
+                </div>
+            `;
+        }
 
         if (isInternal) {
             const sA = b.streamer_a || {};
@@ -536,7 +584,6 @@ function renderPublicLiveActiveBattles(liveBattles) {
         const sScore = fmtNum(b.streamer_score || 0);
         const oScore = fmtNum(b.opponent_score || 0);
         const coins = fmtNum(b.coins_earned || 0);
-        const bMode = b.battle_mode || "1v1";
 
         let modeBadge = `<span class="mode-badge mode-1v1" style="font-size:10px; padding:2px 6px;">1v1</span>`;
         if (bMode === "2v2") modeBadge = `<span class="mode-badge mode-2v2" style="font-size:10px; padding:2px 6px;">2v2</span>`;
@@ -590,6 +637,7 @@ function renderPublicBattlesFeed(data) {
         const isOngoing = b.result === "ONGOING" || b.status === "active";
 
         const bMode = b.battle_mode || "1v1";
+        const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
         const is2v2 = bMode === "2v2" || Boolean(b.teammate_username);
 
         let cardClass = isWin ? "card-win" : isLose ? "card-lose" : "card-draw";
@@ -600,6 +648,36 @@ function renderPublicBattlesFeed(data) {
             cardClass = "card-derby";
             resultLabel = b.winner_username ? `🏆 SIEGER: @${escapeHtml(b.winner_username)}` : "⚔️ INTERNES DERBY";
             resultClass = "win";
+        } else if (isFfa && !isOngoing) {
+            const rank = b.streamer_rank || (isWin ? 1 : 2);
+            if (rank === 1) {
+                cardClass = "card-win";
+                resultLabel = "🥇 1. PLATZ (SIEG)";
+                resultClass = "win";
+            } else if (rank === 2) {
+                cardClass = "card-lose";
+                resultLabel = "🥈 2. PLATZ";
+                resultClass = "lose";
+            } else if (rank === 3) {
+                cardClass = "card-lose";
+                resultLabel = "🥉 3. PLATZ";
+                resultClass = "lose";
+            } else {
+                cardClass = "card-lose";
+                resultLabel = "4. PLATZ";
+                resultClass = "lose";
+            }
+        }
+
+        let modeBadge = `<span class="mode-badge mode-1v1">⚔️ 1 VS 1</span>`;
+        if (b.is_internal) {
+            modeBadge = `<span class="mode-badge mode-derby">⚔️ INTERNES DERBY</span>`;
+        } else if (bMode === "2v2") {
+            modeBadge = `<span class="mode-badge mode-2v2">👥 2 VS 2 TEAM</span>`;
+        } else if (bMode === "1v1v1") {
+            modeBadge = `<span class="mode-badge mode-1v1v1">🔺 1 VS 1 VS 1 (3ER)</span>`;
+        } else if (bMode === "1v1v1v1") {
+            modeBadge = `<span class="mode-badge mode-1v1v1v1">⚡ 4ER-EINZEL (1V1V1V1)</span>`;
         }
 
         const dateStr = (b.created_at || "").replace("T", " ").substring(0, 16);
@@ -609,32 +687,104 @@ function renderPublicBattlesFeed(data) {
         const sPct = totScore > 0 ? Math.round((sScore / totScore) * 100) : 50;
         const oPct = 100 - sPct;
 
-        const mvpName = b.mvp_supporter_nickname || b.mvp_supporter_username;
-        const mvpPoints = b.mvp_supporter_points || 0;
-        const mvpHtml = mvpName ? `
-            <div class="battle-mvp-strip" style="margin-top:8px;">
-                <div class="mvp-badge-container">
-                    <span class="mvp-icon">👑</span>
-                    <span class="mvp-label">MVP:</span>
-                    <span class="mvp-name">${escapeHtml(mvpName)}</span>
-                </div>
-                <div class="mvp-points">${fmtNum(mvpPoints)} Pkt</div>
-            </div>
-        ` : "";
+        let matchupHtml = "";
+        if (isFfa) {
+            const players = [
+                {
+                    username: b.streamer_username,
+                    name: b.streamer_display_name || b.streamer_username,
+                    avatar: b.streamer_avatar_url || '/pictures/bot_avatar.jpg',
+                    score: sScore,
+                    isMine: true,
+                },
+                {
+                    username: b.opponent_username || "Gegner 1",
+                    name: b.opponent_display_name || b.opponent_username || "Gegner 1",
+                    avatar: b.opponent_avatar_url || '/pictures/bot_avatar.jpg',
+                    score: oScore,
+                    isMine: false,
+                },
+                {
+                    username: b.opponent2_username || "Gegner 2",
+                    name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
+                    avatar: b.opponent2_avatar_url || '/pictures/bot_avatar.jpg',
+                    score: b.opponent2_score || 0,
+                    isMine: false,
+                },
+            ];
+            if (bMode === "1v1v1v1" || b.opponent3_username) {
+                players.push({
+                    username: b.opponent3_username || "Gegner 3",
+                    name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
+                    avatar: b.opponent3_avatar_url || '/pictures/bot_avatar.jpg',
+                    score: b.opponent3_score || 0,
+                    isMine: false,
+                });
+            }
 
-        return `
-            <div class="battle-match-card ${cardClass}" style="margin-bottom:12px;">
-                <div class="battle-card-header">
-                    <div class="battle-meta-left">
-                        <span class="mode-badge mode-${bMode}">${bMode.toUpperCase()}</span>
-                        <span class="battle-timestamp mono">${escapeHtml(dateStr)}</span>
-                        ${b.duration_seconds ? `<span class="battle-duration mono">${Math.floor(b.duration_seconds / 60)}m ${b.duration_seconds % 60}s</span>` : ""}
+            players.sort((x, y) => (y.score || 0) - (x.score || 0));
+            const maxScore = Math.max(1, ...players.map(p => p.score || 0));
+            const rankPills = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
+
+            matchupHtml = `
+                <div class="battle-ffa-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin:10px 0;">
+                    ${players.map((p, idx) => {
+                        const rankPill = rankPills[idx] || `#${idx + 1}`;
+                        const pct = Math.round(((p.score || 0) / maxScore) * 100);
+                        const isWinnerSlot = idx === 0 && p.score > 0;
+                        return `
+                            <div class="ffa-player-card ${p.isMine ? 'is-my-streamer' : ''} ${isWinnerSlot ? 'is-winner' : ''}" style="background:rgba(255,255,255,0.03); border:1px solid ${isWinnerSlot ? '#f59e0b' : 'rgba(255,255,255,0.08)'}; border-radius:8px; padding:10px; text-align:center;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:11px; font-weight:700;">
+                                    <span style="color:#f59e0b;">${rankPill}</span>
+                                    ${isWinnerSlot ? '<span>👑</span>' : '<span></span>'}
+                                </div>
+                                <div class="participant-avatar-wrap" style="width:44px; height:44px; margin:0 auto 6px; border-radius:50%; overflow:hidden;">
+                                    <img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.username)}" class="battle-avatar ${isWinnerSlot ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg';" />
+                                </div>
+                                <div style="font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+                                <div class="mono" style="font-size:10px; color:var(--text-muted);">@${escapeHtml(p.username)}</div>
+                                <div class="mono" style="font-size:15px; font-weight:800; color:${isWinnerSlot ? '#10b981' : '#38bdf8'}; margin-top:4px;">${fmtNum(p.score || 0)} <span style="font-size:10px; color:var(--text-muted);">Pkt</span></div>
+                                <div style="height:4px; background:rgba(255,255,255,0.1); border-radius:2px; margin-top:6px; overflow:hidden;">
+                                    <div style="height:100%; width:${pct}%; background:${isWinnerSlot ? '#10b981' : '#38bdf8'};"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join("")}
+                </div>
+            `;
+        } else if (is2v2) {
+            matchupHtml = `
+                <div class="battle-arena-1v1">
+                    <div class="battle-participant streamer">
+                        <div class="participant-avatar-wrap">
+                            <img src="${escapeHtml(b.streamer_avatar_url || '/pictures/bot_avatar.jpg')}" alt="Streamer" class="battle-avatar ${isWin ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                        </div>
+                        <div class="participant-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
+                        <div class="participant-handle mono">@${escapeHtml(b.streamer_username)}</div>
+                        ${b.teammate_username ? `<div class="mono muted" style="font-size:10px;">+ @${escapeHtml(b.teammate_username)}</div>` : ''}
+                        <div class="participant-score ${isWin ? 'score-win' : ''}">${fmtNum(sScore)}</div>
                     </div>
-                    <div>
-                        <span class="result-badge ${resultClass}">${resultLabel}</span>
+                    <div class="battle-versus-center">
+                        <span class="vs-badge">VS</span>
+                        <div class="versus-bar-container">
+                            <div class="versus-bar-fill-streamer" style="width: ${sPct}%;"></div>
+                            <div class="versus-bar-fill-opponent" style="width: ${oPct}%;"></div>
+                        </div>
+                        <div class="score-delta-text">${sPct}% : ${oPct}%</div>
+                    </div>
+                    <div class="battle-participant opponent">
+                        <div class="participant-avatar-wrap">
+                            <img src="${escapeHtml(b.opponent_avatar_url || '/pictures/bot_avatar.jpg')}" alt="Gegner" class="battle-avatar ${isLose ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                        </div>
+                        <div class="participant-name">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
+                        <div class="participant-handle mono">@${escapeHtml(b.opponent_username || 'unbekannt')}</div>
+                        ${b.opponent2_username ? `<div class="mono muted" style="font-size:10px;">+ @${escapeHtml(b.opponent2_username)}</div>` : ''}
+                        <div class="participant-score ${isLose ? 'score-win' : ''}">${fmtNum(oScore)}</div>
                     </div>
                 </div>
-
+            `;
+        } else {
+            matchupHtml = `
                 <div class="battle-arena-1v1">
                     <div class="battle-participant streamer">
                         <div class="participant-avatar-wrap">
@@ -663,7 +813,36 @@ function renderPublicBattlesFeed(data) {
                         <div class="participant-score ${isLose ? 'score-win' : ''}">${fmtNum(oScore)}</div>
                     </div>
                 </div>
+            `;
+        }
 
+        const mvpName = b.mvp_supporter_nickname || b.mvp_supporter_username;
+        const mvpPoints = b.mvp_supporter_points || 0;
+        const mvpHtml = mvpName ? `
+            <div class="battle-mvp-strip" style="margin-top:8px;">
+                <div class="mvp-badge-container">
+                    <span class="mvp-icon">👑</span>
+                    <span class="mvp-label">MVP:</span>
+                    <span class="mvp-name">${escapeHtml(mvpName)}</span>
+                </div>
+                <div class="mvp-points">${fmtNum(mvpPoints)} Pkt</div>
+            </div>
+        ` : "";
+
+        return `
+            <div class="battle-match-card ${cardClass}" style="margin-bottom:12px;">
+                <div class="battle-card-header">
+                    <div class="battle-meta-left">
+                        ${modeBadge}
+                        <span class="battle-timestamp mono">${escapeHtml(dateStr)}</span>
+                        ${b.duration_seconds ? `<span class="battle-duration mono">${Math.floor(b.duration_seconds / 60)}m ${b.duration_seconds % 60}s</span>` : ""}
+                    </div>
+                    <div>
+                        <span class="result-badge ${resultClass}">${resultLabel}</span>
+                    </div>
+                </div>
+
+                ${matchupHtml}
                 ${mvpHtml}
 
                 <div class="battle-card-footer">

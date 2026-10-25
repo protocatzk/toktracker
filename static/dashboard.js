@@ -1409,7 +1409,55 @@ function renderLiveActiveBattles(liveBattles) {
     container.style.display = "block";
     list.innerHTML = validLive.map(item => {
         const b = item.battle || {};
+        const bMode = b.battle_mode || "1v1";
+        const isFfa = b.is_ffa || bMode === "1v1v1" || bMode === "1v1v1v1";
         const isInternal = Boolean(b.is_internal);
+
+        if (isFfa) {
+            const players = (b.participants && b.participants.length > 0) ? b.participants : [
+                { username: item.username, display_name: item.display_name, avatar_url: item.avatar_url, score: b.streamer_score || 0, is_tracked: true },
+                { username: b.opponent_username || "Gegner 1", display_name: b.opponent_display_name || b.opponent_username || "Gegner 1", avatar_url: b.opponent_avatar_url, score: b.opponent_score || 0 },
+                { username: b.opponent2_username || "Gegner 2", display_name: b.opponent2_display_name || b.opponent2_username || "Gegner 2", avatar_url: b.opponent2_avatar_url, score: b.opponent2_score || 0 },
+            ];
+            if ((bMode === "1v1v1v1" || b.opponent3_username) && (!b.participants || b.participants.length < 4)) {
+                players.push({ username: b.opponent3_username || "Gegner 3", display_name: b.opponent3_display_name || b.opponent3_username || "Gegner 3", avatar_url: b.opponent3_avatar_url, score: b.opponent3_score || 0 });
+            }
+            players.sort((x, y) => (y.score || 0) - (x.score || 0));
+
+            const rankBadges = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
+            const modeLabel = bMode === "1v1v1v1" ? "⚡ 4ER-EINZEL LIVE" : "🔺 1 VS 1 VS 1 (3ER) LIVE";
+
+            return `
+                <div class="live-active-card card-ffa" style="background:var(--bg-card); border:1px solid #f59e0b; border-left:4px solid #f59e0b; border-radius:6px; padding:12px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="live-pulse" style="background:#f59e0b;"></span>
+                            <span class="mode-badge mode-${bMode}" style="font-size:11px; padding:2px 8px;">${modeLabel}</span>
+                            <span class="muted" style="font-size:11px;">Battle #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</span>
+                        </div>
+                        <div>
+                            <span class="pct-pill" style="border-color:#f59e0b; color:#f59e0b; font-weight:700;">🔥 +${(b.total_coins || b.coins_earned || 0).toLocaleString("de-DE")} Coins</span>
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">
+                        ${players.map((p, idx) => `
+                            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; text-align:center;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; font-weight:700; margin-bottom:4px;">
+                                    <span style="color:#f59e0b;">${rankBadges[idx] || `#${idx+1}`}</span>
+                                    ${p.is_tracked ? '<span style="color:#10b981;">● Getrackt</span>' : ''}
+                                </div>
+                                <div style="width:38px; height:38px; margin:0 auto 4px; border-radius:50%; overflow:hidden;">
+                                    <img src="${escapeHtml(p.avatar_url || '/static/avatar_default.png')}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='/static/avatar_default.png'" />
+                                </div>
+                                <div style="font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.display_name || p.username || '')}</div>
+                                <div class="mono" style="font-size:10px; color:var(--text-muted);">@${escapeHtml(p.username || '')}</div>
+                                <div class="mono" style="font-size:15px; font-weight:800; color:#38bdf8; margin-top:4px;">${(p.score || 0).toLocaleString("de-DE")} <span style="font-size:9px; color:var(--text-muted);">Pkt</span></div>
+                            </div>
+                        `).join("")}
+                    </div>
+                </div>
+            `;
+        }
 
         if (isInternal) {
             const sA = b.streamer_a || {};
@@ -1449,9 +1497,7 @@ function renderLiveActiveBattles(liveBattles) {
         const oScore = (b.opponent_score || 0).toLocaleString("de-DE");
         const coins = (b.coins_earned || 0).toLocaleString("de-DE");
 
-        const bMode = b.battle_mode || "1v1";
         const is2v2 = bMode === "2v2" || Boolean(b.teammate_username);
-        const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
 
         let modeBadge = `<span class="mode-badge mode-1v1" style="font-size:10px; padding:1px 5px;">1v1</span>`;
         if (bMode === "2v2") {
@@ -1529,7 +1575,26 @@ function renderBattlesFeed(data) {
         let resultLabel = "🤝 UNENTSCHIEDEN";
         let resultClass = "draw";
 
-        if (isInternal) {
+        if (isFfa && !isOngoing) {
+            const rank = b.streamer_rank || (isWin ? 1 : 2);
+            if (rank === 1) {
+                cardClass = "card-win";
+                resultLabel = "🥇 1. PLATZ (SIEG)";
+                resultClass = "win";
+            } else if (rank === 2) {
+                cardClass = "card-lose";
+                resultLabel = "🥈 2. PLATZ";
+                resultClass = "lose";
+            } else if (rank === 3) {
+                cardClass = "card-lose";
+                resultLabel = "🥉 3. PLATZ";
+                resultClass = "lose";
+            } else {
+                cardClass = "card-lose";
+                resultLabel = "4. PLATZ";
+                resultClass = "lose";
+            }
+        } else if (isInternal) {
             cardClass = "card-derby";
             if (b.is_single_view) {
                 if (isWin) {
@@ -1550,25 +1615,6 @@ function renderBattlesFeed(data) {
                     resultLabel = "🤝 UNENTSCHIEDEN";
                     resultClass = "draw";
                 }
-            }
-        } else if (isFfa && !isOngoing) {
-            const rank = b.streamer_rank || (isWin ? 1 : 2);
-            if (rank === 1) {
-                cardClass = "card-win";
-                resultLabel = "🥇 1. PLATZ (SIEG)";
-                resultClass = "win";
-            } else if (rank === 2) {
-                cardClass = "card-lose";
-                resultLabel = "🥈 2. PLATZ";
-                resultClass = "lose";
-            } else if (rank === 3) {
-                cardClass = "card-lose";
-                resultLabel = "🥉 3. PLATZ";
-                resultClass = "lose";
-            } else {
-                cardClass = "card-lose";
-                resultLabel = "4. PLATZ";
-                resultClass = "lose";
             }
         } else if (isWin) {
             cardClass = "card-win";
@@ -1603,14 +1649,14 @@ function renderBattlesFeed(data) {
         const matchDate = b.started_at ? b.started_at.replace("T", " ").substring(0, 16) : "-";
 
         let modeBadge = `<span class="mode-badge mode-1v1">⚔️ 1 VS 1</span>`;
-        if (isInternal) {
-            modeBadge = `<span class="mode-badge mode-derby">⚔️ INTERNES DERBY</span>`;
-        } else if (bMode === "2v2") {
-            modeBadge = `<span class="mode-badge mode-2v2">👥 2 VS 2 TEAM</span>`;
-        } else if (bMode === "1v1v1") {
+        if (bMode === "1v1v1") {
             modeBadge = `<span class="mode-badge mode-1v1v1">🔺 1 VS 1 VS 1 (3ER)</span>`;
         } else if (bMode === "1v1v1v1") {
             modeBadge = `<span class="mode-badge mode-1v1v1v1">⚡ 4ER-EINZEL (1V1V1V1)</span>`;
+        } else if (bMode === "2v2") {
+            modeBadge = `<span class="mode-badge mode-2v2">👥 2 VS 2 TEAM</span>`;
+        } else if (isInternal) {
+            modeBadge = `<span class="mode-badge mode-derby">⚔️ INTERNES DERBY</span>`;
         }
 
         let matchupRowHtml = "";

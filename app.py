@@ -638,8 +638,8 @@ def consolidate_live_battles(
 ) -> List[Dict[str, Any]]:
     """
     Konsolidiert aktive TikTok-Live-Battles aus den Workern.
-    Erkennt interne Duelle (beide Duellanten getrackt) und fasst sie zu einer
-    einheitlichen "Internes Derby"-Karte zusammen, anstatt zwei separate Karten anzuzeigen.
+    Erkennt 1v1, 2v2, 1v1v1 (3er-Matches) sowie 1v1v1v1 (4er-Einzel) und fasst
+    mehrere getrackte Teilnehmer desselben Matches zu einer konsistenten Live-Karte zusammen.
     """
     active_items = []
     for w in raw_workers:
@@ -657,75 +657,199 @@ def consolidate_live_battles(
             "battle": dict(ab),
         })
 
-    consolidated = []
-    merged_indices = set()
+    # Gruppierung nach battle_id (oder wechselseitigen Gegnern bei 1v1)
+    groups: List[List[Dict[str, Any]]] = []
+    used_indices = set()
 
     for i, item1 in enumerate(active_items):
-        if i in merged_indices:
+        if i in used_indices:
             continue
-
         b1 = item1["battle"]
         b1_id = str(b1.get("battle_id") or "").strip()
         uname1 = item1["username"].lower()
         opp1 = str(b1.get("opponent_username") or "").lower()
 
-        # Prüfen, ob ein anderer Worker dasselbe Battle hat
-        partner_item = None
+        group = [item1]
+        used_indices.add(i)
+
         for j, item2 in enumerate(active_items):
-            if i == j or j in merged_indices:
+            if j in used_indices:
                 continue
             b2 = item2["battle"]
             b2_id = str(b2.get("battle_id") or "").strip()
             uname2 = item2["username"].lower()
             opp2 = str(b2.get("opponent_username") or "").lower()
 
-            # Gleiche battle_id oder wechselseitige Gegner
-            if (b1_id and b1_id == b2_id) or (uname1 and opp1 and uname1 == opp2 and uname2 == opp1):
-                partner_item = item2
-                merged_indices.add(j)
-                break
+            matches = False
+            if b1_id and b2_id and b1_id == b2_id:
+                matches = True
+            elif (uname1 and opp1 and uname1 == opp2 and uname2 == opp1):
+                matches = True
+            elif b1.get("battle_mode") in ("1v1v1", "1v1v1v1") and b2.get("battle_mode") in ("1v1v1", "1v1v1v1"):
+                # Prüfen, ob Kontrahenten übereinstimmen
+                b1_opps = {str(b1.get("opponent_username") or "").lower(), str(b1.get("opponent2_username") or "").lower(), str(b1.get("opponent3_username") or "").lower()}
+                if uname2 in b1_opps:
+                    matches = True
 
-        if partner_item:
-            merged_indices.add(i)
-            # Internes Duell zusammenführen
+            if matches:
+                group.append(item2)
+                used_indices.add(j)
+
+        groups.append(group)
+
+    consolidated = []
+
+    for group in groups:
+        if filter_streamer_id:
+            if not any(it["streamer_id"] == filter_streamer_id for it in group):
+                continue
+
+        # Modus ermitteln
+        b_mode = "1v1"
+        for it in group:
+            m = str(it["battle"].get("battle_mode") or "")
+            if m in ("1v1v1", "1v1v1v1", "2v2"):
+                b_mode = m
+                break
+        if len(group) == 3 and b_mode == "1v1":
+            b_mode = "1v1v1"
+        elif len(group) >= 4 and b_mode == "1v1":
+            b_mode = "1v1v1v1"
+
+        base_item = group[0]
+        base_battle = dict(base_item["battle"])
+        base_battle["battle_mode"] = b_mode
+
+        # FALL A: 1v1v1 (3er-Match) oder 1v1v1v1 (4er-Einzel) -> FFA-Struktur
+        if b_mode in ("1v1v1", "1v1v1v1") or len(group) >= 3:
+            b_mode = "1v1v1" if (b_mode == "1v1v1" or len(group) == 3) else "1v1v1v1"
+            base_battle["battle_mode"] = b_mode
+            base_battle["is_ffa"] = True
+            base_battle["is_internal"] = False
+
+            # Alle Teilnehmer zusammentragen
+            participants_map: Dict[str, Dict[str, Any]] = {}
+            total_coins = 0
+            total_eur = 0.0
+
+            # 1. Getrackte Streamer der Gruppe erfassen
+            for it in group:
+                u = it["username"].lower()
+                b = it["battle"]
+                s_score = b.get("streamer_score", 0) or 0
+                c_earned = b.get("coins_earned", 0) or 0
+                e_net = float(b.get("eur_net", 0.0) or 0.0)
+                total_coins += c_earned
+                total_eur += e_net
+
+                participants_map[u] = {
+                    "streamer_id": it["streamer_id"],
+                    "username": it["username"],
+                    "display_name": it["display_name"],
+                    "avatar_url": it["avatar_url"],
+                    "score": s_score,
+                    "coins_earned": c_earned,
+                    "eur_net": round(e_net, 2),
+                    "is_tracked": True,
+                }
+
+            # 2. Externe Gegner aus den Battles der Gruppe ergänzen
+            for it in group:
+                b = it["battle"]
+                opp_specs = [
+                    (b.get("opponent_username"), b.get("opponent_display_name"), b.get("opponent_avatar_url"), b.get("opponent_score", 0)),
+                    (b.get("opponent2_username"), b.get("opponent2_display_name"), b.get("opponent2_avatar_url"), b.get("opponent2_score", 0)),
+                    (b.get("opponent3_username"), b.get("opponent3_display_name"), b.get("opponent3_avatar_url"), b.get("opponent3_score", 0)),
+                ]
+                for o_u, o_d, o_a, o_s in opp_specs:
+                    if not o_u:
+                        continue
+                    o_u_clean = str(o_u).lstrip("@").lower()
+                    if o_u_clean and o_u_clean not in participants_map:
+                        st_info = streamer_map.get(o_u_clean) or {}
+                        participants_map[o_u_clean] = {
+                            "streamer_id": st_info.get("id"),
+                            "username": o_u,
+                            "display_name": o_d or st_info.get("display_name") or o_u,
+                            "avatar_url": o_a or st_info.get("avatar_url") or "",
+                            "score": int(o_s or 0),
+                            "coins_earned": 0,
+                            "eur_net": 0.0,
+                            "is_tracked": bool(st_info),
+                        }
+
+            participants = list(participants_map.values())
+            participants.sort(key=lambda x: x["score"], reverse=True)
+            for idx, p in enumerate(participants):
+                p["rank"] = idx + 1
+
+            base_battle["participants"] = participants
+            base_battle["total_coins"] = total_coins
+            base_battle["total_eur_net"] = round(total_eur, 2)
+            base_battle["coins_earned"] = total_coins
+            base_battle["eur_net"] = round(total_eur, 2)
+
+            # Abwärtskompatible Felder für ältere Templates
+            if len(participants) > 0:
+                base_battle["streamer_username"] = participants[0]["username"]
+                base_battle["streamer_score"] = participants[0]["score"]
+            if len(participants) > 1:
+                base_battle["opponent_username"] = participants[1]["username"]
+                base_battle["opponent_display_name"] = participants[1]["display_name"]
+                base_battle["opponent_avatar_url"] = participants[1]["avatar_url"]
+                base_battle["opponent_score"] = participants[1]["score"]
+            if len(participants) > 2:
+                base_battle["opponent2_username"] = participants[2]["username"]
+                base_battle["opponent2_display_name"] = participants[2]["display_name"]
+                base_battle["opponent2_avatar_url"] = participants[2]["avatar_url"]
+                base_battle["opponent2_score"] = participants[2]["score"]
+            if len(participants) > 3:
+                base_battle["opponent3_username"] = participants[3]["username"]
+                base_battle["opponent3_display_name"] = participants[3]["display_name"]
+                base_battle["opponent3_avatar_url"] = participants[3]["avatar_url"]
+                base_battle["opponent3_score"] = participants[3]["score"]
+
+            consolidated.append({
+                "streamer_id": base_item["streamer_id"],
+                "username": base_item["username"],
+                "display_name": base_item["display_name"],
+                "avatar_url": base_item["avatar_url"],
+                "battle": base_battle,
+                "is_internal": False,
+            })
+
+        # FALL B: 2 getrackte Streamer im 1v1 Derby
+        elif len(group) == 2 and b_mode == "1v1":
+            item1 = group[0]
+            item2 = group[1]
+            b1 = item1["battle"]
+            b2 = item2["battle"]
+
             s1_coins = b1.get("coins_earned", 0) or 0
-            s2_coins = partner_item["battle"].get("coins_earned", 0) or 0
+            s2_coins = b2.get("coins_earned", 0) or 0
             s1_eur = float(b1.get("eur_net", 0.0) or 0.0)
-            s2_eur = float(partner_item["battle"].get("eur_net", 0.0) or 0.0)
+            s2_eur = float(b2.get("eur_net", 0.0) or 0.0)
             tot_coins = s1_coins + s2_coins
             tot_eur = round(s1_eur + s2_eur, 2)
 
             score1 = b1.get("streamer_score", 0) or 0
-            score2 = partner_item["battle"].get("streamer_score", 0) or 0
+            score2 = b2.get("streamer_score", 0) or 0
 
-            # Reihenfolge bestimmen: Wenn Filter gesetzt, gefilterter Streamer nach links; sonst Führender nach links
-            if filter_streamer_id and partner_item["streamer_id"] == filter_streamer_id:
-                left_item = partner_item
-                right_item = item1
-                left_score = score2
-                right_score = score1
-                left_coins = s2_coins
-                right_coins = s1_coins
-                left_eur = s2_eur
-                right_eur = s1_eur
+            if filter_streamer_id and item2["streamer_id"] == filter_streamer_id:
+                left_item, right_item = item2, item1
+                left_score, right_score = score2, score1
+                left_coins, right_coins = s2_coins, s1_coins
+                left_eur, right_eur = s2_eur, s1_eur
             elif not filter_streamer_id and score2 > score1:
-                left_item = partner_item
-                right_item = item1
-                left_score = score2
-                right_score = score1
-                left_coins = s2_coins
-                right_coins = s1_coins
-                left_eur = s2_eur
-                right_eur = s1_eur
+                left_item, right_item = item2, item1
+                left_score, right_score = score2, score1
+                left_coins, right_coins = s2_coins, s1_coins
+                left_eur, right_eur = s2_eur, s1_eur
             else:
-                left_item = item1
-                right_item = partner_item
-                left_score = score1
-                right_score = score2
-                left_coins = s1_coins
-                right_coins = s2_coins
-                left_eur = s1_eur
-                right_eur = s2_eur
+                left_item, right_item = item1, item2
+                left_score, right_score = score1, score2
+                left_coins, right_coins = s1_coins, s2_coins
+                left_eur, right_eur = s1_eur, s2_eur
 
             streamer_a = {
                 "id": left_item["streamer_id"],
@@ -748,6 +872,7 @@ def consolidate_live_battles(
 
             merged_battle = dict(left_item["battle"])
             merged_battle["is_internal"] = True
+            merged_battle["battle_mode"] = "1v1"
             merged_battle["streamer_a"] = streamer_a
             merged_battle["streamer_b"] = streamer_b
             merged_battle["total_coins"] = tot_coins
@@ -760,30 +885,20 @@ def consolidate_live_battles(
             merged_battle["coins_earned"] = tot_coins
             merged_battle["eur_net"] = tot_eur
 
-            if filter_streamer_id:
-                if left_item["streamer_id"] == filter_streamer_id or right_item["streamer_id"] == filter_streamer_id:
-                    consolidated.append({
-                        "streamer_id": left_item["streamer_id"],
-                        "username": left_item["username"],
-                        "display_name": left_item["display_name"],
-                        "avatar_url": left_item["avatar_url"],
-                        "battle": merged_battle,
-                        "is_internal": True,
-                    })
-            else:
-                consolidated.append({
-                    "streamer_id": left_item["streamer_id"],
-                    "username": left_item["username"],
-                    "display_name": left_item["display_name"],
-                    "avatar_url": left_item["avatar_url"],
-                    "battle": merged_battle,
-                    "is_internal": True,
-                })
+            consolidated.append({
+                "streamer_id": left_item["streamer_id"],
+                "username": left_item["username"],
+                "display_name": left_item["display_name"],
+                "avatar_url": left_item["avatar_url"],
+                "battle": merged_battle,
+                "is_internal": True,
+            })
+
+        # FALL C: Einzelner Streamer oder 2v2
         else:
-            # Normales Duell gegen externen Gegner
-            if filter_streamer_id and item1["streamer_id"] != filter_streamer_id:
-                continue
-            item1["battle"]["is_internal"] = False
+            item1 = group[0]
+            b1 = item1["battle"]
+            b1["is_internal"] = False
             consolidated.append(item1)
 
     return consolidated

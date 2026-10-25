@@ -487,7 +487,57 @@
         let html = '<div class="section-head"><div class="section-title">🔴 LIVE DUELL</div></div>';
         liveBattles.forEach(item => {
             const b = item.battle || {};
-            const isInternal = Boolean(b.is_internal);
+            const isFfa = b.is_ffa || b.battle_mode === '1v1v1' || b.battle_mode === '1v1v1v1';
+            const isInternal = Boolean(b.is_internal) && !isFfa;
+
+            if (isFfa) {
+                const bMode = b.battle_mode || '1v1v1';
+                const players = (b.participants && b.participants.length > 0) ? b.participants : [
+                    { username: item.username, display_name: item.display_name, avatar_url: item.avatar_url, score: b.streamer_score || 0, is_tracked: true },
+                    { username: b.opponent_username || "Gegner 1", display_name: b.opponent_display_name || b.opponent_username || "Gegner 1", avatar_url: b.opponent_avatar_url, score: b.opponent_score || 0 },
+                    { username: b.opponent2_username || "Gegner 2", display_name: b.opponent2_display_name || b.opponent2_username || "Gegner 2", avatar_url: b.opponent2_avatar_url, score: b.opponent2_score || 0 },
+                ];
+                if ((bMode === "1v1v1v1" || b.opponent3_username) && (!b.participants || b.participants.length < 4)) {
+                    players.push({ username: b.opponent3_username || "Gegner 3", display_name: b.opponent3_display_name || b.opponent3_username || "Gegner 3", avatar_url: b.opponent3_avatar_url, score: b.opponent3_score || 0 });
+                }
+                players.sort((x, y) => (y.score || 0) - (x.score || 0));
+                const rankBadges = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
+                const modeLabel = bMode === "1v1v1v1" ? "⚡ 4ER-EINZEL" : "🔺 1 VS 1 VS 1";
+
+                html += `
+                    <div class="battle-card-mobile active-match" style="border-left: 4px solid #f59e0b;">
+                        <div class="battle-card-header">
+                            <span class="match-mode-pill mode-${escapeHtml(bMode)}">${escapeHtml(modeLabel)}</span>
+                            <span class="match-result-badge live">LIVE BATTLE</span>
+                        </div>
+
+                        <div class="ffa-ranks-list">
+                            ${players.map((p, idx) => `
+                                <div class="ffa-row-item ${p.is_tracked ? 'is-tracked' : ''}">
+                                    <div class="ffa-player-meta">
+                                        <span class="ffa-rank-tag" style="${idx === 0 ? 'color:#f59e0b;' : ''}">${rankBadges[idx] || `#${idx+1}`}</span>
+                                        <img src="${escapeHtml(p.avatar_url || '/static/avatar_default.png')}" class="ffa-avatar-small" onerror="this.src='/static/avatar_default.png'">
+                                        <div style="min-width:0;">
+                                            <div class="ffa-name">${escapeHtml(p.display_name || p.username || '')}</div>
+                                            <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">@${escapeHtml(p.username || '')}</div>
+                                        </div>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <div class="ffa-score" style="color:#38bdf8;">${formatNumber(p.score || 0)}</div>
+                                        ${p.eur_net !== undefined ? `<div style="font-size:10px; color:#10b981; font-weight:700;">+${formatCurrency(p.eur_net || 0)}</div>` : ''}
+                                    </div>
+                                </div>
+                            `).join("")}
+                        </div>
+
+                        <div class="battle-card-footer">
+                            <span>Battle #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</span>
+                            <span class="battle-earnings-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b;">🔥 +${formatNumber(b.total_coins || b.coins_earned || 0)} Coins</span>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
 
             if (isInternal) {
                 const sA = b.streamer_a || {};
@@ -609,7 +659,89 @@
 
         let html = "";
         battles.forEach(b => {
-            const isInternal = Boolean(b.is_internal);
+            const bMode = b.battle_mode || "1v1";
+            const isFfa = b.is_ffa || bMode === "1v1v1" || bMode === "1v1v1v1";
+            const isInternal = Boolean(b.is_internal) && !isFfa;
+
+            if (isFfa) {
+                const sScore = b.streamer_score || 0;
+                const oScore = b.opponent_score || 0;
+                const players = [
+                    {
+                        username: b.streamer_username,
+                        display_name: b.streamer_display_name || b.streamer_username,
+                        avatar_url: b.streamer_avatar_url || '/static/avatar_default.png',
+                        score: sScore,
+                        is_tracked: true,
+                        eur_net: b.eur_net,
+                    },
+                    {
+                        username: b.opponent_username || "Gegner 1",
+                        display_name: b.opponent_display_name || b.opponent_username || "Gegner 1",
+                        avatar_url: b.opponent_avatar_url || '/static/avatar_default.png',
+                        score: oScore,
+                        is_tracked: false,
+                    },
+                    {
+                        username: b.opponent2_username || "Gegner 2",
+                        display_name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
+                        avatar_url: b.opponent2_avatar_url || '/static/avatar_default.png',
+                        score: b.opponent2_score || 0,
+                        is_tracked: false,
+                    },
+                ];
+                if (bMode === "1v1v1v1" || b.opponent3_username) {
+                    players.push({
+                        username: b.opponent3_username || "Gegner 3",
+                        display_name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
+                        avatar_url: b.opponent3_avatar_url || '/static/avatar_default.png',
+                        score: b.opponent3_score || 0,
+                        is_tracked: false,
+                    });
+                }
+                players.sort((x, y) => (y.score || 0) - (x.score || 0));
+
+                const rank = b.streamer_rank || (b.result === "WIN" ? 1 : 2);
+                const rankBadges = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
+                const modeLabel = bMode === "1v1v1v1" ? "⚡ 4ER-EINZEL" : "🔺 1 VS 1 VS 1";
+                const resClass = rank === 1 ? "win" : "lose";
+                const resLabel = rank === 1 ? "🥇 1. PLATZ" : (rank === 2 ? "🥈 2. PLATZ" : (rank === 3 ? "🥉 3. PLATZ" : "4. PLATZ"));
+                const relTime = getRelativeTime(b.started_at || b.created_at);
+
+                html += `
+                    <div class="battle-card-mobile ${rank === 1 ? 'card-win' : ''}" style="${rank === 1 ? 'border-left: 4px solid var(--color-win);' : ''}">
+                        <div class="battle-card-header">
+                            <span class="match-mode-pill mode-${escapeHtml(bMode)}">${escapeHtml(modeLabel)}</span>
+                            <span class="match-result-badge ${resClass}">${resLabel}</span>
+                        </div>
+
+                        <div class="ffa-ranks-list">
+                            ${players.map((p, idx) => `
+                                <div class="ffa-row-item ${p.is_tracked ? 'is-tracked' : ''}">
+                                    <div class="ffa-player-meta">
+                                        <span class="ffa-rank-tag" style="${idx === 0 ? 'color:#f59e0b;' : ''}">${rankBadges[idx] || `#${idx+1}`}</span>
+                                        <img src="${escapeHtml(p.avatar_url || '/static/avatar_default.png')}" class="ffa-avatar-small" onerror="this.src='/static/avatar_default.png'">
+                                        <div style="min-width:0;">
+                                            <div class="ffa-name">${escapeHtml(p.display_name || p.username || '')}</div>
+                                            <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">@${escapeHtml(p.username || '')}</div>
+                                        </div>
+                                    </div>
+                                    <div style="text-align:right;">
+                                        <div class="ffa-score">${formatNumber(p.score || 0)}</div>
+                                        ${p.eur_net !== undefined ? `<div style="font-size:10px; color:#10b981; font-weight:700;">+${formatCurrency(p.eur_net || 0)}</div>` : ''}
+                                    </div>
+                                </div>
+                            `).join("")}
+                        </div>
+
+                        <div class="battle-card-footer">
+                            <span>${relTime} · ${formatNumber(b.coins_earned || 0)} Coins</span>
+                            <span class="battle-earnings-badge">+${formatCurrency(b.eur_net || 0, "EUR")}</span>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
 
             if (isInternal) {
                 const sA = b.streamer_a || {};

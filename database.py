@@ -2476,14 +2476,41 @@ def record_battle_start(
 
         existing = conn.execute(
             """
-            SELECT id, battle_mode, opponent_username, teammate_username, opponent2_username, opponent3_username FROM tiktok_battles
-            WHERE streamer_id = ? AND battle_id = ? AND status = 'active'
+            SELECT id, status, battle_mode, opponent_username, teammate_username, opponent2_username, opponent3_username FROM tiktok_battles
+            WHERE streamer_id = ? AND battle_id = ?
             ORDER BY id DESC LIMIT 1
             """,
             (streamer_id, str(battle_id)),
         ).fetchone()
         if existing:
-            # Nachträgliche Aktualisierung falls Partner/Gegner erst jetzt per Event bekannt wurden
+            # Wenn bereits beendet, nur fehlende Metadaten nachtragen, aber Status nicht zurücksetzen
+            if existing["status"] == "finished":
+                conn.execute(
+                    """
+                    UPDATE tiktok_battles
+                    SET battle_mode = CASE WHEN (battle_mode IS NULL OR battle_mode = '1v1') AND ? != '1v1' THEN ? ELSE battle_mode END,
+                        opponent_username = CASE WHEN (opponent_username IS NULL OR opponent_username = '') THEN ? ELSE opponent_username END,
+                        opponent_display_name = CASE WHEN (opponent_display_name IS NULL OR opponent_display_name = '') THEN ? ELSE opponent_display_name END,
+                        opponent_avatar_url = CASE WHEN (opponent_avatar_url IS NULL OR opponent_avatar_url = '') THEN ? ELSE opponent_avatar_url END,
+                        opponent2_username = CASE WHEN (opponent2_username IS NULL OR opponent2_username = '') THEN ? ELSE opponent2_username END,
+                        opponent2_display_name = CASE WHEN (opponent2_display_name IS NULL OR opponent2_display_name = '') THEN ? ELSE opponent2_display_name END,
+                        opponent2_avatar_url = CASE WHEN (opponent2_avatar_url IS NULL OR opponent2_avatar_url = '') THEN ? ELSE opponent2_avatar_url END,
+                        opponent3_username = CASE WHEN (opponent3_username IS NULL OR opponent3_username = '') THEN ? ELSE opponent3_username END,
+                        opponent3_display_name = CASE WHEN (opponent3_display_name IS NULL OR opponent3_display_name = '') THEN ? ELSE opponent3_display_name END,
+                        opponent3_avatar_url = CASE WHEN (opponent3_avatar_url IS NULL OR opponent3_avatar_url = '') THEN ? ELSE opponent3_avatar_url END
+                    WHERE id = ?
+                    """,
+                    (
+                        battle_mode, battle_mode,
+                        str(opponent_username or ""), str(opponent_display_name or opponent_username or ""), str(opponent_avatar_url or ""),
+                        str(opponent2_username or ""), str(opponent2_display_name or opponent2_username or ""), str(opponent2_avatar_url or ""),
+                        str(opponent3_username or ""), str(opponent3_display_name or opponent3_username or ""), str(opponent3_avatar_url or ""),
+                        int(existing["id"]),
+                    ),
+                )
+                return int(existing["id"])
+
+            # Nachträgliche Aktualisierung für noch aktives Battle
             conn.execute(
                 """
                 UPDATE tiktok_battles
@@ -2907,7 +2934,23 @@ def get_battles_list(
                     except Exception:
                         pass
 
-            if partner_row or is_opp_tracked:
+            is_ffa = str(b.get("battle_mode") or "").lower() in ("1v1v1", "1v1v1v1")
+            if is_ffa:
+                b["is_internal"] = False
+                # Gegnerdetails anreichern, falls es getrackte Streamer sind
+                for opp_key, dname_key, av_key in [
+                    ("opponent_username", "opponent_display_name", "opponent_avatar_url"),
+                    ("opponent2_username", "opponent2_display_name", "opponent2_avatar_url"),
+                    ("opponent3_username", "opponent3_display_name", "opponent3_avatar_url"),
+                ]:
+                    u = str(b.get(opp_key) or "").lower()
+                    if u in streamer_by_uname:
+                        st = streamer_by_uname[u]
+                        if not b.get(dname_key) or b.get(dname_key) == b.get(opp_key):
+                            b[dname_key] = st.get("display_name") or b.get(dname_key)
+                        if not b.get(av_key) or "/pictures/" in str(b.get(av_key)):
+                            b[av_key] = st.get("avatar_url") or b.get(av_key)
+            elif partner_row or is_opp_tracked:
                 b["is_internal"] = True
                 p = partner_row or {}
                 partner_st = streamer_by_uname.get(opp_uname) or {}
