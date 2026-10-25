@@ -5,6 +5,7 @@ import io
 import json
 import os
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,8 @@ from database import (
     get_battles_list,
     get_battle_stats,
     get_battle_details,
+    get_chat_analysis,
+    get_chat_export_data,
     get_chat_messages,
     get_dashboard_overview,
     get_db,
@@ -35,6 +38,7 @@ from database import (
     get_recent_whale_gifts,
     get_settings,
     get_site_analytics_overview,
+    get_stream_sessions,
     get_streamer_by_id_or_username,
     get_streamer_detail,
     get_telegram_access_mode,
@@ -441,6 +445,35 @@ async def donor_radar_page(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+        },
+    )
+
+
+@app.get("/chat-intelligence", response_class=HTMLResponse, include_in_schema=False)
+async def chat_intelligence_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Chat-Intelligence & Wortwolken-Viewer (/chat-intelligence).
+    Bietet Stream-Chat-Logs, interaktive Wortwolke, Top-Phrasen und Session-Viewer.
+    """
+    settings = get_settings()
+    is_public_mode = settings.get("telegram_access_mode") == "public"
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload and not is_public_mode:
+        return RedirectResponse(url="/login", status_code=302)
+
+    init_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="chat_intelligence.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "GUEST") if session_payload else "PUBLIC",
+            "is_admin": bool(session_payload),
         },
     )
 
@@ -1669,6 +1702,7 @@ async def api_loyalty_and_overlap(
 )
 async def api_chat_logs(
     streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
+    session_id: Optional[int] = Query(None, description="Filter nach Stream-Session-ID"),
     search: Optional[str] = Query(None, description="Textsuche in Chat-Nachrichten"),
     min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
     only_whales: bool = Query(False, description="Nur Spender-Nachrichten anzeigen"),
@@ -1680,6 +1714,7 @@ async def api_chat_logs(
     messages = await asyncio.to_thread(
         get_chat_messages,
         streamer_id=streamer_id,
+        session_id=session_id,
         limit=limit,
         search=search,
         min_tier=min_tier,
@@ -1688,6 +1723,121 @@ async def api_chat_logs(
         after_id=after_id,
     )
     return {"ok": True, "messages": messages, "count": len(messages)}
+
+
+@app.get(
+    "/api/chat-intelligence/sessions",
+    tags=["Chat Intelligence"],
+    summary="Liefert Stream-Sessions mit Chat-Anzahl für das Dropdown",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_chat_intelligence_sessions(
+    streamer_id: Optional[int] = Query(None, description="Optionaler Streamer-ID Filter"),
+    status: Optional[str] = Query(None, description="active | ended"),
+    limit: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    init_db()
+    sessions = await asyncio.to_thread(
+        get_stream_sessions,
+        streamer_id=streamer_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return {"ok": True, "sessions": sessions, "count": len(sessions)}
+
+
+@app.get(
+    "/api/chat-intelligence/analysis",
+    tags=["Chat Intelligence"],
+    summary="Analysiert Chatnachrichten (Wortwolke, Top-Phrasen, Emojis, KPIs)",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_chat_intelligence_analysis(
+    streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
+    session_id: Optional[int] = Query(None, description="Stream-Session-ID"),
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+    min_word_len: int = Query(3, ge=2, le=10),
+    limit_words: int = Query(80, ge=10, le=200),
+    limit_phrases: int = Query(30, ge=5, le=100),
+    limit_emojis: int = Query(25, ge=5, le=50),
+):
+    init_db()
+    analysis = await asyncio.to_thread(
+        get_chat_analysis,
+        streamer_id=streamer_id,
+        session_id=session_id,
+        period=period,
+        min_word_len=min_word_len,
+        limit_words=limit_words,
+        limit_phrases=limit_phrases,
+        limit_emojis=limit_emojis,
+    )
+    return {"ok": True, "data": analysis}
+
+
+@app.get(
+    "/api/chat-intelligence/export",
+    tags=["Chat Intelligence"],
+    summary="Exportiert Chatnachrichten eines Streams als CSV oder Textdatei",
+    dependencies=[Depends(verify_radar_access)],
+)
+async def api_chat_intelligence_export(
+    streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
+    session_id: Optional[int] = Query(None, description="Stream-Session-ID"),
+    search: Optional[str] = Query(None, description="Suchbegriff"),
+    only_whales: bool = Query(False, description="Nur Wale/VIPs"),
+    format: str = Query("csv", description="csv | txt"),
+):
+    init_db()
+    rows = await asyncio.to_thread(
+        get_chat_export_data,
+        streamer_id=streamer_id,
+        session_id=session_id,
+        search=search,
+        only_whales=only_whales,
+    )
+
+    filename_part = f"session_{session_id}" if session_id else (f"streamer_{streamer_id}" if streamer_id else "all")
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if format.lower() == "txt":
+        lines = []
+        lines.append(f"# TokTracker Chatlog Export - {filename_part} - {timestamp_str}")
+        lines.append(f"# Gesamt Nachrichten: {len(rows)}")
+        lines.append("# " + "=" * 60)
+        for r in rows:
+            whale_tag = f"[{r['whale_tier'].upper()}] " if r.get("is_whale") and r.get("whale_tier") else ""
+            lines.append(f"[{r.get('created_at', '')}] [@{r.get('streamer_username', '')}] {whale_tag}{r.get('nickname', '')} (@{r.get('username', '')}): {r.get('comment', '')}")
+        content = "\n".join(lines)
+        return Response(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="toktracker_chat_{filename_part}_{timestamp_str}.txt"'},
+        )
+    else:
+        output = io.StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(["ID", "Timestamp", "Streamer", "SessionID", "Username", "Nickname", "IsWhale", "WhaleTier", "Message"])
+        for r in rows:
+            writer.writerow([
+                r.get("id"),
+                r.get("created_at"),
+                r.get("streamer_username"),
+                r.get("session_id") or "",
+                r.get("username"),
+                r.get("nickname"),
+                1 if r.get("is_whale") else 0,
+                r.get("whale_tier") or "",
+                r.get("comment"),
+            ])
+        content = output.getvalue()
+        return Response(
+            content=content,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="toktracker_chat_{filename_part}_{timestamp_str}.csv"'},
+        )
 
 
 

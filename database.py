@@ -5,6 +5,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple, Union
@@ -528,6 +529,7 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_created", "created_at")
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_username", "username")
         _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_whale", "is_whale, streamer_id")
+        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_session", "session_id")
         _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_username", "username")
         _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_vip", "is_vip")
 
@@ -784,6 +786,8 @@ def _init_sqlite_schema() -> None:
                 ON chat_messages(username);
             CREATE INDEX IF NOT EXISTS idx_chat_messages_whale
                 ON chat_messages(is_whale, streamer_id);
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+                ON chat_messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_donor_crm_username
                 ON donor_crm(username);
             CREATE INDEX IF NOT EXISTS idx_donor_crm_vip
@@ -4046,6 +4050,7 @@ def cleanup_old_chat_messages(days: int = 7) -> int:
 
 def get_chat_messages(
     streamer_id: Optional[int] = None,
+    session_id: Optional[int] = None,
     limit: int = 100,
     search: Optional[str] = None,
     min_tier: Optional[str] = None,
@@ -4054,7 +4059,7 @@ def get_chat_messages(
     after_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Liefert gefilterte Chat-Nachrichten pro Streamer oder global über alle Kanäle.
+    Liefert gefilterte Chat-Nachrichten pro Streamer, Session oder global über alle Kanäle.
     Unterstützt Live-Streaming über `after_id` und historische Paginierung via `before_id`.
     """
     where_clauses = ["1=1"]
@@ -4063,6 +4068,10 @@ def get_chat_messages(
     if streamer_id:
         where_clauses.append("c.streamer_id = ?")
         params.append(streamer_id)
+
+    if session_id:
+        where_clauses.append("c.session_id = ?")
+        params.append(session_id)
 
     if search:
         search_pattern = f"%{search.strip()}%"
@@ -4109,6 +4118,298 @@ def get_chat_messages(
             rd["is_whale"] = bool(rd["is_whale"])
             result.append(rd)
         return result
+
+
+def get_stream_sessions(
+    streamer_id: Optional[int] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    Liefert eine sortierte Liste aller erfassten Stream-Sessions mit Streamer-Details
+    und der Anzahl zugeordneter Chatnachrichten für das Sessions-Dropdown.
+    """
+    where_clauses = ["1=1"]
+    params: List[Any] = []
+
+    if streamer_id:
+        where_clauses.append("ss.streamer_id = ?")
+        params.append(streamer_id)
+
+    if status:
+        where_clauses.append("ss.status = ?")
+        params.append(status)
+
+    where_sql = " AND ".join(where_clauses)
+    query = f"""
+    SELECT 
+        ss.id, ss.streamer_id, ss.room_id, ss.title, ss.started_at, ss.ended_at,
+        ss.peak_viewers, ss.last_fan_tickets, ss.status,
+        s.username AS streamer_username, s.display_name AS streamer_display_name,
+        s.avatar_url AS streamer_avatar_url,
+        (SELECT COUNT(*) FROM chat_messages cm WHERE cm.session_id = ss.id) AS chat_count
+    FROM stream_sessions ss
+    JOIN streamers s ON s.id = ss.streamer_id
+    WHERE {where_sql}
+    ORDER BY ss.id DESC
+    LIMIT ? OFFSET ?
+    """
+    params.extend([max(1, min(limit, 300)), max(0, offset)])
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+COMMON_CHAT_STOP_WORDS = {
+    # Deutsch
+    "der", "die", "das", "dem", "den", "des", "ein", "eine", "einer", "eines", "einem", "einen",
+    "und", "oder", "aber", "auch", "ist", "sind", "war", "waren", "sein", "haben", "hat", "hatte",
+    "wird", "werden", "mit", "von", "aus", "bei", "nach", "zu", "zum", "zur", "in", "im", "an", "am",
+    "auf", "über", "unter", "vor", "hinter", "für", "um", "durch", "ohne", "gegen", "wie", "so", "dann",
+    "als", "wenn", "weil", "dass", "da", "hier", "dort", "wo", "wer", "was", "warum", "ich", "du", "er",
+    "sie", "es", "wir", "ihr", "mich", "dich", "ihn", "uns", "euch", "ihnen", "mir", "dir", "ihm",
+    "mein", "dein", "sein", "unser", "euer", "ihre", "meine", "deine", "seine", "unsere", "eure", "ihren",
+    "nicht", "noch", "nur", "schon", "jetzt", "wieder", "immer", "mehr", "sehr", "viel", "viele",
+    "etwas", "alles", "nichts", "man", "mal", "halt", "doch", "ja", "nein", "bitte", "danke",
+    "hallo", "servus", "moin", "guten", "hab", "habe", "hast", "geht", "gehts", "geht's", "kann", "kannst",
+    "können", "muss", "musst", "müssen", "will", "willst", "wollen", "soll", "sollte", "macht", "machen",
+    "gut", "schlecht", "okay", "ok", "dies", "diese", "dieser", "dieses", "diesem", "diesen",
+    # Englisch
+    "the", "and", "or", "but", "in", "on", "at", "to", "for", "with", "from", "by", "is", "are", "was",
+    "were", "be", "been", "have", "has", "had", "do", "does", "did", "can", "will", "would", "should",
+    "it", "its", "you", "they", "them", "my", "your", "this", "that", "what", "which", "who", "not", "no", "yes",
+}
+
+EMOJI_REGEX = re.compile(r"[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf]", re.UNICODE)
+
+
+def get_chat_analysis(
+    streamer_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    period: str = "all",
+    min_word_len: int = 3,
+    limit_words: int = 80,
+    limit_phrases: int = 30,
+    limit_emojis: int = 25,
+) -> Dict[str, Any]:
+    """
+    Führt eine hochperformante NLP-Analyse über Chatnachrichten durch:
+    - Wortwolke (Häufigkeit & Gewichtung ohne Stopwörter)
+    - Häufige Phrasen & N-Grams (2er- und 3er-Wortkombinationen)
+    - Top Emojis & Emote-Häufigkeiten
+    - Top-Chatter-Rangliste
+    - KPIs (Nachrichten gesamt, Unique Chatter, Whale-Nachrichten, etc.)
+    """
+    where_clauses = ["1=1"]
+    params: List[Any] = []
+
+    if session_id:
+        where_clauses.append("c.session_id = ?")
+        params.append(session_id)
+    elif streamer_id:
+        where_clauses.append("c.streamer_id = ?")
+        params.append(streamer_id)
+
+    if period != "all" and not session_id:
+        cutoff = _get_period_cutoff(period)
+        where_clauses.append("c.created_at >= ?")
+        params.append(cutoff)
+
+    where_sql = " AND ".join(where_clauses)
+    query = f"""
+    SELECT 
+        c.id, c.comment, c.username, c.nickname, c.avatar_url,
+        c.is_whale, c.whale_tier, c.created_at
+    FROM chat_messages c
+    WHERE {where_sql}
+    ORDER BY c.id DESC
+    LIMIT 6000
+    """
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    if not rows:
+        return {
+            "total_messages": 0,
+            "unique_chatters": 0,
+            "whale_messages": 0,
+            "avg_chars_per_msg": 0,
+            "chatter_diversity_pct": 0.0,
+            "words": [],
+            "phrases": [],
+            "emojis": [],
+            "top_chatters": [],
+        }
+
+    total_messages = len(rows)
+    all_words: List[str] = []
+    all_phrases: List[str] = []
+    all_emojis: List[str] = []
+    user_counter: Counter = Counter()
+    user_meta: Dict[str, Dict[str, Any]] = {}
+    whale_count = 0
+    total_chars = 0
+
+    for r in rows:
+        text = str(r["comment"] or "").strip()
+        total_chars += len(text)
+        username = str(r["username"] or "").strip()
+        if username:
+            user_counter[username] += 1
+            if username not in user_meta:
+                user_meta[username] = {
+                    "nickname": str(r["nickname"] or username).strip(),
+                    "avatar_url": str(r["avatar_url"] or ""),
+                    "is_whale": bool(r["is_whale"]),
+                    "whale_tier": str(r["whale_tier"] or ""),
+                }
+
+        if r["is_whale"]:
+            whale_count += 1
+
+        # Emojis finden
+        found_emojis = EMOJI_REGEX.findall(text)
+        all_emojis.extend(found_emojis)
+
+        # Bereinigung für Text-Tokens
+        cleaned = re.sub(r"https?://\S+|www\.\S+|@\w+", " ", text)
+        cleaned = re.sub(r"[^\w\s]", " ", cleaned.lower())
+        tokens = [w for w in cleaned.split() if len(w) >= 2 and not w.isdigit()]
+
+        # Wortwolken-Tokens (ohne Stopwörter, Mindestlänge)
+        valid_words = [w for w in tokens if len(w) >= min_word_len and w not in COMMON_CHAT_STOP_WORDS]
+        all_words.extend(valid_words)
+
+        # 2-Grams (Wortpaare)
+        for i in range(len(tokens) - 1):
+            w1, w2 = tokens[i], tokens[i + 1]
+            if len(w1) >= 2 and len(w2) >= 2:
+                # Mindestens ein Wort darf kein Stopwort sein
+                if w1 not in COMMON_CHAT_STOP_WORDS or w2 not in COMMON_CHAT_STOP_WORDS:
+                    all_phrases.append(f"{w1} {w2}")
+
+        # 3-Grams (3er Phrasen)
+        for i in range(len(tokens) - 2):
+            w1, w2, w3 = tokens[i], tokens[i + 1], tokens[i + 2]
+            if len(w1) >= 2 and len(w2) >= 2 and len(w3) >= 2:
+                if w1 not in COMMON_CHAT_STOP_WORDS or w2 not in COMMON_CHAT_STOP_WORDS or w3 not in COMMON_CHAT_STOP_WORDS:
+                    all_phrases.append(f"{w1} {w2} {w3}")
+
+    # 1. Wortwolken-Berechnung
+    word_counts = Counter(all_words).most_common(limit_words)
+    max_word_count = word_counts[0][1] if word_counts else 1
+    word_cloud_data = []
+    for word, count in word_counts:
+        # Gewichtung von 1 bis 100
+        weight = max(1, round((count / max_word_count) * 100))
+        word_cloud_data.append({
+            "text": word,
+            "count": count,
+            "weight": weight,
+        })
+
+    # 2. Phrasen-Ranking
+    phrase_counts = Counter(all_phrases).most_common(limit_phrases)
+    phrases_data = []
+    for phrase, count in phrase_counts:
+        if count >= 2:
+            phrases_data.append({
+                "phrase": phrase,
+                "count": count,
+                "pct": round((count / total_messages) * 100, 1),
+                "words": len(phrase.split()),
+            })
+
+    # 3. Emoji-Ranking
+    emoji_counts = Counter(all_emojis).most_common(limit_emojis)
+    emoji_data = []
+    for emo, count in emoji_counts:
+        emoji_data.append({
+            "emoji": emo,
+            "count": count,
+            "pct": round((count / total_messages) * 100, 1),
+        })
+
+    # 4. Top Chatter
+    top_chatters_raw = user_counter.most_common(12)
+    top_chatters = []
+    for uname, count in top_chatters_raw:
+        meta = user_meta.get(uname, {})
+        top_chatters.append({
+            "username": uname,
+            "nickname": meta.get("nickname", uname),
+            "avatar_url": meta.get("avatar_url", ""),
+            "is_whale": meta.get("is_whale", False),
+            "whale_tier": meta.get("whale_tier", ""),
+            "count": count,
+            "pct": round((count / total_messages) * 100, 1),
+        })
+
+    unique_chatters = len(user_counter)
+    diversity = round((unique_chatters / max(1, total_messages)) * 100, 1)
+    avg_len = round(total_chars / max(1, total_messages), 1)
+
+    return {
+        "total_messages": total_messages,
+        "unique_chatters": unique_chatters,
+        "whale_messages": whale_count,
+        "avg_chars_per_msg": avg_len,
+        "chatter_diversity_pct": diversity,
+        "words": word_cloud_data,
+        "phrases": phrases_data,
+        "emojis": emoji_data,
+        "top_chatters": top_chatters,
+    }
+
+
+def get_chat_export_data(
+    streamer_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    search: Optional[str] = None,
+    only_whales: bool = False,
+    limit: int = 10000,
+) -> List[Dict[str, Any]]:
+    """
+    Liefert Chatdaten für den CSV- oder Text-Export.
+    """
+    where_clauses = ["1=1"]
+    params: List[Any] = []
+
+    if streamer_id:
+        where_clauses.append("c.streamer_id = ?")
+        params.append(streamer_id)
+
+    if session_id:
+        where_clauses.append("c.session_id = ?")
+        params.append(session_id)
+
+    if search:
+        search_pattern = f"%{search.strip()}%"
+        where_clauses.append("(c.comment LIKE ? OR c.username LIKE ? OR c.nickname LIKE ?)")
+        params.extend([search_pattern, search_pattern, search_pattern])
+
+    if only_whales:
+        where_clauses.append("(c.is_whale = 1 OR c.whale_tier != '')")
+
+    where_sql = " AND ".join(where_clauses)
+    query = f"""
+    SELECT 
+        c.id, c.created_at, s.username AS streamer_username,
+        c.session_id, c.username, c.nickname, c.is_whale, c.whale_tier, c.comment
+    FROM chat_messages c
+    JOIN streamers s ON s.id = c.streamer_id
+    WHERE {where_sql}
+    ORDER BY c.id ASC
+    LIMIT ?
+    """
+    params.append(max(1, min(limit, 25000)))
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
 
 
 _radar_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}

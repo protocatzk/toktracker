@@ -626,6 +626,7 @@
             <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
             <span class="pill">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
             <a class="btn-link sm" href="/admin">← Admin-Dashboard</a>
+            <a class="btn-link sm" href="/chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>
             <a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>
             <a class="btn-link primary sm" href="/">Öffentliches Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
@@ -1012,6 +1013,8 @@
         </div>
         <div>
             <a href="/admin">Admin-Dashboard</a>
+            <span class="sep">·</span>
+            <a href="/chat-intelligence">Chat Intelligence &amp; Wortwolke</a>
             <span class="sep">·</span>
             <a href="/site-analytics">Website &amp; Bot Analysen</a>
             <span class="sep">·</span>
