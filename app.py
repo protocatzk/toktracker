@@ -355,6 +355,47 @@ def verify_radar_access(
     )
 
 
+def verify_chat_intelligence_access(
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
+) -> Dict[str, Any]:
+    """
+    Schützt Chat-Intelligence, Wortwolken & Stream-Chatlogs:
+    Zugriff ist EXKLUSIV für:
+    1. Authentifizierte Admins & freigeschaltete Whitelist-Nutzer (mit gültigem Session-Token)
+    2. Gültige API-Key-Inhaber
+    Öffentlicher Gast-Zugriff ist hier NIEMALS gestattet, auch nicht im Public-Bot-Modus!
+    """
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+
+    if token:
+        session_payload = admin_auth_manager.verify_session_token(token)
+        if session_payload:
+            role = session_payload.get("role", "")
+            is_allowed = bool(session_payload.get("is_allowed", False))
+            if role == "admin" or is_allowed is True:
+                return session_payload
+            raise HTTPException(
+                status_code=403,
+                detail="Zugriff verweigert: Chat-Intelligence ist nur für freigeschaltete Whitelist-Nutzer zugänglich. Bitte wende dich an einen Administrator.",
+            )
+
+    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
+    provided = (x_api_key or api_key or "").strip()
+    if configured_key and provided and provided == configured_key:
+        return {"sub": "api_key", "role": "admin", "is_allowed": True}
+
+    raise HTTPException(
+        status_code=401,
+        detail="Nicht autorisiert: Chat-Intelligence erfordert eine Whitelist-Freigabe oder einen Admin-Login.",
+    )
+
+
 def _set_admin_session_cookie(response: Response, admin_label: str) -> None:
     token = admin_auth_manager.create_session_token(admin_label=admin_label)
     response.set_cookie(
@@ -538,13 +579,26 @@ async def chat_intelligence_page(
 ):
     """
     Chat-Intelligence & Wortwolken-Viewer (/chat-intelligence).
-    Bietet Stream-Chat-Logs, interaktive Wortwolke, Top-Phrasen und Session-Viewer.
+    Exklusiv hinter der Whitelist-Funktion geschützt.
     """
-    settings = get_settings()
-    is_public_mode = settings.get("telegram_access_mode") == "public"
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
-    if not session_payload and not is_public_mode:
-        return RedirectResponse(url="/login", status_code=302)
+    if not session_payload:
+        return RedirectResponse(url="/login?next=/chat-intelligence", status_code=302)
+
+    is_admin = session_payload.get("role") == "admin"
+    is_whitelisted = bool(session_payload.get("is_allowed", False))
+
+    if not (is_admin or is_whitelisted):
+        return templates.TemplateResponse(
+            request=request,
+            name="chat_intelligence_locked.html",
+            status_code=403,
+            context={
+                "sub": session_payload.get("sub", "TELEGRAM"),
+                "env_summary": config.public_summary(),
+                "telegram_diag": telegram_bot_service.get_diagnostics(),
+            },
+        )
 
     init_db()
     return templates.TemplateResponse(
@@ -554,8 +608,9 @@ async def chat_intelligence_page(
             "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
-            "admin_sub": session_payload.get("sub", "GUEST") if session_payload else "PUBLIC",
-            "is_admin": bool(session_payload),
+            "admin_sub": session_payload.get("sub", "WHITELIST"),
+            "is_admin": is_admin,
+            "is_whitelisted": True,
         },
     )
 
@@ -1830,7 +1885,13 @@ async def api_chat_logs(
     "/api/chat-intelligence/sessions",
     tags=["Chat Intelligence"],
     summary="Liefert Stream-Sessions mit Chat-Anzahl für das Dropdown",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_chat_intelligence_access)],
+)
+@app.get(
+    "/api/v1/chat-intelligence/sessions",
+    tags=["Chat Intelligence"],
+    summary="Liefert Stream-Sessions mit Chat-Anzahl für das Dropdown",
+    dependencies=[Depends(verify_chat_intelligence_access)],
 )
 async def api_chat_intelligence_sessions(
     streamer_id: Optional[int] = Query(None, description="Optionaler Streamer-ID Filter"),
@@ -1853,7 +1914,13 @@ async def api_chat_intelligence_sessions(
     "/api/chat-intelligence/analysis",
     tags=["Chat Intelligence"],
     summary="Analysiert Chatnachrichten (Wortwolke, Top-Phrasen, Emojis, KPIs)",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_chat_intelligence_access)],
+)
+@app.get(
+    "/api/v1/chat-intelligence/analysis",
+    tags=["Chat Intelligence"],
+    summary="Analysiert Chatnachrichten (Wortwolke, Top-Phrasen, Emojis, KPIs)",
+    dependencies=[Depends(verify_chat_intelligence_access)],
 )
 async def api_chat_intelligence_analysis(
     streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
@@ -1882,7 +1949,13 @@ async def api_chat_intelligence_analysis(
     "/api/chat-intelligence/export",
     tags=["Chat Intelligence"],
     summary="Exportiert Chatnachrichten eines Streams als CSV oder Textdatei",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_chat_intelligence_access)],
+)
+@app.get(
+    "/api/v1/chat-intelligence/export",
+    tags=["Chat Intelligence"],
+    summary="Exportiert Chatnachrichten eines Streams als CSV oder Textdatei",
+    dependencies=[Depends(verify_chat_intelligence_access)],
 )
 async def api_chat_intelligence_export(
     streamer_id: Optional[int] = Query(None, description="Streamer-ID"),

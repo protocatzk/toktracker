@@ -719,6 +719,7 @@
                     <div class="ci-brand-title">
                         <span>TokTracker</span>
                         <span class="ci-badge ci-badge-purple">CHAT INTELLIGENCE</span>
+                        <span class="ci-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35);">🔒 WHITELIST EXKLUSIV</span>
                     </div>
                     <div class="muted" style="font-size: 11.5px; margin-top: 2px;">
                         Wortwolke · Häufige Phrasen &amp; Emojis · Stream-Chat Log-Viewer
@@ -726,13 +727,17 @@
                 </div>
             </div>
 
-            <nav class="ci-nav-links">
-                <a href="/admin">← Admin-Dashboard</a>
-                <a href="/donor-radar">🐋 Spender-Radar</a>
-                <a href="/public">🌐 Public-Portal</a>
-                <a href="/site-analytics">📊 Web-Analysen</a>
-                <a href="/logout" style="color:#ef4444;">Abmelden</a>
-            </nav>
+            <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+                <span class="pill" style="font-size: 11px; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+                    Freigabe: <strong style="color: #38bdf8;">{{ "👑 ADMIN" if is_admin else "🛡️ WHITELIST" }}</strong> ({{ admin_sub }})
+                </span>
+                <nav class="ci-nav-links">
+                    <a href="/admin">← Admin-Dashboard</a>
+                    <a href="/donor-radar">🐋 Spender-Radar</a>
+                    <a href="/site-analytics">📊 Web-Analysen</a>
+                    <a href="/logout" style="color:#ef4444;">Abmelden</a>
+                </nav>
+            </div>
         </header>
 
         <!-- 2. Controls & Dropdowns Bar -->

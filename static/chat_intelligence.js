@@ -350,7 +350,13 @@
                 url += `&streamer_id=${encodeURIComponent(state.streamerId)}`;
             }
             const res = await fetch(url);
-            if (!res.ok) return;
+            if (!res.ok) {
+                if (res.status === 401 || res.status === 403) {
+                    window.location.reload();
+                    return;
+                }
+                return;
+            }
             const data = await res.json();
             const sessions = data.sessions || [];
 
@@ -387,7 +393,13 @@
             }
 
             const res = await fetch(url);
-            if (!res.ok) return;
+            if (!res.ok) {
+                if (res.status === 401 || res.status === 403) {
+                    window.location.reload();
+                    return;
+                }
+                return;
+            }
             const json = await res.json();
             const d = json.data || {};
 
