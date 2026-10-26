@@ -184,6 +184,22 @@ async function loadOverview() {
             if (modeSel && activeEl !== modeSel && data.settings.telegram_access_mode) {
                 modeSel.value = data.settings.telegram_access_mode;
             }
+
+            const bannerTitleInput = document.getElementById("setBannerTitle");
+            if (bannerTitleInput && activeEl !== bannerTitleInput && (!activeEl || !activeEl.id.startsWith("setBanner"))) {
+                const chk = document.getElementById("setBannerEnabled");
+                if (chk) chk.checked = Boolean(data.settings.public_banner_enabled);
+                const sty = document.getElementById("setBannerStyle");
+                if (sty) sty.value = data.settings.public_banner_style || "highlight";
+                bannerTitleInput.value = data.settings.public_banner_title || "";
+                const txt = document.getElementById("setBannerText");
+                if (txt) txt.value = data.settings.public_banner_text || "";
+                const bTxt = document.getElementById("setBannerBtnText");
+                if (bTxt) bTxt.value = data.settings.public_banner_btn_text || "";
+                const bUrl = document.getElementById("setBannerBtnUrl");
+                if (bUrl) bUrl.value = data.settings.public_banner_btn_url || "";
+                updateAdminBannerPreview();
+            }
         }
 
         cachedStreamers = data.streamers || [];
@@ -2960,6 +2976,90 @@ document.addEventListener("DOMContentLoaded", () => {
             }),
         });
         loadOverview();
+    });
+
+    // =========================================================
+    // ÖFFENTLICHES ANKÜNDIGUNGS- & WHITELIST-BANNER VERWALTUNG
+    // =========================================================
+    function updateAdminBannerPreview() {
+        const previewEl = document.getElementById("adminBannerPreview");
+        if (!previewEl) return;
+
+        const enabled = Boolean(document.getElementById("setBannerEnabled")?.checked);
+        const style = document.getElementById("setBannerStyle")?.value || "highlight";
+        const title = document.getElementById("setBannerTitle")?.value || "Exklusive Whitelist-Features & Chat-Intelligence";
+        const text = document.getElementById("setBannerText")?.value || "Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!";
+        const btnText = document.getElementById("setBannerBtnText")?.value || "Whitelist anfragen ↗";
+
+        previewEl.className = "announcement-banner " + style;
+        previewEl.style.opacity = enabled ? "1" : "0.5";
+
+        const titleEl = document.getElementById("previewBannerTitle");
+        const textEl = document.getElementById("previewBannerText");
+        const btnEl = document.getElementById("previewBannerBtn");
+        const tagEl = document.getElementById("previewBannerTag");
+        const statusTag = document.getElementById("bannerActiveTag");
+
+        if (titleEl) titleEl.textContent = title;
+        if (textEl) textEl.textContent = text;
+        if (btnEl) btnEl.textContent = btnText;
+
+        if (tagEl) {
+            if (style === "warning") tagEl.textContent = "⚠️ WICHTIG";
+            else if (style === "success") tagEl.textContent = "🟢 STATUS";
+            else if (style === "info") tagEl.textContent = "ℹ️ INFO";
+            else tagEl.textContent = "✨ WHITELIST PROMO";
+        }
+
+        if (statusTag) {
+            if (enabled) {
+                statusTag.textContent = "BANNER AKTIV";
+                statusTag.className = "status-tag live";
+            } else {
+                statusTag.textContent = "BANNER DEAKTIVIERT";
+                statusTag.className = "status-tag off";
+            }
+        }
+    }
+
+    // Input-Listeners für Live-Vorschau
+    ["setBannerEnabled", "setBannerStyle", "setBannerTitle", "setBannerText", "setBannerBtnText", "setBannerBtnUrl"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener("input", updateAdminBannerPreview);
+            el.addEventListener("change", updateAdminBannerPreview);
+        }
+    });
+
+    // Formular absenden
+    document.getElementById("formPublicBanner")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const payload = {
+            public_banner_enabled: document.getElementById("setBannerEnabled").checked ? 1 : 0,
+            public_banner_style: document.getElementById("setBannerStyle").value,
+            public_banner_title: document.getElementById("setBannerTitle").value.trim(),
+            public_banner_text: document.getElementById("setBannerText").value.trim(),
+            public_banner_btn_text: document.getElementById("setBannerBtnText").value.trim(),
+            public_banner_btn_url: document.getElementById("setBannerBtnUrl").value.trim(),
+        };
+
+        const res = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (res.ok) {
+            const fb = document.getElementById("bannerSaveFeedback");
+            if (fb) {
+                fb.style.display = "inline";
+                fb.textContent = "✅ Gespeichert & auf Startseite aktiv!";
+                setTimeout(() => { fb.style.display = "none"; }, 3500);
+            }
+            loadOverview();
+        } else {
+            alert("Fehler beim Speichern der Banner-Einstellungen.");
+        }
     });
 
     // Battle Toolbar & Filter Listeners

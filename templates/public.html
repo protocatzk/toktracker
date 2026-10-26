@@ -85,6 +85,31 @@
 </nav>
 
 <main class="container">
+    <!-- Öffentliches Ankündigungs- & Whitelist-Banner (aus dem Adminpanel steuerbar) -->
+    <div id="publicAnnouncementBanner" class="announcement-banner {{ public_banner.style if public_banner else 'highlight' }} {% if not (public_banner and public_banner.enabled) %}is-hidden{% endif %}">
+        <div class="announcement-inner">
+            <div class="announcement-badge-col">
+                <span class="announcement-tag" id="pubBannerTag">
+                    {% if public_banner and public_banner.style == 'warning' %}⚠️ WICHTIG
+                    {% elif public_banner and public_banner.style == 'success' %}🟢 HINWEIS
+                    {% elif public_banner and public_banner.style == 'info' %}ℹ️ INFO
+                    {% else %}✨ WHITELIST PROMO
+                    {% endif %}
+                </span>
+            </div>
+            <div class="announcement-content">
+                <div class="announcement-title" id="pubBannerTitle">{{ (public_banner.title if public_banner else '') or 'Exklusive Whitelist-Features & Chat-Intelligence' }}</div>
+                <div class="announcement-text" id="pubBannerText">{{ (public_banner.text if public_banner else '') or 'Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!' }}</div>
+            </div>
+            <div class="announcement-action">
+                <a id="pubBannerBtn" class="btn-link primary sm" href="{{ (public_banner.btn_url if (public_banner and public_banner.btn_url) else '') or ('https://t.me/' + telegram_bot_username.lstrip('@')) }}" target="_blank" rel="noopener">
+                    <span id="pubBannerBtnText">{{ (public_banner.btn_text if (public_banner and public_banner.btn_text) else '') or 'Whitelist anfragen ↗' }}</span>
+                </a>
+                <button type="button" id="btnDismissPubBanner" class="btn-dismiss-banner" title="Banner in dieser Sitzung schließen">✕</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Globale KPI-Leiste (Creator-Auszahlung, Coins, Brutto, Geschenke) -->
     <div class="summary-bar">
         <div class="summary-box">

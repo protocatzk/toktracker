@@ -447,13 +447,30 @@ async def public_panel(request: Request):
     """
     Startseite (/): Öffentliches User-Panel für Zuschauer (Read-Only).
     """
+    init_db()
     tg_diag = telegram_bot_service.get_diagnostics()
+    bot_uname = (tg_diag.get("bot_username") or "toktrackeragent").lstrip("@")
+    settings = get_settings()
+    banner_btn_url = (settings.get("public_banner_btn_url") or "").strip()
+    if not banner_btn_url:
+        banner_btn_url = f"https://t.me/{bot_uname}"
+
+    public_banner = {
+        "enabled": bool(settings.get("public_banner_enabled")),
+        "title": settings.get("public_banner_title") or "Exklusive Whitelist-Features & Chat-Intelligence",
+        "text": settings.get("public_banner_text") or "",
+        "style": settings.get("public_banner_style") or "highlight",
+        "btn_text": settings.get("public_banner_btn_text") or "Whitelist anfragen ↗",
+        "btn_url": banner_btn_url,
+    }
+
     return templates.TemplateResponse(
         request=request,
         name="public.html",
         context={
-            "telegram_bot_username": tg_diag.get("bot_username") or "",
+            "telegram_bot_username": bot_uname,
             "telegram_state": tg_diag.get("state") or "offline",
+            "public_banner": public_banner,
         },
     )
 
@@ -865,6 +882,12 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
         )
 
     cfg = raw.get("settings") or {}
+    tg_diag = telegram_bot_service.get_diagnostics()
+    bot_uname = (tg_diag.get("bot_username") or "toktrackeragent").lstrip("@")
+    banner_btn_url = (cfg.get("public_banner_btn_url") or "").strip()
+    if not banner_btn_url:
+        banner_btn_url = f"https://t.me/{bot_uname}"
+
     return {
         "period": raw.get("period", period),
         "totals": raw.get("totals", {}),
@@ -874,6 +897,14 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
             "usd_per_diamond": cfg.get("usd_per_diamond", 0.005),
             "gross_usd_per_coin": cfg.get("gross_usd_per_coin", 0.0106),
             "usd_to_eur_rate": cfg.get("usd_to_eur_rate", 0.92),
+        },
+        "banner": {
+            "enabled": bool(cfg.get("public_banner_enabled")),
+            "title": cfg.get("public_banner_title") or "",
+            "text": cfg.get("public_banner_text") or "",
+            "style": cfg.get("public_banner_style") or "highlight",
+            "btn_text": cfg.get("public_banner_btn_text") or "Whitelist anfragen ↗",
+            "btn_url": banner_btn_url,
         },
     }
 

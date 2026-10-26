@@ -886,6 +886,99 @@
                 </div>
             </div>
         </div>
+
+        <!-- ÖFFENTLICHES ANKÜNDIGUNGS- & WHITELIST-BANNER STEUERUNG -->
+        <div class="box" id="boxPublicBannerControl" style="margin-bottom: 20px;">
+            <div class="box-header">
+                <div>
+                    <h2>📢 Öffentliches Ankündigungs- &amp; Whitelist-Banner</h2>
+                    <div class="section-hint">
+                        Steuere die öffentliche Nachricht auf der Startseite (<code>/</code> &amp; <code>/public</code>). Bewerbe exklusive Features (Chat-Intelligence, Spender-Radar) oder informiere über Server-Updates &amp; Whitelist-Freischaltungen.
+                    </div>
+                </div>
+                <div class="inline-form" style="gap: 8px;">
+                    <span id="bannerActiveTag" class="status-tag live">BANNER AKTIV</span>
+                    <a class="btn-link sm" href="/" target="_blank" rel="noopener">Öffentliche Startseite ↗</a>
+                </div>
+            </div>
+
+            <!-- Formular & Live-Vorschau im 2-Spalten Layout -->
+            <div class="grid-2">
+                <!-- Spalte 1: Formularfelder -->
+                <div>
+                    <form id="formPublicBanner">
+                        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="setBannerEnabled" style="width: 17px; height: 17px; cursor: pointer;" />
+                            <label for="setBannerEnabled" style="cursor: pointer; font-weight: 700; font-size: 13px;">
+                                Banner auf der öffentlichen Seite anzeigen (Aktiv)
+                            </label>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                            <div class="field-group">
+                                <label for="setBannerStyle">Farbschema &amp; Akzent</label>
+                                <select id="setBannerStyle">
+                                    <option value="highlight">✨ Highlight (Violett · Whitelist Promo)</option>
+                                    <option value="info">ℹ️ Info (Cyan / Blau · Allgemein)</option>
+                                    <option value="success">🟢 Erfolg (Smaragdgrün · Empfehlung)</option>
+                                    <option value="warning">⚠️ Warnung (Bernstein · Wichtig)</option>
+                                </select>
+                            </div>
+                            <div class="field-group">
+                                <label for="setBannerTitle">Titelzeile</label>
+                                <input type="text" id="setBannerTitle" placeholder="z. B. Exklusive Whitelist-Features &amp; Chat-Intelligence" required />
+                            </div>
+                        </div>
+
+                        <div class="field-group" style="margin-bottom: 10px;">
+                            <label for="setBannerText">Banner-Nachricht / Text</label>
+                            <textarea id="setBannerText" rows="3" style="width: 100%; padding: 8px 10px; background: var(--bg-input); color: var(--text-main); border: 1px solid var(--border-input); font-family: inherit; font-size: 13px; resize: vertical;" placeholder="Nachricht für Zuschauer und Besucher..."></textarea>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+                            <div class="field-group">
+                                <label for="setBannerBtnText">Button-Beschriftung</label>
+                                <input type="text" id="setBannerBtnText" placeholder="z. B. Whitelist anfragen ↗" />
+                            </div>
+                            <div class="field-group">
+                                <label for="setBannerBtnUrl">Button-Ziel-URL (Optional)</label>
+                                <input type="text" id="setBannerBtnUrl" placeholder="Leer = Automatisch Telegram-Bot" />
+                            </div>
+                        </div>
+
+                        <div class="inline-form" style="gap: 10px; align-items: center;">
+                            <button type="submit" class="primary" id="btnSaveBanner">💾 Banner speichern &amp; veröffentlichen</button>
+                            <span id="bannerSaveFeedback" class="mono" style="font-size: 12px; display: none; color: #10b981; font-weight: 600;"></span>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Spalte 2: Live-Vorschau -->
+                <div>
+                    <label class="mono muted" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 8px; font-weight: 600;">
+                        👁️ Live-Vorschau auf der Startseite:
+                    </label>
+                    <div id="adminBannerPreview" class="announcement-banner highlight" style="margin-bottom: 8px;">
+                        <div class="announcement-inner">
+                            <div class="announcement-badge-col">
+                                <span class="announcement-tag" id="previewBannerTag">✨ WHITELIST PROMO</span>
+                            </div>
+                            <div class="announcement-content">
+                                <div class="announcement-title" id="previewBannerTitle">Exklusive Whitelist-Features &amp; Chat-Intelligence</div>
+                                <div class="announcement-text" id="previewBannerText">Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!</div>
+                            </div>
+                            <div class="announcement-action">
+                                <span class="btn-link primary sm" id="previewBannerBtn">Whitelist anfragen ↗</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="section-hint mono" style="font-size: 11px;">
+                        Tipp: Änderungen in der Vorschau reagieren sofort beim Tippen. Klicke auf <strong>"Speichern"</strong>, um das Banner für Besucher zu aktivieren.
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid-2">
             <div class="box">
                 <div class="box-header">

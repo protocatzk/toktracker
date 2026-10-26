@@ -33,6 +33,12 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "poll_interval_seconds": "45",     # Intervall für Auto-Live-Check wenn Streamer offline ist
     "api_key": "",                     # Optionaler API-Key für externe Bot-Abfragen
     "telegram_access_mode": config.telegram_access_mode if config.telegram_access_mode in ("whitelist", "public") else "whitelist",
+    "public_banner_enabled": "1",      # 1 = Aktiv, 0 = Deaktiviert
+    "public_banner_title": "Exklusive Whitelist-Features & Chat-Intelligence",
+    "public_banner_text": "Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!",
+    "public_banner_style": "highlight", # highlight | info | success | warning
+    "public_banner_btn_text": "Whitelist anfragen ↗",
+    "public_banner_btn_url": "",       # Leer = autom. Telegram-Bot Link
 }
 
 _db_init_lock = threading.Lock()
@@ -927,6 +933,12 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
         mode = str(data.get("telegram_access_mode", config.telegram_access_mode or "whitelist")).lower()
         if mode not in ("whitelist", "public"):
             mode = "whitelist"
+
+        banner_enabled_raw = str(data.get("public_banner_enabled", DEFAULT_SETTINGS["public_banner_enabled"])).strip().lower()
+        banner_style = str(data.get("public_banner_style", DEFAULT_SETTINGS["public_banner_style"])).strip().lower()
+        if banner_style not in ("highlight", "info", "success", "warning"):
+            banner_style = "highlight"
+
         res = {
             "usd_per_diamond": float(data.get("usd_per_diamond", 0.005)),
             "gross_usd_per_coin": float(data.get("gross_usd_per_coin", 0.0106)),
@@ -935,6 +947,12 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
             "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
             "api_key": str(data.get("api_key", "")),
             "telegram_access_mode": mode,
+            "public_banner_enabled": banner_enabled_raw in ("1", "true", "yes", "on"),
+            "public_banner_title": str(data.get("public_banner_title", DEFAULT_SETTINGS["public_banner_title"])),
+            "public_banner_text": str(data.get("public_banner_text", DEFAULT_SETTINGS["public_banner_text"])),
+            "public_banner_style": banner_style,
+            "public_banner_btn_text": str(data.get("public_banner_btn_text", DEFAULT_SETTINGS["public_banner_btn_text"])),
+            "public_banner_btn_url": str(data.get("public_banner_btn_url", DEFAULT_SETTINGS["public_banner_btn_url"])),
         }
         _settings_cache = res
         _settings_cache_time = now
@@ -950,6 +968,12 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     val = val.lower()
                     if val not in ("whitelist", "public"):
                         continue
+                elif key == "public_banner_enabled":
+                    val = "1" if str(new_settings[key]).strip().lower() in ("1", "true", "yes", "on") else "0"
+                elif key == "public_banner_style":
+                    val = val.lower()
+                    if val not in ("highlight", "info", "success", "warning"):
+                        val = "highlight"
                 conn.execute(
                     "INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
                     (key, val),
