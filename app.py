@@ -16,7 +16,7 @@ from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Requ
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config import config
 from database import (
@@ -110,6 +110,20 @@ class TelegramLoginRequestPayload(BaseModel):
 class TelegramLoginVerifyPayload(BaseModel):
     code: str
     challenge_id: Optional[str] = None
+
+
+class TelegramWidgetAuthPayload(BaseModel):
+    id: int = Field(..., description="Telegram User ID")
+    first_name: str = Field("", description="Vorname")
+    last_name: Optional[str] = Field(None, description="Nachname")
+    username: Optional[str] = Field(None, description="Telegram @username")
+    photo_url: Optional[str] = Field(None, description="Profilbild URL")
+    auth_date: int = Field(..., description="Unix Timestamp der Authentifizierung")
+    hash: str = Field(..., description="Kryptografische Signatur von Telegram")
+
+
+class PasswordLoginPayload(BaseModel):
+    password: str = Field(..., description="Admin-Passwort")
 
 
 @asynccontextmanager
@@ -476,12 +490,15 @@ async def admin_login_page(
         return RedirectResponse(url="/admin", status_code=302)
 
     tg_diag = telegram_bot_service.get_diagnostics()
+    bot_username = (tg_diag.get("bot_username") or "toktrackeragent").lstrip("@")
     return templates.TemplateResponse(
         request=request,
         name="login.html",
         context={
-            "telegram_bot_username": tg_diag.get("bot_username") or "",
+            "telegram_bot_username": bot_username,
             "telegram_state": tg_diag.get("state") or "offline",
+            "has_admin_password": bool(config.admin_password),
+            "error_message": request.query_params.get("error", ""),
         },
     )
 
@@ -698,6 +715,105 @@ async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
             detail="Ungültiger oder abgelaufener Einmal-Code. Bitte fordere einen neuen Code per Telegram (/login) an.",
         )
 
+    resp = JSONResponse(
+        content={
+            "ok": True,
+            "admin": admin_label,
+            "redirect": "/admin",
+        }
+    )
+    _set_admin_session_cookie(resp, admin_label=admin_label)
+    return resp
+
+
+@app.post(
+    "/api/auth/telegram/widget",
+    tags=["Admin Authentication"],
+    summary="Verifiziert Authentifizierung über das offizielle Telegram Login Widget (OAuth Flow)",
+)
+async def api_auth_telegram_widget(request: Request, payload: TelegramWidgetAuthPayload):
+    init_db()
+    auth_data = payload.model_dump(exclude_none=True)
+    is_valid, err_msg, user_identifier = admin_auth_manager.verify_telegram_auth(auth_data)
+    if not is_valid:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Telegram-Signatur ungültig: {err_msg or 'Verifikation fehlgeschlagen'}",
+        )
+
+    # Berechtigung als Administrator prüfen
+    access_info = check_telegram_user_access(
+        telegram_id=payload.id,
+        username=payload.username,
+        first_name=payload.first_name,
+    )
+
+    if not access_info.get("is_admin"):
+        uname = f"@{payload.username}" if payload.username else f"ID {payload.id}"
+        raise HTTPException(
+            status_code=403,
+            detail=f"Erfolgreich via Telegram verifiziert ({uname}), aber dein Account besitzt keine Administrator-Berechtigung für TokTracker.",
+        )
+
+    admin_label = f"@{payload.username}" if payload.username else str(payload.id)
+    resp = JSONResponse(
+        content={
+            "ok": True,
+            "admin": admin_label,
+            "redirect": "/admin",
+        }
+    )
+    _set_admin_session_cookie(resp, admin_label=admin_label)
+    return resp
+
+
+@app.get(
+    "/api/auth/telegram/widget-callback",
+    include_in_schema=False,
+)
+async def api_auth_telegram_widget_callback(request: Request):
+    init_db()
+    auth_data = dict(request.query_params)
+    is_valid, err_msg, user_identifier = admin_auth_manager.verify_telegram_auth(auth_data)
+    if not is_valid:
+        encoded_err = urllib.parse.quote(err_msg or "Ungültige Telegram-Signatur")
+        return RedirectResponse(url=f"/login?error={encoded_err}", status_code=302)
+
+    try:
+        tg_id = int(auth_data.get("id", 0))
+    except (ValueError, TypeError):
+        return RedirectResponse(url="/login?error=Ungueltige_ID", status_code=302)
+
+    access_info = check_telegram_user_access(
+        telegram_id=tg_id,
+        username=auth_data.get("username"),
+        first_name=auth_data.get("first_name"),
+    )
+
+    if not access_info.get("is_admin"):
+        uname = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
+        msg = f"Account {uname} besitzt keine Admin-Berechtigung."
+        return RedirectResponse(url=f"/login?error={urllib.parse.quote(msg)}", status_code=302)
+
+    admin_label = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
+    resp = RedirectResponse(url="/admin", status_code=302)
+    _set_admin_session_cookie(resp, admin_label=admin_label)
+    return resp
+
+
+@app.post(
+    "/api/auth/password",
+    tags=["Admin Authentication"],
+    summary="Notfall-Login mit konfiguriertem Admin-Passwort",
+)
+async def api_auth_password(payload: PasswordLoginPayload):
+    clean_pwd = payload.password.strip()
+    admin_label = admin_auth_manager.verify_code(clean_pwd)
+    if not admin_label:
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiges Admin-Passwort.",
+        )
     resp = JSONResponse(
         content={
             "ok": True,

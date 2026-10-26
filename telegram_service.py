@@ -206,6 +206,60 @@ class AdminAuthManager:
 
         return None
 
+    def verify_telegram_auth(self, auth_data: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Validiert die Authentifizierungsdaten des offiziellen Telegram Login Widgets (OAuth flow).
+        Telegram-Spezifikation:
+        1. secret_key = SHA256(bot_token)
+        2. data_check_string = alphabetisch sortierte 'k=v\n...' Paare aller Attribute außer 'hash'
+        3. HMAC-SHA256(data_check_string, secret_key) == received_hash
+        4. Replay Protection: auth_date nicht älter als 86400s (24h)
+
+        Rückgabe: (is_valid, error_reason, telegram_user_identifier)
+        """
+        received_hash = auth_data.get("hash")
+        if not received_hash or not isinstance(received_hash, str):
+            return False, "Fehlende Signatur (hash)", None
+
+        try:
+            auth_date = int(auth_data.get("auth_date", 0))
+        except (ValueError, TypeError):
+            return False, "Ungültiges auth_date Format", None
+
+        now = int(time.time())
+        # Replay-Schutz: max. 24h alt und max. 5 Min in der Zukunft
+        if (now - auth_date) > 86400 or (auth_date - now) > 300:
+            return False, "Login-Sitzung abgelaufen (älter als 24 Stunden)", None
+
+        token = (config.telegram_bot_token or "").strip()
+        if not token:
+            return False, "Telegram Bot-Token nicht konfiguriert", None
+
+        secret_key = hashlib.sha256(token.encode("utf-8")).digest()
+
+        check_items = []
+        for key in sorted(auth_data.keys()):
+            if key == "hash":
+                continue
+            val = auth_data[key]
+            if val is not None and val != "":
+                check_items.append(f"{key}={val}")
+        data_check_string = "\n".join(check_items)
+
+        computed_hash = hmac.new(
+            secret_key,
+            data_check_string.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(computed_hash, received_hash):
+            return False, "Ungültige kryptografische Signatur", None
+
+        telegram_id = auth_data.get("id")
+        username = (auth_data.get("username") or "").strip().lstrip("@")
+        user_identifier = f"@{username}" if username else f"id:{telegram_id}"
+        return True, None, user_identifier
+
     def create_session_token(
         self,
         admin_label: str = "telegram_admin",
