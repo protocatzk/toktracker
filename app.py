@@ -863,10 +863,13 @@ async def api_auth_password(payload: PasswordLoginPayload):
 )
 async def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
     raw = await asyncio.to_thread(get_dashboard_overview, period=period)
+    worker_map = monitor_manager._get_worker_map()
 
     public_streamers = []
     for s in raw.get("streamers", []):
         uname = s["username"]
+        w = worker_map.get(uname.lower())
+        is_tracking_active = bool(w.get("is_running")) if w else bool(s.get("is_tracking"))
         public_streamers.append(
             {
                 "id": s["id"],
@@ -876,7 +879,7 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
                 "follower_count": s.get("follower_count") or 0,
                 "current_viewers": s.get("current_viewers") or 0,
                 "is_live": bool(s.get("is_live")),
-                "is_tracking_active": monitor_manager.is_tracking(uname),
+                "is_tracking_active": is_tracking_active,
                 "total_coins": s.get("total_coins") or 0,
                 "gift_events_count": s.get("gift_events_count") or 0,
                 "total_gifts_sent": s.get("total_gifts_sent") or 0,
@@ -1751,13 +1754,22 @@ async def api_v1_streamer_single_report(
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
     data = await asyncio.to_thread(get_dashboard_overview, period=period)
-    for s in data["streamers"]:
-        uname = s["username"]
-        s["is_tracking_active"] = monitor_manager.is_tracking(uname)
-        s["monitor_status"] = monitor_manager.get_status(uname)
-        s["worker_diagnostics"] = monitor_manager.get_worker_diagnostics(uname)
     sys_diag = monitor_manager.get_all_diagnostics()
     sys_diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
+    worker_map = {str(w.get("username", "")).lower(): w for w in sys_diag.get("workers", []) if isinstance(w, dict)}
+    for s in data["streamers"]:
+        uname = (s.get("username") or "").lower()
+        w = worker_map.get(uname)
+        if w:
+            s["is_tracking_active"] = bool(w.get("is_running"))
+            state = w.get("state", "idle")
+            err = w.get("last_error") or w.get("last_message") or ""
+            s["monitor_status"] = f"[{state}] {err}" if err else f"[{state}]"
+            s["worker_diagnostics"] = w
+        else:
+            s["is_tracking_active"] = bool(s.get("is_tracking"))
+            s["monitor_status"] = "Inaktiv" if not s.get("is_tracking") else "polling_offline"
+            s["worker_diagnostics"] = None
     data["system"] = sys_diag
     data["gift_catalog"] = TIKTOK_GIFT_CATALOG
     return data

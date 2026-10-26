@@ -102,6 +102,7 @@ from config import config
 from database import (
     end_stream_session,
     get_auto_monitor_streamers,
+    get_db,
     get_settings,
     record_gift_event,
     start_stream_session,
@@ -2000,9 +2001,17 @@ class StreamerMonitorManager:
         self._remote_diag_cache: Optional[Dict[str, Any]] = None
         self._remote_diag_time: float = 0.0
 
+    def _get_worker_map(self) -> Dict[str, Dict[str, Any]]:
+        diag = self.get_all_diagnostics()
+        workers = diag.get("workers", []) if isinstance(diag, dict) else []
+        return {str(w.get("username", "")).lower(): w for w in workers if isinstance(w, dict) and w.get("username")}
+
     def is_tracking(self, username: str) -> bool:
         clean = username.strip().lstrip("@").lower()
         if not ENABLE_WORKER:
+            w = self._get_worker_map().get(clean)
+            if w is not None:
+                return bool(w.get("is_running"))
             try:
                 with get_db() as conn:
                     row = conn.execute("SELECT is_tracking FROM streamers WHERE username = ?", (clean,)).fetchone()
@@ -2016,6 +2025,11 @@ class StreamerMonitorManager:
     def get_status(self, username: str) -> str:
         clean = username.strip().lstrip("@").lower()
         if not ENABLE_WORKER:
+            w = self._get_worker_map().get(clean)
+            if w is not None:
+                state = w.get("state", "idle")
+                msg = w.get("last_message") or w.get("last_error") or ""
+                return f"[{state}] {msg}" if msg else f"[{state}]"
             try:
                 with get_db() as conn:
                     row = conn.execute("SELECT is_tracking, is_live, last_error FROM streamers WHERE username = ?", (clean,)).fetchone()
@@ -2036,6 +2050,9 @@ class StreamerMonitorManager:
     def get_worker_diagnostics(self, username: str) -> Optional[Dict[str, Any]]:
         clean = username.strip().lstrip("@").lower()
         if not ENABLE_WORKER:
+            w = self._get_worker_map().get(clean)
+            if w is not None:
+                return w
             try:
                 resp = httpx.get(f"{WORKER_URL}/api/diagnostics/{clean}", timeout=1.0)
                 if resp.status_code == 200:
@@ -2175,6 +2192,7 @@ class StreamerMonitorManager:
     ) -> Dict[str, Any]:
         clean = username.strip().lstrip("@").lower()
         if not ENABLE_WORKER:
+            self._remote_diag_cache = None
             update_streamer_runtime_state(
                 clean,
                 is_tracking=True,
@@ -2232,6 +2250,7 @@ class StreamerMonitorManager:
     def stop_tracking(self, username: str, preserve_db_state: bool = False) -> Dict[str, Any]:
         clean = username.strip().lstrip("@").lower()
         if not ENABLE_WORKER:
+            self._remote_diag_cache = None
             if not preserve_db_state:
                 update_streamer_runtime_state(
                     clean,
