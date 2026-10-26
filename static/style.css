@@ -484,6 +484,7 @@ h2 {
 
 input[type="text"],
 input[type="number"],
+input[type="password"],
 select {
     padding: 6px 9px;
     border: 1px solid var(--border-input);
@@ -494,12 +495,14 @@ select {
 }
 
 input[type="text"]::placeholder,
-input[type="number"]::placeholder {
+input[type="number"]::placeholder,
+input[type="password"]::placeholder {
     color: var(--text-muted);
 }
 
 input[type="text"]:focus,
 input[type="number"]:focus,
+input[type="password"]:focus,
 select:focus {
     outline: none;
     border-color: var(--border-focus);
