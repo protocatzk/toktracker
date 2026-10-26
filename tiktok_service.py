@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -676,10 +677,12 @@ class StreamerWorker:
 
             finally:
                 try:
-                    if getattr(client, "connected", False):
-                        await client.disconnect(close_client=True)
-                    else:
-                        await client.close()
+                    if client is not None:
+                        await client.disconnect(close_client=False)
+                        if hasattr(client, "_web") and hasattr(client._web, "close"):
+                            res = client._web.close()
+                            if inspect.isawaitable(res):
+                                await res
                 except Exception:
                     pass
                 with self._lock:

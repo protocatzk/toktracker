@@ -1593,7 +1593,6 @@ def record_gift_event(
             """,
             (cur.lastrowid,),
         ).fetchone()
-        invalidate_overview_cache()
         return (dict(row) if row else None), True
 
 
@@ -1618,7 +1617,7 @@ def _get_period_cutoff(period: str) -> Optional[str]:
 
 _overview_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _overview_cache_lock = threading.Lock()
-_OVERVIEW_CACHE_TTL = 2.5  # 2.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
+_OVERVIEW_CACHE_TTL = 3.5  # 3.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
 
 
 def invalidate_overview_cache() -> None:
@@ -1672,6 +1671,85 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
                 """
             ).fetchall()
 
+        # Batch 1: Alle aktiven Sessions in einer einzigen Abfrage erfassen
+        active_sess_rows = conn.execute(
+            """
+            SELECT id, streamer_id, room_id, started_at, peak_viewers, last_fan_tickets
+            FROM stream_sessions
+            WHERE status = 'active'
+            ORDER BY id DESC
+            """
+        ).fetchall()
+        active_sess_by_streamer: Dict[int, Dict[str, Any]] = {}
+        for as_row in active_sess_rows:
+            sid = as_row["streamer_id"]
+            if sid not in active_sess_by_streamer:
+                active_sess_by_streamer[sid] = dict(as_row)
+
+        # Batch 2: Top-Gifts pro Streamer in einem aggregierten Durchlauf erfassen
+        if cutoff:
+            gift_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, gift_name, SUM(total_coins) AS coins, SUM(repeat_count) AS count
+                FROM gift_events
+                WHERE created_at >= ?
+                GROUP BY streamer_id, gift_name
+                ORDER BY coins DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        else:
+            gift_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, gift_name, SUM(total_coins) AS coins, SUM(repeat_count) AS count
+                FROM gift_events
+                GROUP BY streamer_id, gift_name
+                ORDER BY coins DESC
+                """
+            ).fetchall()
+
+        top_gift_by_streamer: Dict[int, Dict[str, Any]] = {}
+        for grow in gift_sum_rows:
+            sid = grow["streamer_id"]
+            if sid not in top_gift_by_streamer:
+                top_gift_by_streamer[sid] = {
+                    "gift_name": grow["gift_name"],
+                    "coins": int(grow["coins"] or 0),
+                    "count": int(grow["count"] or 0),
+                }
+
+        # Batch 3: Top-Gifter pro Streamer in einem aggregierten Durchlauf erfassen
+        if cutoff:
+            gifter_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, sender_username, MAX(sender_nickname) AS sender_nickname, SUM(total_coins) AS coins
+                FROM gift_events
+                WHERE created_at >= ?
+                GROUP BY streamer_id, sender_username
+                ORDER BY coins DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        else:
+            gifter_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, sender_username, MAX(sender_nickname) AS sender_nickname, SUM(total_coins) AS coins
+                FROM gift_events
+                GROUP BY streamer_id, sender_username
+                ORDER BY coins DESC
+                """
+            ).fetchall()
+
+        top_gifter_by_streamer: Dict[int, Dict[str, Any]] = {}
+        for grow in gifter_sum_rows:
+            sid = grow["streamer_id"]
+            if sid not in top_gifter_by_streamer:
+                top_gifter_by_streamer[sid] = {
+                    "sender_username": grow["sender_username"],
+                    "sender_nickname": grow["sender_nickname"] or grow["sender_username"],
+                    "coins": int(grow["coins"] or 0),
+                }
+
         streamers: List[Dict[str, Any]] = []
         totals = {
             "streamer_count": len(streamer_rows),
@@ -1694,42 +1772,10 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
             d["usd_gross"] = round(coins * cfg["gross_usd_per_coin"], 2)
             d["eur_gross"] = round(d["usd_gross"] * cfg["usd_to_eur_rate"], 2)
 
-            top_gift = conn.execute(
-                """
-                SELECT gift_name, SUM(total_coins) AS coins, SUM(repeat_count) AS count
-                FROM gift_events
-                WHERE streamer_id = ? AND (? IS NULL OR created_at >= ?)
-                GROUP BY gift_name
-                ORDER BY coins DESC
-                LIMIT 1
-                """,
-                (d["id"], cutoff, cutoff),
-            ).fetchone()
-            d["top_gift"] = dict(top_gift) if top_gift else None
-
-            top_gifter = conn.execute(
-                """
-                SELECT sender_username, MAX(sender_nickname) AS sender_nickname, SUM(total_coins) AS coins
-                FROM gift_events
-                WHERE streamer_id = ? AND (? IS NULL OR created_at >= ?)
-                GROUP BY sender_username
-                ORDER BY coins DESC
-                LIMIT 1
-                """,
-                (d["id"], cutoff, cutoff),
-            ).fetchone()
-            d["top_gifter"] = dict(top_gifter) if top_gifter else None
-
-            active_sess = conn.execute(
-                """
-                SELECT id, room_id, started_at, peak_viewers, last_fan_tickets
-                FROM stream_sessions
-                WHERE streamer_id = ? AND status = 'active'
-                ORDER BY id DESC LIMIT 1
-                """,
-                (d["id"],),
-            ).fetchone()
-            d["active_session"] = dict(active_sess) if active_sess else None
+            sid = d["id"]
+            d["top_gift"] = top_gift_by_streamer.get(sid)
+            d["top_gifter"] = top_gifter_by_streamer.get(sid)
+            d["active_session"] = active_sess_by_streamer.get(sid)
 
             streamers.append(d)
 
@@ -4513,7 +4559,6 @@ def get_chat_messages(
         count_sql = f"""
         SELECT COUNT(*) AS total
         FROM chat_messages c
-        JOIN streamers s ON s.id = c.streamer_id
         WHERE {where_sql}
         """
         with get_db() as conn:
@@ -4579,8 +4624,7 @@ def get_stream_sessions(
         ss.id, ss.streamer_id, ss.room_id, ss.title, ss.started_at, ss.ended_at,
         ss.peak_viewers, ss.last_fan_tickets, ss.status,
         s.username AS streamer_username, s.display_name AS streamer_display_name,
-        s.avatar_url AS streamer_avatar_url,
-        (SELECT COUNT(*) FROM chat_messages cm WHERE cm.session_id = ss.id) AS chat_count
+        s.avatar_url AS streamer_avatar_url
     FROM stream_sessions ss
     JOIN streamers s ON s.id = ss.streamer_id
     WHERE {where_sql}
@@ -4590,8 +4634,30 @@ def get_stream_sessions(
     params.extend([max(1, min(limit, 300)), max(0, offset)])
 
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+        if not rows:
+            return []
+
+        session_ids = [r["id"] for r in rows if r.get("id")]
+        chat_counts = {}
+        if session_ids:
+            placeholders = ", ".join(["?"] * len(session_ids))
+            count_sql = f"""
+            SELECT session_id, COUNT(*) AS cnt
+            FROM chat_messages
+            WHERE session_id IN ({placeholders})
+            GROUP BY session_id
+            """
+            for crow in conn.execute(count_sql, session_ids).fetchall():
+                try:
+                    chat_counts[crow["session_id"]] = int(crow["cnt"])
+                except Exception:
+                    pass
+
+        for r in rows:
+            r["chat_count"] = chat_counts.get(r["id"], 0)
+
+        return rows
 
 
 COMMON_CHAT_STOP_WORDS = {

@@ -271,8 +271,21 @@ async def track_page_views_middleware(request: Request, call_next):
             elif not ref and not is_cli_or_script and "mozilla" in ua_lower and sec_site == "same-origin":
                 is_external = 0
 
-            # Internes Polling von /api/site-analytics überspringen, um DB nicht aufzublähen
-            if not (is_external == 0 and path in ("/api/site-analytics", "/api/v1/site-analytics")):
+            # Internes Polling und UI-Updates überspringen, um DB und Event-Loop nicht mit Writes zu fluten
+            is_internal_poll = (is_external == 0 and (
+                path.startswith((
+                    "/api/overview", "/api/v1/overview",
+                    "/api/public/overview", "/api/v1/public/overview",
+                    "/api/chat-logs", "/api/v1/chat-logs",
+                    "/api/site-analytics", "/api/v1/site-analytics",
+                    "/api/chat-intelligence", "/api/v1/chat-intelligence",
+                    "/api/radar", "/api/v1/radar",
+                    "/api/notifications", "/api/v1/notifications",
+                ))
+                or path in ("/api/health", "/api/v1/health", "/favicon.ico")
+            ))
+
+            if not is_internal_poll:
                 client_ip = _extract_client_ip(request)
                 salt = config.session_secret or "toktracker_salt_2026"
                 ip_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
@@ -283,18 +296,21 @@ async def track_page_views_middleware(request: Request, call_next):
                     q_str = re.sub(r'(api_key=[^&]{3})[^&]+', r'\1***', q_str)
                     q_str = re.sub(r'(password=[^&]{2})[^&]+', r'\1***', q_str)
 
-                record_api_call(
-                    endpoint=path,
-                    method=request.method,
-                    status_code=response.status_code,
-                    response_time_ms=duration_ms,
-                    client_ip=client_ip,
-                    ip_hash=ip_hash,
-                    user_agent=ua,
-                    auth_type=auth_type,
-                    api_key_name=api_key_name,
-                    is_external=is_external,
-                    query_params=q_str,
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        record_api_call,
+                        endpoint=path,
+                        method=request.method,
+                        status_code=response.status_code,
+                        response_time_ms=duration_ms,
+                        client_ip=client_ip,
+                        ip_hash=ip_hash,
+                        user_agent=ua,
+                        auth_type=auth_type,
+                        api_key_name=api_key_name,
+                        is_external=is_external,
+                        query_params=q_str,
+                    )
                 )
         except Exception:
             pass
@@ -2015,7 +2031,7 @@ async def api_chat_logs(
     order_dir: str = Query("DESC", description="ASC oder DESC"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    include_total: bool = Query(True, description="Gesamtzahl berechnen"),
+    include_total: bool = Query(False, description="Gesamtzahl berechnen"),
 ):
     init_db()
     clean_uname = username if isinstance(username, str) else None
@@ -2023,7 +2039,8 @@ async def api_chat_logs(
     clean_order = order_dir if isinstance(order_dir, str) else "DESC"
     clean_limit = limit if isinstance(limit, int) else 50
     clean_offset = offset if isinstance(offset, int) else 0
-    clean_total = include_total if isinstance(include_total, bool) else True
+    # Gesamtzahl nur berechnen, wenn explizit gefordert und kein Cursor-Streaming (after_id/before_id) aktiv ist
+    clean_total = bool(include_total) if (include_total and not after_id and not before_id) else False
 
     messages, total_count = await asyncio.to_thread(
         get_chat_messages,
