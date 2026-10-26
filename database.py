@@ -529,6 +529,22 @@ def _init_mysql_schema() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_challenges (
+                challenge_id VARCHAR(64) PRIMARY KEY,
+                code VARCHAR(16) NOT NULL,
+                created_at DOUBLE NOT NULL,
+                expires_at DOUBLE NOT NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                admin_label VARCHAR(128) DEFAULT '',
+                client_info VARCHAR(255) DEFAULT ''
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+
+        _ensure_index_mysql(conn, "admin_challenges", "idx_admin_challenges_code", "code")
+        _ensure_index_mysql(conn, "admin_challenges", "idx_admin_challenges_status", "status")
 
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
@@ -752,6 +768,16 @@ def _init_sqlite_schema() -> None:
                 query_params TEXT DEFAULT '',
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS admin_challenges (
+                challenge_id TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                admin_label TEXT DEFAULT '',
+                client_info TEXT DEFAULT ''
+            );
             """
         )
 
@@ -839,6 +865,10 @@ def _init_sqlite_schema() -> None:
                 ON api_calls(is_external, created_at);
             CREATE INDEX IF NOT EXISTS idx_api_calls_status
                 ON api_calls(status_code);
+            CREATE INDEX IF NOT EXISTS idx_admin_challenges_code
+                ON admin_challenges(code);
+            CREATE INDEX IF NOT EXISTS idx_admin_challenges_status
+                ON admin_challenges(status);
             """
         )
 
@@ -5747,5 +5777,107 @@ def get_network_loyalty_and_overlap(
         with _loyalty_cache_lock:
             _loyalty_cache[cache_key] = (now, result)
         return copy.deepcopy(result)
+
+
+def db_create_admin_challenge(
+    challenge_id: str,
+    code: str,
+    created_at: float,
+    expires_at: float,
+    client_info: str = "Web-Browser",
+    admin_label: str = "telegram_admin",
+) -> Dict[str, Any]:
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO admin_challenges (challenge_id, code, created_at, expires_at, status, admin_label, client_info)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?)
+            """,
+            (challenge_id, code, created_at, expires_at, admin_label, client_info),
+        )
+    return {
+        "challenge_id": challenge_id,
+        "code": code,
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "status": "pending",
+        "admin_label": admin_label,
+        "client_info": client_info,
+    }
+
+
+def db_get_admin_challenge(challenge_id: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM admin_challenges WHERE challenge_id = ?",
+            (challenge_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_approve_admin_challenge(challenge_id: str, admin_label: str) -> Optional[Dict[str, Any]]:
+    now = time.time()
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE admin_challenges
+            SET status = 'approved', admin_label = ?
+            WHERE challenge_id = ? AND expires_at > ? AND status IN ('pending', 'approved')
+            """,
+            (admin_label, challenge_id, now),
+        )
+        row = conn.execute(
+            "SELECT * FROM admin_challenges WHERE challenge_id = ?",
+            (challenge_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_reject_admin_challenge(challenge_id: str, admin_label: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE admin_challenges
+            SET status = 'rejected', admin_label = ?
+            WHERE challenge_id = ?
+            """,
+            (admin_label, challenge_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM admin_challenges WHERE challenge_id = ?",
+            (challenge_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_verify_admin_challenge_code(code: str) -> Optional[str]:
+    now = time.time()
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM admin_challenges
+            WHERE code = ? AND status IN ('pending', 'approved') AND expires_at > ?
+            ORDER BY created_at DESC
+            """,
+            (code, now),
+        ).fetchall()
+        if not rows:
+            return None
+        row = rows[0]
+        cid = row["challenge_id"]
+        conn.execute(
+            "UPDATE admin_challenges SET status = 'consumed' WHERE challenge_id = ?",
+            (cid,),
+        )
+        return str(row.get("admin_label") or "telegram_admin")
+
+
+def db_get_recent_admin_challenges(limit: int = 25) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM admin_challenges ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 

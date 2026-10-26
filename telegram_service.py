@@ -62,6 +62,12 @@ from database import (
     toggle_donor_vip,
     upsert_streamer,
     upsert_telegram_user_permission,
+    db_create_admin_challenge,
+    db_get_admin_challenge,
+    db_approve_admin_challenge,
+    db_reject_admin_challenge,
+    db_verify_admin_challenge_code,
+    db_get_recent_admin_challenges,
 )
 from tiktok_service import fetch_tiktok_user_info, monitor_manager
 
@@ -78,6 +84,9 @@ if not logger.handlers:
     )
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+ENABLE_BOT = os.getenv("ENABLE_BOT", "true").lower() in ("true", "1", "yes")
+BOT_URL = os.getenv("BOT_URL", "http://bot:5002").rstrip("/")
 
 
 class AdminAuthManager:
@@ -112,16 +121,28 @@ class AdminAuthManager:
         challenge_id = secrets.token_hex(16)
         code = f"{secrets.randbelow(900000) + 100000}"
         now = time.time()
+        expires_at = now + self.CHALLENGE_TTL_SECONDS
         challenge = {
             "challenge_id": challenge_id,
             "code": code,
             "created_at": now,
-            "expires_at": now + self.CHALLENGE_TTL_SECONDS,
+            "expires_at": expires_at,
             "status": "pending",  # pending | approved | rejected | consumed
             "admin_label": admin_label,
             "client_info": client_info,
         }
         self._challenges[challenge_id] = challenge
+        try:
+            db_create_admin_challenge(
+                challenge_id=challenge_id,
+                code=code,
+                created_at=now,
+                expires_at=expires_at,
+                client_info=client_info,
+                admin_label=admin_label,
+            )
+        except Exception as exc:
+            logger.debug("Konnte Admin-Challenge nicht in DB schreiben: %s", exc)
         return challenge
 
     def get_latest_pending_challenge(self) -> Optional[Dict[str, Any]]:
@@ -138,6 +159,14 @@ class AdminAuthManager:
 
     def approve_challenge(self, challenge_id: str, admin_label: str) -> Optional[Dict[str, Any]]:
         self._cleanup_expired()
+        try:
+            db_res = db_approve_admin_challenge(challenge_id, admin_label)
+            if db_res:
+                self._challenges[challenge_id] = db_res
+                return db_res
+        except Exception as exc:
+            logger.debug("DB approve_challenge Fehler: %s", exc)
+
         ch = self._challenges.get(challenge_id)
         if not ch or ch.get("status") not in ("pending", "approved"):
             return None
@@ -147,6 +176,14 @@ class AdminAuthManager:
 
     def reject_challenge(self, challenge_id: str, admin_label: str) -> Optional[Dict[str, Any]]:
         self._cleanup_expired()
+        try:
+            db_res = db_reject_admin_challenge(challenge_id, admin_label)
+            if db_res:
+                self._challenges[challenge_id] = db_res
+                return db_res
+        except Exception as exc:
+            logger.debug("DB reject_challenge Fehler: %s", exc)
+
         ch = self._challenges.get(challenge_id)
         if not ch:
             return None
@@ -156,12 +193,38 @@ class AdminAuthManager:
 
     def get_recent_challenges(self, limit: int = 25) -> List[Dict[str, Any]]:
         self._cleanup_expired()
+        try:
+            db_items = db_get_recent_admin_challenges(limit=limit)
+            if db_items:
+                return db_items
+        except Exception:
+            pass
         items = list(self._challenges.values())
         items.sort(key=lambda c: c.get("created_at", 0), reverse=True)
         return items[:limit]
 
     def poll_challenge(self, challenge_id: str) -> Dict[str, Any]:
         self._cleanup_expired()
+        try:
+            ch_db = db_get_admin_challenge(challenge_id)
+            if ch_db:
+                now = time.time()
+                if float(ch_db.get("expires_at", 0)) < now:
+                    return {"status": "expired"}
+                st = ch_db.get("status", "pending")
+                if st == "approved":
+                    db_res = db_approve_admin_challenge(challenge_id, ch_db.get("admin_label") or "telegram_admin")
+                    # Setze auf consumed
+                    with get_db() as conn:
+                        conn.execute("UPDATE admin_challenges SET status = 'consumed' WHERE challenge_id = ?", (challenge_id,))
+                    return {
+                        "status": "approved",
+                        "admin_label": ch_db.get("admin_label") or "telegram_admin",
+                    }
+                return {"status": st}
+        except Exception as exc:
+            logger.debug("DB poll_challenge Fehler: %s", exc)
+
         ch = self._challenges.get(challenge_id)
         if not ch:
             return {"status": "expired"}
@@ -188,6 +251,13 @@ class AdminAuthManager:
         if config.admin_password and hmac.compare_digest(clean_code, config.admin_password):
             return "env_admin"
 
+        try:
+            db_verified = db_verify_admin_challenge_code(clean_code)
+            if db_verified:
+                return db_verified
+        except Exception as exc:
+            logger.debug("DB verify_code Fehler: %s", exc)
+
         if challenge_id and challenge_id in self._challenges:
             ch = self._challenges[challenge_id]
             if ch.get("status") in ("pending", "approved") and hmac.compare_digest(
@@ -196,7 +266,7 @@ class AdminAuthManager:
                 ch["status"] = "consumed"
                 return str(ch.get("admin_label") or "telegram_admin")
 
-        # Suche über alle aktiven Challenges (z. B. wenn der Code direkt per /login im Bot erzeugt wurde)
+        # Suche über alle aktiven Challenges (In-Memory Fallback)
         for ch in list(self._challenges.values()):
             if ch.get("status") in ("pending", "approved") and hmac.compare_digest(
                 str(ch.get("code", "")), clean_code
@@ -527,7 +597,34 @@ class TelegramBotService:
         else:
             logger.info("%s", msg)
 
+    _remote_diag_cache: Optional[Dict[str, Any]] = None
+    _remote_diag_cache_time: float = 0.0
+
+    def _fetch_remote_diagnostics(self) -> Optional[Dict[str, Any]]:
+        import time
+        now = time.monotonic()
+        if TelegramBotService._remote_diag_cache and (now - TelegramBotService._remote_diag_cache_time) < 3.5:
+            return TelegramBotService._remote_diag_cache.copy()
+
+        import urllib.request
+        try:
+            req = urllib.request.Request(f"{BOT_URL}/api/diagnostics", headers={"User-Agent": "toktracker_web"})
+            with urllib.request.urlopen(req, timeout=0.8) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    TelegramBotService._remote_diag_cache = data
+                    TelegramBotService._remote_diag_cache_time = now
+                    return data
+        except Exception:
+            pass
+        return None
+
     def get_diagnostics(self) -> Dict[str, Any]:
+        if not ENABLE_BOT:
+            cached = self._fetch_remote_diagnostics()
+            if cached and isinstance(cached, dict):
+                return cached
+
         try:
             mode = get_telegram_access_mode()
             users = list_telegram_users()
@@ -538,10 +635,14 @@ class TelegramBotService:
             allowed_count = 0
             pending_count = 0
 
+        state = self._state
+        if not ENABLE_BOT and state == "disabled":
+            state = "running (remote)"
+
         return {
             "sdk_available": PTB_AVAILABLE,
-            "state": self._state,
-            "bot_username": self._bot_username,
+            "state": state,
+            "bot_username": self._bot_username or ("toktrackeragent" if not ENABLE_BOT else ""),
             "has_token": bool(config.telegram_bot_token),
             "default_chat_id": config.telegram_chat_id,
             "access_mode": mode,
@@ -560,6 +661,12 @@ class TelegramBotService:
         }
 
     async def start(self) -> None:
+        if not ENABLE_BOT:
+            self._state = "running (remote)"
+            self._bot_username = "toktrackeragent"
+            self._log("INFO", f"Telegram-Bot Service läuft als eigenständiger Microservice ({BOT_URL}).")
+            return
+
         if not PTB_AVAILABLE:
             self._state = "disabled"
             self._log("INFO", "python-telegram-bot SDK nicht installiert – Bot deaktiviert.")
@@ -715,6 +822,9 @@ class TelegramBotService:
             self._log("INFO", f"Hinweis bei set_my_commands: {exc}")
 
     async def stop(self) -> None:
+        if not ENABLE_BOT:
+            self._state = "stopped"
+            return
         if not self._app:
             return
         self._log("INFO", "Stoppe Telegram-Bot...")
@@ -781,6 +891,35 @@ class TelegramBotService:
         Erzeugt eine Login-Challenge und sendet den 6-stelligen Einmal-Code sowie
         einen Inline-Freigabe-Button an die hinterlegten Admin-Telegram-Chats.
         """
+        if not ENABLE_BOT:
+            try:
+                import urllib.request
+                req_data = json.dumps({"identifier_hint": identifier_hint, "client_info": client_info}).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{BOT_URL}/api/notify-challenge",
+                    data=req_data,
+                    headers={"Content-Type": "application/json", "User-Agent": "toktracker_web"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    if resp.status == 200:
+                        payload = json.loads(resp.read().decode("utf-8"))
+                        if payload.get("ok") and "result" in payload:
+                            return payload["result"]
+            except Exception as exc:
+                self._log("WARNING", f"Konnte Login-Challenge nicht an Remote-Bot senden: {exc}")
+
+            challenge = admin_auth_manager.create_challenge(client_info=client_info)
+            return {
+                "ok": True,
+                "challenge_id": challenge["challenge_id"],
+                "delivered_count": 0,
+                "bot_running": False,
+                "bot_username": self._bot_username or "toktrackeragent",
+                "expires_in": AdminAuthManager.CHALLENGE_TTL_SECONDS,
+                "message": "Challenge erzeugt (OTP-Login aktiv).",
+            }
+
         challenge = admin_auth_manager.create_challenge(client_info=client_info)
         cid = challenge["challenge_id"]
         code = challenge["code"]
@@ -1073,6 +1212,27 @@ class TelegramBotService:
     async def send_report_now(
         self, chat_id: Optional[str] = None, hours: int = 24
     ) -> Dict[str, Any]:
+        if not ENABLE_BOT:
+            try:
+                import urllib.request
+                req_data = json.dumps({"chat_id": chat_id, "hours": hours}).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{BOT_URL}/api/send-report",
+                    data=req_data,
+                    headers={"Content-Type": "application/json", "User-Agent": "toktracker_web"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    if resp.status == 200:
+                        payload = json.loads(resp.read().decode("utf-8"))
+                        if "result" in payload:
+                            return payload["result"]
+                        return {"ok": True, "chat_id": chat_id, "hours": hours}
+            except Exception as exc:
+                err = f"{type(exc).__name__}: {exc}"
+                self._log("ERROR", f"Fehler bei Remote-Report: {err}")
+                return {"ok": False, "error": err}
+
         target_chat = (chat_id or config.telegram_chat_id or "").strip()
         if self._state != "running" or not self._app:
             return {

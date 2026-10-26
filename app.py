@@ -3,6 +3,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import time
@@ -10,6 +11,8 @@ import urllib.parse
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("toktracker_web")
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -82,6 +85,18 @@ from telegram_service import (
     telegram_bot_service,
 )
 from tiktok_service import TIKTOKLIVE_AVAILABLE, fetch_tiktok_user_info, monitor_manager
+from remote_services import (
+    ENABLE_BOT,
+    ENABLE_WORKER,
+    get_bot_diagnostics,
+    get_worker_diagnostics,
+    is_streamer_tracking,
+    send_admin_login_challenge,
+    send_report_now,
+    start_streamer_tracking,
+    stop_streamer_tracking,
+    trigger_worker_sync,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -142,14 +157,22 @@ async def lifespan(app_instance: FastAPI):
         if count == 0:
             seed_demo_data()
 
-    monitor_manager.autostart_from_db()
+    if ENABLE_WORKER:
+        monitor_manager.autostart_from_db()
+    else:
+        logger.info("TokTracker Web läuft im Microservice-Modus: TikTok-Monitoring wird von toktracker_worker ausgeführt.")
 
-    await telegram_bot_service.start()
+    if ENABLE_BOT:
+        await telegram_bot_service.start()
+    else:
+        logger.info("TokTracker Web läuft im Microservice-Modus: Telegram-Bot wird von toktracker_bot ausgeführt.")
 
     yield
 
-    await telegram_bot_service.stop()
-    monitor_manager.stop_all()
+    if ENABLE_BOT:
+        await telegram_bot_service.stop()
+    if ENABLE_WORKER:
+        monitor_manager.stop_all()
 
 
 app = FastAPI(
@@ -439,6 +462,10 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 # =====================================================================
 # 1. TOKTRACKER WEB-INTERFACE: PUBLIC PANEL (/), LOGIN (/login) & ADMIN (/admin)
 # =====================================================================
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    return {"ok": True, "service": "toktracker_app"}
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/public", response_class=HTMLResponse, include_in_schema=False)

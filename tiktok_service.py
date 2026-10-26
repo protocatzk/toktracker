@@ -1,7 +1,9 @@
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -11,6 +13,9 @@ from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import httpx
+
+ENABLE_WORKER = os.getenv("ENABLE_WORKER", "true").lower() in ("true", "1", "yes")
+WORKER_URL = os.getenv("WORKER_URL", "http://worker:5001").rstrip("/")
 
 try:
     from TikTokLive import TikTokLiveClient
@@ -1992,15 +1997,35 @@ class StreamerMonitorManager:
         self._lock = threading.Lock()
         self._workers: Dict[str, StreamerWorker] = {}
         self._autostart_done = False
+        self._remote_diag_cache: Optional[Dict[str, Any]] = None
+        self._remote_diag_time: float = 0.0
 
     def is_tracking(self, username: str) -> bool:
         clean = username.strip().lstrip("@").lower()
+        if not ENABLE_WORKER:
+            try:
+                with get_db() as conn:
+                    row = conn.execute("SELECT is_tracking FROM streamers WHERE username = ?", (clean,)).fetchone()
+                    return bool(row and row["is_tracking"])
+            except Exception:
+                return False
         with self._lock:
             worker = self._workers.get(clean)
             return bool(worker and worker.is_alive())
 
     def get_status(self, username: str) -> str:
         clean = username.strip().lstrip("@").lower()
+        if not ENABLE_WORKER:
+            try:
+                with get_db() as conn:
+                    row = conn.execute("SELECT is_tracking, is_live, last_error FROM streamers WHERE username = ?", (clean,)).fetchone()
+                    if not row or not row["is_tracking"]:
+                        return "Inaktiv"
+                    state = "connected" if row["is_live"] else "polling_offline"
+                    err = str(row["last_error"] or "")
+                    return f"[{state}] {err}"
+            except Exception:
+                return "Inaktiv"
         with self._lock:
             worker = self._workers.get(clean)
             if not worker:
@@ -2010,11 +2035,89 @@ class StreamerMonitorManager:
 
     def get_worker_diagnostics(self, username: str) -> Optional[Dict[str, Any]]:
         clean = username.strip().lstrip("@").lower()
+        if not ENABLE_WORKER:
+            try:
+                resp = httpx.get(f"{WORKER_URL}/api/diagnostics/{clean}", timeout=1.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, dict) and "diagnostics" in data:
+                        return data["diagnostics"]
+                    return data
+            except Exception:
+                pass
+            try:
+                with get_db() as conn:
+                    row = conn.execute("SELECT * FROM streamers WHERE username = ?", (clean,)).fetchone()
+                    if not row:
+                        return None
+                    d = dict(row)
+                    return {
+                        "username": d["username"],
+                        "is_running": bool(d["is_tracking"]),
+                        "state": "connected" if d["is_live"] else ("polling_offline" if d["is_tracking"] else "idle"),
+                        "is_live": bool(d["is_live"]),
+                        "current_viewers": int(d.get("current_viewers", 0) or 0),
+                        "peak_viewers": int(d.get("peak_viewers", 0) or 0),
+                        "last_error": str(d.get("last_error", "") or ""),
+                        "last_message": str(d.get("last_error", "") or ""),
+                    }
+            except Exception:
+                return None
         with self._lock:
             worker = self._workers.get(clean)
             return worker.get_snapshot() if worker else None
 
     def get_all_diagnostics(self) -> Dict[str, Any]:
+        if not ENABLE_WORKER:
+            now = time.monotonic()
+            if self._remote_diag_cache is not None and (now - self._remote_diag_time) < 3.0:
+                return self._remote_diag_cache.copy()
+            try:
+                resp = httpx.get(f"{WORKER_URL}/api/diagnostics", timeout=1.2)
+                if resp.status_code == 200:
+                    self._remote_diag_cache = resp.json()
+                    self._remote_diag_time = now
+                    return self._remote_diag_cache.copy()
+            except Exception:
+                pass
+            try:
+                with get_db() as conn:
+                    rows = conn.execute("SELECT * FROM streamers").fetchall()
+                    streamers = [dict(r) for r in rows]
+                active = sum(1 for s in streamers if s.get("is_tracking"))
+                connected = sum(1 for s in streamers if s.get("is_live"))
+                res = {
+                    "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+                    "env_config": config.public_summary(),
+                    "workers_total": len(streamers),
+                    "workers_running": active,
+                    "workers_connected": connected,
+                    "workers": [
+                        {
+                            "username": s["username"],
+                            "is_running": bool(s["is_tracking"]),
+                            "state": "connected" if s["is_live"] else ("polling_offline" if s["is_tracking"] else "idle"),
+                            "is_live": bool(s["is_live"]),
+                            "current_viewers": int(s.get("current_viewers", 0) or 0),
+                            "peak_viewers": int(s.get("peak_viewers", 0) or 0),
+                            "last_error": str(s.get("last_error", "") or ""),
+                            "last_message": str(s.get("last_error", "") or ""),
+                        }
+                        for s in streamers
+                    ],
+                }
+                self._remote_diag_cache = res
+                self._remote_diag_time = now
+                return res
+            except Exception:
+                return {
+                    "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+                    "env_config": config.public_summary(),
+                    "workers_total": 0,
+                    "workers_running": 0,
+                    "workers_connected": 0,
+                    "workers": [],
+                }
         with self._lock:
             snapshots = [w.get_snapshot() for w in self._workers.values()]
         active_count = sum(1 for s in snapshots if s["is_running"])
@@ -2029,10 +2132,12 @@ class StreamerMonitorManager:
         }
 
     def autostart_from_db(self, force: bool = False) -> List[str]:
-        """
-        Startet beim Programmstart automatisch alle Streamer, die in der Datenbank
-        mit `auto_monitor = 1` oder `is_tracking = 1` markiert sind.
-        """
+        if not ENABLE_WORKER:
+            try:
+                httpx.post(f"{WORKER_URL}/api/sync", timeout=1.5)
+            except Exception:
+                pass
+            return []
         with self._lock:
             if self._autostart_done and not force:
                 return []
@@ -2069,6 +2174,26 @@ class StreamerMonitorManager:
         self, streamer_id: int, username: str, auto_reconnect: bool = True
     ) -> Dict[str, Any]:
         clean = username.strip().lstrip("@").lower()
+        if not ENABLE_WORKER:
+            update_streamer_runtime_state(
+                clean,
+                is_tracking=True,
+                auto_monitor=bool(auto_reconnect),
+            )
+            try:
+                resp = httpx.post(
+                    f"{WORKER_URL}/api/tracking/start",
+                    json={"streamer_id": streamer_id, "username": clean, "auto_reconnect": auto_reconnect},
+                    timeout=2.0,
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("result", {"ok": True})
+            except Exception as exc:
+                logger.debug("Konnte Remote-Worker für @%s nicht triggern: %s", clean, exc)
+            return {
+                "ok": True,
+                "message": f"Tracking für @{clean} in DB aktiviert (wird von toktracker_worker synchronisiert).",
+            }
         if not TIKTOKLIVE_AVAILABLE:
             return {
                 "ok": False,
@@ -2104,21 +2229,45 @@ class StreamerMonitorManager:
             "diagnostics": worker.get_snapshot(),
         }
 
-    def stop_tracking(self, username: str) -> Dict[str, Any]:
+    def stop_tracking(self, username: str, preserve_db_state: bool = False) -> Dict[str, Any]:
         clean = username.strip().lstrip("@").lower()
+        if not ENABLE_WORKER:
+            if not preserve_db_state:
+                update_streamer_runtime_state(
+                    clean,
+                    is_live=False,
+                    is_tracking=False,
+                    auto_monitor=False,
+                    current_viewers=0,
+                )
+            try:
+                resp = httpx.post(
+                    f"{WORKER_URL}/api/tracking/stop",
+                    params={"username": clean, "preserve_db_state": preserve_db_state},
+                    timeout=2.0,
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("result", {"ok": True})
+            except Exception as exc:
+                logger.debug("Konnte Remote-Worker für Stop @%s nicht triggern: %s", clean, exc)
+            return {
+                "ok": True,
+                "message": f"Tracking für @{clean} in DB gestoppt (wird von toktracker_worker synchronisiert).",
+            }
         with self._lock:
             worker = self._workers.get(clean)
 
         if worker:
-            worker.stop(preserve_db_state=False)
+            worker.stop(preserve_db_state=preserve_db_state)
         else:
-            update_streamer_runtime_state(
-                clean,
-                is_live=False,
-                is_tracking=False,
-                auto_monitor=False,
-                current_viewers=0,
-            )
+            if not preserve_db_state:
+                update_streamer_runtime_state(
+                    clean,
+                    is_live=False,
+                    is_tracking=False,
+                    auto_monitor=False,
+                    current_viewers=0,
+                )
 
         return {
             "ok": True,
@@ -2131,6 +2280,8 @@ class StreamerMonitorManager:
         Beendet alle laufenden Worker-Verbindungen sauber, behält aber die
         Markierung (`auto_monitor = 1` / `is_tracking = 1`) in der Datenbank bei!
         """
+        if not ENABLE_WORKER:
+            return
         with self._lock:
             workers = list(self._workers.values())
         for w in workers:

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # ============================================================================
-  # 1. TokTracker Web Dashboard & Worker Service
+  # 1. TokTracker Web Dashboard & REST-API Service
   # ============================================================================
   app:
     build:
@@ -20,6 +20,10 @@ services:
       - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
+      - ENABLE_WORKER=false
+      - ENABLE_BOT=false
+      - WORKER_URL=http://worker:5001
+      - BOT_URL=http://bot:5002
       # Automatische Konfiguration für Nginx Reverse Proxy & Let's Encrypt
       - VIRTUAL_HOST=${DOMAIN_NAME}
       - VIRTUAL_PORT=5000
@@ -28,6 +32,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      worker:
+        condition: service_started
+      bot:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/health"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     group_add:
@@ -36,7 +50,73 @@ services:
       - toktracker_net
 
   # ============================================================================
-  # 2. MariaDB Datenbank (Produktion)
+  # 2. TokTracker Worker Service (TikTokLive Streaming & Ingestion)
+  # ============================================================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: toktracker_worker
+    command: ["python", "worker.py"]
+    restart: unless-stopped
+    expose:
+      - "5001"
+    env_file:
+      - .env
+    environment:
+      - WORKER_PORT=5001
+      - ENABLE_WORKER=true
+      - ENABLE_BOT=false
+      - DB_ENGINE=mysql
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5001/health"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - toktracker_net
+
+  # ============================================================================
+  # 3. TokTracker Telegram Bot Service (2FA Auth & Reporting)
+  # ============================================================================
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: toktracker_bot
+    command: ["python", "bot.py"]
+    restart: unless-stopped
+    expose:
+      - "5002"
+    env_file:
+      - .env
+    environment:
+      - BOT_PORT=5002
+      - ENABLE_BOT=true
+      - ENABLE_WORKER=false
+      - DB_ENGINE=mysql
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5002/health"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - toktracker_net
+
+  # ============================================================================
+  # 4. MariaDB Datenbank (Produktion)
   # ============================================================================
   db:
     image: mariadb:11
@@ -58,7 +138,7 @@ services:
       retries: 5
 
   # ============================================================================
-  # 3. Nginx Reverse Proxy (Öffentlich erreichbar über Port 80 & 443)
+  # 5. Nginx Reverse Proxy (Öffentlich erreichbar über Port 80 & 443)
   # ============================================================================
   nginx-proxy:
     image: nginxproxy/nginx-proxy:alpine
@@ -78,7 +158,7 @@ services:
       - app
 
   # ============================================================================
-  # 4. Let's Encrypt SSL Companion (Automatisches Zertifikat & Auto-Renewal)
+  # 6. Let's Encrypt SSL Companion (Automatisches Zertifikat & Auto-Renewal)
   # ============================================================================
   acme-companion:
     image: nginxproxy/acme-companion:latest
