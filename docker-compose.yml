@@ -49,6 +49,8 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-user_change_me_in_production}
     volumes:
       - mariadb_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
     networks:
       - toktracker_net
     healthcheck:
