@@ -689,6 +689,475 @@
             color: #10b981;
         }
 
+        /* Database Viewer Table Styles */
+        .ci-table-wrap {
+            height: 540px;
+            overflow-y: auto;
+            overflow-x: auto;
+            background: var(--bg-surface);
+        }
+
+        .ci-db-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 12px;
+        }
+
+        .ci-db-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--bg-card);
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 750;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 10px 14px;
+            border-bottom: 2px solid var(--border-color);
+            white-space: nowrap;
+            text-align: left;
+        }
+
+        .ci-db-table thead th.text-right {
+            text-align: right;
+        }
+
+        .ci-db-table tbody tr {
+            transition: background 0.12s ease;
+            cursor: pointer;
+        }
+
+        .ci-db-table tbody tr:hover td {
+            background: rgba(168, 85, 247, 0.05);
+        }
+
+        .ci-db-table tbody tr.row-whale td {
+            background: rgba(245, 158, 11, 0.03);
+        }
+
+        .ci-db-table tbody tr.row-shark td {
+            background: rgba(56, 189, 248, 0.03);
+        }
+
+        .ci-db-table tbody tr.row-dolphin td {
+            background: rgba(16, 185, 129, 0.03);
+        }
+
+        .ci-db-table tbody td {
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: middle;
+            color: var(--text-main);
+        }
+
+        /* Columns */
+        .col-id { width: 85px; font-family: var(--font-mono); }
+        .col-time { width: 135px; font-family: var(--font-mono); white-space: nowrap; color: var(--text-muted); }
+        .col-streamer { width: 140px; white-space: nowrap; }
+        .col-user { width: 180px; min-width: 160px; }
+        .col-tier { width: 100px; white-space: nowrap; }
+        .col-comment { min-width: 280px; word-break: break-word; line-height: 1.4; }
+        .col-actions { width: 130px; text-align: right; white-space: nowrap; }
+
+        /* User Cell */
+        .user-cell-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-avatar-sm {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            flex-shrink: 0;
+        }
+
+        .user-info-text {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .user-nick {
+            font-weight: 700;
+            color: var(--text-strong);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 130px;
+            font-size: 12px;
+        }
+
+        .user-handle-btn {
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            color: #a855f7;
+            background: transparent;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 130px;
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+
+        .user-handle-btn:hover {
+            color: #c084fc;
+            text-decoration: underline;
+        }
+
+        /* Tier Badges */
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-family: var(--font-mono);
+            letter-spacing: 0.3px;
+        }
+
+        .tier-badge-whale { background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); }
+        .tier-badge-shark { background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+        .tier-badge-vip { background: rgba(16, 185, 129, 0.18); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }
+        .tier-badge-default { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-color); }
+
+        /* Row Actions */
+        .row-actions-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            justify-content: flex-end;
+        }
+
+        .btn-row-action {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            width: 26px;
+            height: 26px;
+            border-radius: 5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.15s ease;
+            text-decoration: none;
+        }
+
+        .btn-row-action:hover {
+            color: var(--text-main);
+            border-color: #8b5cf6;
+            background: rgba(139, 92, 246, 0.12);
+        }
+
+        /* View Switcher */
+        .ci-view-switcher {
+            display: inline-flex;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .ci-view-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 5px 11px;
+            border-radius: 4px;
+            font-size: 11.5px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.15s ease;
+        }
+
+        .ci-view-btn:hover {
+            color: var(--text-main);
+        }
+
+        .ci-view-btn.active {
+            background: #8b5cf6;
+            color: #ffffff;
+            box-shadow: 0 2px 6px rgba(139, 92, 246, 0.35);
+        }
+
+        /* Tool Buttons */
+        .btn-ci-tool {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s ease;
+        }
+
+        .btn-ci-tool:hover {
+            border-color: #8b5cf6;
+            color: #fff;
+        }
+
+        .btn-ci-tool.sm {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        .ci-select-sm {
+            background: var(--bg-subtle);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 5px 8px;
+            border-radius: 6px;
+            font-size: 11.5px;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .ci-select-sm:focus {
+            border-color: #8b5cf6;
+        }
+
+        /* Active User Filter Pill */
+        .active-user-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.45);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: var(--font-mono);
+        }
+
+        .active-user-pill button {
+            background: transparent;
+            border: none;
+            color: #38bdf8;
+            cursor: pointer;
+            font-size: 13px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        /* Pagination Bar */
+        .ci-pagination-bar {
+            padding: 10px 18px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-muted);
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .ci-pagination-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ci-pag-btn {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .ci-pag-btn:hover:not(:disabled) {
+            background: rgba(139, 92, 246, 0.15);
+            border-color: #8b5cf6;
+            color: #fff;
+        }
+
+        .ci-pag-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .ci-pag-info {
+            font-size: 11.5px;
+            margin: 0 4px;
+        }
+
+        /* Inspector Modal */
+        .insp-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .insp-modal-content {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 650px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+        }
+
+        .insp-header {
+            padding: 16px 20px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .insp-title {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--text-strong);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .insp-body {
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .insp-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        @media (max-width: 600px) {
+            .insp-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .insp-field {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+
+        .insp-field-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            font-weight: 750;
+            color: var(--text-muted);
+            letter-spacing: 0.4px;
+            margin-bottom: 3px;
+        }
+
+        .insp-field-val {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--text-main);
+            word-break: break-all;
+        }
+
+        .insp-message-box {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 13.5px;
+            line-height: 1.5;
+            color: var(--text-main);
+            word-break: break-word;
+        }
+
+        .insp-json-block {
+            background: #090d16;
+            color: #e2e8f0;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            max-height: 180px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+        }
+
+        .insp-footer {
+            padding: 14px 20px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* Floating Toast Feedback */
+        .ci-toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #10b981;
+            color: #ffffff;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 12.5px;
+            font-weight: 700;
+            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+
         .ci-footer-nav {
             margin-top: 40px;
             padding-top: 20px;
@@ -878,47 +1347,126 @@
             </div>
         </section>
 
-        <!-- 5. Stream Chat Log Viewer -->
+        <!-- 5. Stream Chat Log & Database Viewer -->
         <section class="ci-viewer-card" id="chatViewerSection">
             <div class="ci-viewer-header">
                 <div class="ci-viewer-search-wrap">
-                    <input type="text" id="inputChatSearch" class="ci-search-input" placeholder="Chat durchsuchen (Text, @User, Nickname)..." />
+                    <input type="text" id="inputChatSearch" class="ci-search-input" placeholder="Chat &amp; Datenbank durchsuchen (z.B. @nutzername, Text, #ID)..." />
                     
                     <div id="activeFilterPill" style="display: none;">
                         <span class="active-filter-pill">
                             <span id="activeFilterText">löwe</span>
-                            <button type="button" id="btnClearWordFilter" title="Filter entfernen">&times;</button>
+                            <button type="button" id="btnClearWordFilter" title="Wortfilter entfernen">&times;</button>
+                        </span>
+                    </div>
+
+                    <div id="activeUserFilterPill" style="display: none;">
+                        <span class="active-user-pill">
+                            <span>👤 @<span id="activeUserFilterText">username</span></span>
+                            <button type="button" id="btnClearUserFilter" title="Benutzerfilter entfernen">&times;</button>
                         </span>
                     </div>
                 </div>
 
-                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                    <label class="checkbox-label" style="font-size:12px; margin:0; cursor:pointer;">
-                        <input type="checkbox" id="chkOnlyWhales" style="accent-color:#a855f7;" />
-                        <span>Nur Spender / Wale</span>
-                    </label>
+                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <!-- View Mode Switcher -->
+                    <div class="ci-view-switcher" role="group" aria-label="Ansicht umschalten">
+                        <button type="button" id="btnViewModeTable" class="ci-view-btn active" title="Tabellarische Datenbank-Ansicht">
+                            <span>📊 Tabellen-Grid</span>
+                        </button>
+                        <button type="button" id="btnViewModeStream" class="ci-view-btn" title="Chat-Stream Ansicht">
+                            <span>💬 Stream</span>
+                        </button>
+                    </div>
 
-                    <button type="button" id="btnToggleLiveTail" class="btn-export" style="font-size:11px; padding:4px 8px;">
+                    <!-- Spender-Tier Filter -->
+                    <select id="selectTierFilter" class="ci-select-sm" title="Rang filtern">
+                        <option value="">Alle Ränge</option>
+                        <option value="whales">🐋 Nur Spender (Wale/VIPs)</option>
+                        <option value="whale">🐋 Nur Top-Wale</option>
+                        <option value="shark">🦈 Nur Sharks</option>
+                        <option value="dolphin">🐬 Nur Dolphins</option>
+                    </select>
+
+                    <!-- Sort Order Toggle -->
+                    <button type="button" id="btnToggleSort" class="btn-ci-tool sm" title="Sortierung umkehren (DESC / ASC)">
+                        <span id="sortOrderLabel">⏱ Neueste (DESC)</span>
+                    </button>
+
+                    <!-- Live Tail Toggle -->
+                    <button type="button" id="btnToggleLiveTail" class="btn-ci-tool sm" title="Live-Polling pausieren/starten">
                         <span id="liveTailDot" style="width:8px; height:8px; border-radius:50%; background:#10b981; display:inline-block;"></span>
-                        <span id="liveTailText">Live-Tail: An</span>
+                        <span id="liveTailText">Live: An</span>
                     </button>
 
-                    <button type="button" id="btnExportCsvDirect" class="btn-export" style="font-size:11px; padding:4px 10px;">
-                        <span>CSV Export</span>
+                    <!-- Export Modal Button -->
+                    <button type="button" id="btnExportMenu" class="btn-ci-tool sm" title="Gefilterte Chatdaten exportieren">
+                        <span>📥 Exportieren</span>
                     </button>
 
-                    <span class="mono muted" id="viewerMsgCountMeta" style="font-size:11.5px;">0 Nachrichten</span>
+                    <span class="mono muted" id="viewerMsgCountMeta" style="font-size:11.5px;">0 Einträge</span>
                 </div>
             </div>
 
-            <!-- Messages Stream Area -->
-            <div class="ci-messages-stream" id="chatStreamArea">
+            <!-- Tabellarische Datenbank-Grid Ansicht (Default) -->
+            <div class="ci-table-wrap" id="chatTableContainer">
+                <table class="ci-db-table">
+                    <thead>
+                        <tr>
+                            <th class="col-id" title="Nachrichten-ID">#ID</th>
+                            <th class="col-time" title="Zeitpunkt der Nachricht">Zeitpunkt</th>
+                            <th class="col-streamer" title="Kanal / Streamer">Streamer</th>
+                            <th class="col-user" title="TikTok-Benutzer (Klicken zum Filtern)">Nutzer / Absender</th>
+                            <th class="col-tier" title="Spender-Rang (Whale, Shark, VIP)">Rang</th>
+                            <th class="col-comment" title="Chat-Nachricht">Chat-Nachricht</th>
+                            <th class="col-actions text-right" title="Aktionen">Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="chatTableBody">
+                        <tr>
+                            <td colspan="7" style="text-align: center; padding: 48px; color: var(--text-muted);">
+                                Lade Datenbank-Einträge...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Chat-Stream / Bubble Ansicht (Alternativ) -->
+            <div class="ci-messages-stream" id="chatStreamArea" style="display: none;">
                 <div style="color: var(--text-muted); font-size: 13px; text-align: center; margin-top: 40px;">
                     Lade Chat-Logs...
                 </div>
             </div>
 
-            <div class="ci-viewer-footer">
+            <!-- Footer: Pagination Bar für Tabellen-Ansicht -->
+            <div class="ci-pagination-bar" id="ciPaginationBar">
+                <div class="mono" style="font-size: 11.5px;">
+                    Zeige <strong id="pagRangeStart">0</strong> - <strong id="pagRangeEnd">0</strong> von <strong id="pagTotalCount">0</strong> Einträgen
+                </div>
+
+                <div class="ci-pagination-controls">
+                    <button type="button" id="btnPagFirst" class="ci-pag-btn" title="Erste Seite">⏮ Erste</button>
+                    <button type="button" id="btnPagPrev" class="ci-pag-btn" title="Vorherige Seite">◀ Zurück</button>
+                    <span class="ci-pag-info mono">Seite <strong id="pagCurrentPage">1</strong> von <strong id="pagTotalPages">1</strong></span>
+                    <button type="button" id="btnPagNext" class="ci-pag-btn" title="Nächste Seite">Weiter ▶</button>
+                    <button type="button" id="btnPagLast" class="ci-pag-btn" title="Letzte Seite">Letzte ⏭</button>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:11.5px; color:var(--text-muted);">Zeilen:</label>
+                    <select id="selectPageSize" class="ci-select-sm" title="Einträge pro Seite">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                    <button type="button" id="btnRefreshGrid" class="btn-ci-tool sm" title="Tabelle neu laden">🔄</button>
+                </div>
+            </div>
+
+            <!-- Footer: Ältere Nachrichten laden für Stream-Ansicht -->
+            <div class="ci-viewer-footer" id="ciStreamFooter" style="display: none;">
                 <button type="button" id="btnLoadOlderMsgs" class="btn-export" style="font-size:11.5px;">
                     ⬆ Ältere Nachrichten laden
                 </button>
@@ -937,11 +1485,89 @@
         </footer>
     </div>
 
+    <!-- Datensatz-Inspektor Modal Dialog -->
+    <div class="insp-modal" id="recordInspectorModal" role="dialog" aria-modal="true" aria-labelledby="inspModalTitle">
+        <div class="insp-modal-content">
+            <div class="insp-header">
+                <h3 class="insp-title" id="inspModalTitle">
+                    <span>🔍 Datensatz-Inspektor</span>
+                    <span class="mono muted" style="font-size: 13px;" id="inspModalSub">#0</span>
+                </h3>
+                <button type="button" id="btnCloseInspectorModal" style="background:transparent; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">&times;</button>
+            </div>
+            
+            <div class="insp-body">
+                <!-- 2-Spalten Metadata Grid -->
+                <div class="insp-grid">
+                    <div class="insp-field">
+                        <div class="insp-field-label">Nachrichten-ID</div>
+                        <div class="insp-field-val mono" id="inspId">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">Zeitpunkt</div>
+                        <div class="insp-field-val mono" id="inspTimestamp">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">Streamer (Kanal)</div>
+                        <div class="insp-field-val" id="inspStreamer">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">Stream-Session-ID</div>
+                        <div class="insp-field-val mono" id="inspSession">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">TikTok Username</div>
+                        <div class="insp-field-val mono" id="inspUsername">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">Nickname</div>
+                        <div class="insp-field-val" id="inspNickname">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">Spender-Rang / Status</div>
+                        <div class="insp-field-val" id="inspTier">-</div>
+                    </div>
+                    <div class="insp-field">
+                        <div class="insp-field-label">TikTok User-ID</div>
+                        <div class="insp-field-val mono" id="inspUserId" style="font-size:11px;">-</div>
+                    </div>
+                </div>
+
+                <!-- Volltext-Nachricht -->
+                <div>
+                    <div class="insp-field-label" style="margin-bottom:6px;">💬 Chat-Nachricht</div>
+                    <div class="insp-message-box" id="inspComment"></div>
+                </div>
+
+                <!-- Rohdaten (JSON) -->
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <div class="insp-field-label" style="margin:0;">📦 Rohdaten (JSON)</div>
+                        <button type="button" id="btnCopyRawJson" class="btn-ci-tool sm" style="font-size:10.5px; padding:2px 8px;">📋 JSON Kopieren</button>
+                    </div>
+                    <pre class="insp-json-block" id="inspRawJson">{}</pre>
+                </div>
+            </div>
+
+            <div class="insp-footer">
+                <button type="button" id="btnFilterByThisUser" class="btn-ci-tool" style="background:#8b5cf6; color:#fff; border-color:#8b5cf6;">
+                    <span>👤 Nach diesem Nutzer filtern</span>
+                </button>
+                <a href="#" target="_blank" rel="noopener noreferrer" id="btnOpenTikTokProfile" class="btn-ci-tool">
+                    <span>↗ TikTok-Profil öffnen</span>
+                </a>
+                <button type="button" id="btnDismissInspector" class="btn-ci-tool">
+                    <span>Schließen</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Export Modal Dialog -->
     <div id="exportModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
         <div style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:10px; width:90%; max-width:440px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                <h3 style="margin:0; font-size:16px;">📥 Chatlog Exportieren</h3>
+                <h3 style="margin:0; font-size:16px;">📥 Chatdaten Exportieren</h3>
                 <button type="button" id="btnCloseExportModal" style="background:transparent; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">&times;</button>
             </div>
             <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:16px;">
@@ -951,11 +1577,20 @@
                 <button type="button" id="btnDownloadCsv" class="btn-export" style="justify-content:center; padding:10px; background:#10b981; color:#fff; border-color:#10b981;">
                     📊 Als CSV-Datei herunterladen (Excel / Sheets)
                 </button>
+                <button type="button" id="btnDownloadJson" class="btn-export" style="justify-content:center; padding:10px; background:rgba(139, 92, 246, 0.2); border-color:#8b5cf6; color:#c084fc;">
+                    📦 Als strukturierte JSON-Datei herunterladen (.json)
+                </button>
                 <button type="button" id="btnDownloadTxt" class="btn-export" style="justify-content:center; padding:10px;">
                     📄 Als formatierte Textdatei herunterladen (.txt)
                 </button>
             </div>
         </div>
+    </div>
+
+    <!-- Toast Notification Popup -->
+    <div class="ci-toast" id="ciToast">
+        <span>✓</span>
+        <span id="ciToastText">Kopiert!</span>
     </div>
 
     <script src="/static/chat_intelligence.js?v=1.0.0"></script>

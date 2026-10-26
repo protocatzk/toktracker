@@ -1860,25 +1860,47 @@ async def api_chat_logs(
     streamer_id: Optional[int] = Query(None, description="Filter nach Streamer-ID"),
     session_id: Optional[int] = Query(None, description="Filter nach Stream-Session-ID"),
     search: Optional[str] = Query(None, description="Textsuche in Chat-Nachrichten"),
+    username: Optional[str] = Query(None, description="Direkter Filter nach TikTok-Nutzernamen"),
     min_tier: Optional[str] = Query(None, description="whale | shark | dolphin"),
     only_whales: bool = Query(False, description="Nur Spender-Nachrichten anzeigen"),
     before_id: Optional[int] = Query(None, description="Ältere Nachrichten abrufen (Paginierung)"),
     after_id: Optional[int] = Query(None, description="Neuere Nachrichten abrufen (Live-Polling)"),
-    limit: int = Query(100, ge=1, le=500),
+    order_dir: str = Query("DESC", description="ASC oder DESC"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    include_total: bool = Query(True, description="Gesamtzahl berechnen"),
 ):
     init_db()
-    messages = await asyncio.to_thread(
+    clean_uname = username if isinstance(username, str) else None
+    clean_search = search if isinstance(search, str) else None
+    clean_order = order_dir if isinstance(order_dir, str) else "DESC"
+    clean_limit = limit if isinstance(limit, int) else 50
+    clean_offset = offset if isinstance(offset, int) else 0
+    clean_total = include_total if isinstance(include_total, bool) else True
+
+    messages, total_count = await asyncio.to_thread(
         get_chat_messages,
-        streamer_id=streamer_id,
-        session_id=session_id,
-        limit=limit,
-        search=search,
-        min_tier=min_tier,
-        only_whales=only_whales,
-        before_id=before_id,
-        after_id=after_id,
+        streamer_id=streamer_id if isinstance(streamer_id, int) else None,
+        session_id=session_id if isinstance(session_id, int) else None,
+        limit=clean_limit,
+        offset=clean_offset,
+        search=clean_search,
+        username=clean_uname,
+        min_tier=min_tier if isinstance(min_tier, str) else None,
+        only_whales=only_whales if isinstance(only_whales, bool) else False,
+        before_id=before_id if isinstance(before_id, int) else None,
+        after_id=after_id if isinstance(after_id, int) else None,
+        order_dir=clean_order,
+        include_total=clean_total,
     )
-    return {"ok": True, "messages": messages, "count": len(messages)}
+    return {
+        "ok": True,
+        "messages": messages,
+        "count": len(messages),
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.get(
@@ -1948,21 +1970,22 @@ async def api_chat_intelligence_analysis(
 @app.get(
     "/api/chat-intelligence/export",
     tags=["Chat Intelligence"],
-    summary="Exportiert Chatnachrichten eines Streams als CSV oder Textdatei",
+    summary="Exportiert Chatnachrichten eines Streams als CSV, JSON oder Textdatei",
     dependencies=[Depends(verify_chat_intelligence_access)],
 )
 @app.get(
     "/api/v1/chat-intelligence/export",
     tags=["Chat Intelligence"],
-    summary="Exportiert Chatnachrichten eines Streams als CSV oder Textdatei",
+    summary="Exportiert Chatnachrichten eines Streams als CSV, JSON oder Textdatei",
     dependencies=[Depends(verify_chat_intelligence_access)],
 )
 async def api_chat_intelligence_export(
     streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
     session_id: Optional[int] = Query(None, description="Stream-Session-ID"),
     search: Optional[str] = Query(None, description="Suchbegriff"),
+    username: Optional[str] = Query(None, description="Optionaler Filter nach Username"),
     only_whales: bool = Query(False, description="Nur Wale/VIPs"),
-    format: str = Query("csv", description="csv | txt"),
+    format: str = Query("csv", description="csv | txt | json"),
 ):
     init_db()
     rows = await asyncio.to_thread(
@@ -1970,13 +1993,22 @@ async def api_chat_intelligence_export(
         streamer_id=streamer_id,
         session_id=session_id,
         search=search,
+        username=username,
         only_whales=only_whales,
     )
 
     filename_part = f"session_{session_id}" if session_id else (f"streamer_{streamer_id}" if streamer_id else "all")
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if format.lower() == "txt":
+    if format.lower() == "json":
+        import json as py_json
+        content = py_json.dumps(rows, ensure_ascii=False, indent=2)
+        return Response(
+            content=content,
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="toktracker_chat_{filename_part}_{timestamp_str}.json"'},
+        )
+    elif format.lower() == "txt":
         lines = []
         lines.append(f"# TokTracker Chatlog Export - {filename_part} - {timestamp_str}")
         lines.append(f"# Gesamt Nachrichten: {len(rows)}")
@@ -1993,13 +2025,14 @@ async def api_chat_intelligence_export(
     else:
         output = io.StringIO()
         writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
-        writer.writerow(["ID", "Timestamp", "Streamer", "SessionID", "Username", "Nickname", "IsWhale", "WhaleTier", "Message"])
+        writer.writerow(["ID", "Timestamp", "Streamer", "SessionID", "UserID", "Username", "Nickname", "IsWhale", "WhaleTier", "Message"])
         for r in rows:
             writer.writerow([
                 r.get("id"),
                 r.get("created_at"),
                 r.get("streamer_username"),
                 r.get("session_id") or "",
+                r.get("user_id") or "",
                 r.get("username"),
                 r.get("nickname"),
                 1 if r.get("is_whale") else 0,

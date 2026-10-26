@@ -4366,19 +4366,79 @@ def cleanup_old_chat_messages(days: int = 7) -> int:
         return getattr(cur, "rowcount", 0) or 0
 
 
+def _build_chat_search_clause(search: str) -> Tuple[Optional[str], List[Any]]:
+    """
+    Intelligente Such-Klausel für Chat-Logs:
+    - Unterstützt '@nutzername' (sucht in username, nickname, comment-mentions und streamer)
+    - Unterstützt '#id' (sucht nach exakter Nachrichten-ID)
+    - Unterstützt reguläre Wörter und Phrasen
+    - Mehrere Tokens werden mit AND kombiniert
+    """
+    raw = search.strip()
+    if not raw:
+        return None, []
+
+    tokens = [t.strip() for t in raw.split() if t.strip()]
+    if not tokens:
+        return None, []
+
+    clauses = []
+    params = []
+
+    for token in tokens:
+        if token.startswith("#") and token[1:].isdigit():
+            clauses.append("c.id = ?")
+            params.append(int(token[1:]))
+        elif token.startswith("@"):
+            clean_u = token.lstrip("@").lower()
+            if clean_u:
+                clauses.append("""(
+                    LOWER(c.username) LIKE ? 
+                    OR LOWER(c.nickname) LIKE ? 
+                    OR LOWER(c.comment) LIKE ? 
+                    OR LOWER(s.username) LIKE ?
+                )""")
+                pat = f"%{clean_u}%"
+                params.extend([pat, pat, pat, pat])
+            else:
+                clauses.append("c.comment LIKE ?")
+                params.append("%@%")
+        else:
+            clauses.append("""(
+                LOWER(c.comment) LIKE ? 
+                OR LOWER(c.username) LIKE ? 
+                OR LOWER(c.nickname) LIKE ? 
+                OR LOWER(s.username) LIKE ? 
+                OR LOWER(s.display_name) LIKE ?
+            )""")
+            pat = f"%{token.lower()}%"
+            params.extend([pat, pat, pat, pat, pat])
+
+    if not clauses:
+        return None, []
+
+    combined_sql = "(" + " AND ".join(clauses) + ")"
+    return combined_sql, params
+
+
 def get_chat_messages(
     streamer_id: Optional[int] = None,
     session_id: Optional[int] = None,
     limit: int = 100,
+    offset: int = 0,
     search: Optional[str] = None,
+    username: Optional[str] = None,
     min_tier: Optional[str] = None,
     only_whales: bool = False,
     before_id: Optional[int] = None,
     after_id: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    order_dir: Optional[str] = None,
+    include_total: bool = False,
+) -> Tuple[List[Dict[str, Any]], int]:
     """
     Liefert gefilterte Chat-Nachrichten pro Streamer, Session oder global über alle Kanäle.
-    Unterstützt Live-Streaming über `after_id` und historische Paginierung via `before_id`.
+    Unterstützt intelligente Suche (inkl. @username und #id), direkte Benutzer-Filterung,
+    Pagination (Limit & Offset), Sortierrichtung und Gesamtanzahl-Berechnung.
     """
     where_clauses = ["1=1"]
     params: List[Any] = []
@@ -4391,10 +4451,17 @@ def get_chat_messages(
         where_clauses.append("c.session_id = ?")
         params.append(session_id)
 
-    if search:
-        search_pattern = f"%{search.strip()}%"
-        where_clauses.append("(c.comment LIKE ? OR c.username LIKE ? OR c.nickname LIKE ?)")
-        params.extend([search_pattern, search_pattern, search_pattern])
+    if username and isinstance(username, str):
+        clean_user = username.strip().lstrip("@").lower()
+        if clean_user:
+            where_clauses.append("(LOWER(c.username) = ? OR LOWER(c.nickname) = ?)")
+            params.extend([clean_user, clean_user])
+
+    if search and isinstance(search, str):
+        search_sql, search_params = _build_chat_search_clause(search)
+        if search_sql:
+            where_clauses.append(search_sql)
+            params.extend(search_params)
 
     if min_tier == "whale":
         where_clauses.append("c.whale_tier = 'whale'")
@@ -4403,17 +4470,36 @@ def get_chat_messages(
     elif min_tier == "dolphin" or only_whales:
         where_clauses.append("(c.is_whale = 1 OR c.whale_tier != '')")
 
-    order_dir = "DESC"
+    order_direction = "DESC"
     if after_id:
         where_clauses.append("c.id > ?")
         params.append(after_id)
-        order_dir = "ASC"
+        order_direction = "ASC"
     elif before_id:
         where_clauses.append("c.id < ?")
         params.append(before_id)
-        order_dir = "DESC"
+        order_direction = "DESC"
+    elif order_dir:
+        order_direction = "ASC" if str(order_dir).upper() == "ASC" else "DESC"
 
     where_sql = " AND ".join(where_clauses)
+
+    total_count = 0
+    if include_total:
+        count_sql = f"""
+        SELECT COUNT(*) AS total
+        FROM chat_messages c
+        JOIN streamers s ON s.id = c.streamer_id
+        WHERE {where_sql}
+        """
+        with get_db() as conn:
+            cnt_row = conn.execute(count_sql, params).fetchone()
+            if cnt_row:
+                try:
+                    total_count = int(cnt_row["total"])
+                except (KeyError, TypeError, IndexError):
+                    total_count = int(cnt_row[0])
+
     query = f"""
     SELECT 
         c.id, c.streamer_id, c.session_id, c.user_id, c.username, c.nickname,
@@ -4423,19 +4509,23 @@ def get_chat_messages(
     FROM chat_messages c
     JOIN streamers s ON s.id = c.streamer_id
     WHERE {where_sql}
-    ORDER BY c.id {order_dir}
-    LIMIT ?
+    ORDER BY c.id {order_direction}
+    LIMIT ? OFFSET ?
     """
-    params.append(max(1, min(limit, 500)))
+    exec_params = list(params) + [max(1, min(limit, 500)), max(0, offset)]
 
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(query, exec_params).fetchall()
         result = []
         for r in rows:
             rd = dict(r)
             rd["is_whale"] = bool(rd["is_whale"])
             result.append(rd)
-        return result
+            
+        if not include_total:
+            total_count = len(result)
+            
+        return result, total_count
 
 
 def get_stream_sessions(
@@ -4687,11 +4777,12 @@ def get_chat_export_data(
     streamer_id: Optional[int] = None,
     session_id: Optional[int] = None,
     search: Optional[str] = None,
+    username: Optional[str] = None,
     only_whales: bool = False,
-    limit: int = 10000,
+    limit: int = 25000,
 ) -> List[Dict[str, Any]]:
     """
-    Liefert Chatdaten für den CSV- oder Text-Export.
+    Liefert Chatdaten für den CSV-, JSON- oder Text-Export.
     """
     where_clauses = ["1=1"]
     params: List[Any] = []
@@ -4704,10 +4795,17 @@ def get_chat_export_data(
         where_clauses.append("c.session_id = ?")
         params.append(session_id)
 
-    if search:
-        search_pattern = f"%{search.strip()}%"
-        where_clauses.append("(c.comment LIKE ? OR c.username LIKE ? OR c.nickname LIKE ?)")
-        params.extend([search_pattern, search_pattern, search_pattern])
+    if username and isinstance(username, str):
+        clean_user = username.strip().lstrip("@").lower()
+        if clean_user:
+            where_clauses.append("(LOWER(c.username) = ? OR LOWER(c.nickname) = ?)")
+            params.extend([clean_user, clean_user])
+
+    if search and isinstance(search, str):
+        search_sql, search_params = _build_chat_search_clause(search)
+        if search_sql:
+            where_clauses.append(search_sql)
+            params.extend(search_params)
 
     if only_whales:
         where_clauses.append("(c.is_whale = 1 OR c.whale_tier != '')")
@@ -4716,14 +4814,15 @@ def get_chat_export_data(
     query = f"""
     SELECT 
         c.id, c.created_at, s.username AS streamer_username,
-        c.session_id, c.username, c.nickname, c.is_whale, c.whale_tier, c.comment
+        c.session_id, c.user_id, c.username, c.nickname, c.avatar_url,
+        c.is_whale, c.whale_tier, c.comment
     FROM chat_messages c
     JOIN streamers s ON s.id = c.streamer_id
     WHERE {where_sql}
     ORDER BY c.id ASC
     LIMIT ?
     """
-    params.append(max(1, min(limit, 25000)))
+    params.append(max(1, min(limit, 50000)))
 
     with get_db() as conn:
         rows = conn.execute(query, params).fetchall()
