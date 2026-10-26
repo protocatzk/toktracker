@@ -33,6 +33,8 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "poll_interval_seconds": "45",     # Intervall für Auto-Live-Check wenn Streamer offline ist
     "api_key": "",                     # Optionaler API-Key für externe Bot-Abfragen
     "telegram_access_mode": config.telegram_access_mode if config.telegram_access_mode in ("whitelist", "public") else "whitelist",
+    "dkm_court_costs_target": "10000.00", # Standard Gerichtskosten für DKM Gag-Tracker in EUR
+    "dkm_sentence_months": "7",           # Haftstrafe in Monaten
 }
 
 _db_init_lock = threading.Lock()
@@ -935,10 +937,22 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
             "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
             "api_key": str(data.get("api_key", "")),
             "telegram_access_mode": mode,
+            "dkm_court_costs_target": float(data.get("dkm_court_costs_target", 10000.0)),
+            "dkm_sentence_months": int(float(data.get("dkm_sentence_months", 7))),
         }
         _settings_cache = res
         _settings_cache_time = now
         return res.copy()
+
+
+_overview_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_overview_cache_lock = threading.Lock()
+_OVERVIEW_CACHE_TTL = 2.5  # 2.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
+
+
+def invalidate_overview_cache() -> None:
+    with _overview_cache_lock:
+        _overview_cache.clear()
 
 
 def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -955,6 +969,7 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     (key, val),
                 )
     invalidate_settings_cache()
+    invalidate_overview_cache()
     return get_settings(force_refresh=True)
 
 
@@ -1592,14 +1607,6 @@ def _get_period_cutoff(period: str) -> Optional[str]:
     return None
 
 
-_overview_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-_overview_cache_lock = threading.Lock()
-_OVERVIEW_CACHE_TTL = 2.5  # 2.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
-
-
-def invalidate_overview_cache() -> None:
-    with _overview_cache_lock:
-        _overview_cache.clear()
 
 
 def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> Dict[str, Any]:
@@ -5747,5 +5754,251 @@ def get_network_loyalty_and_overlap(
         with _loyalty_cache_lock:
             _loyalty_cache[cache_key] = (now, result)
         return copy.deepcopy(result)
+
+
+def get_dkm_tracker_data() -> Dict[str, Any]:
+    """
+    Liefert alle Echtzeit- und historischen Statistiken für das DKM Gag- & Justiz-Portal:
+    - Gerichtskosten-Zielwert (€) & bisher abgestreamter Betrag
+    - Benötigte Streaming-Stunden & Sessions
+    - Gift-Äquivalente (Löwen, Universen, Rosen)
+    - JVA-Knastarbeitslohn Vergleich (2 € / Tag)
+    - Live-Session Status & Top Kautions-Spender
+    """
+    import math
+    cfg = get_settings()
+    try:
+        court_costs_target = float(cfg.get("dkm_court_costs_target") or 10000.0)
+    except (ValueError, TypeError):
+        court_costs_target = 10000.0
+
+    try:
+        sentence_months = int(cfg.get("dkm_sentence_months") or 7)
+    except (ValueError, TypeError):
+        sentence_months = 7
+
+    with get_db() as conn:
+        # Streamer DKM finden (id 23 oder nach dkm username)
+        streamer = conn.execute(
+            """
+            SELECT id, username, display_name, avatar_url, is_live, follower_count,
+                   current_viewers, room_id, created_at, last_seen_at
+            FROM streamers
+            WHERE id = 23 OR LOWER(username) LIKE '%dkm%'
+            ORDER BY id ASC LIMIT 1
+            """
+        ).fetchone()
+
+        if not streamer:
+            return {"ok": False, "error": "Streamer DKM nicht in der Datenbank erfasst"}
+
+        s_dict = dict(streamer)
+        streamer_id = s_dict["id"]
+
+        # Gesamt Coins & Auswertungen
+        coins_row = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as gift_count,
+                COALESCE(SUM(total_coins), 0) as total_coins,
+                COALESCE(SUM(repeat_count), 0) as total_gifts_sent
+            FROM gift_events
+            WHERE streamer_id = ?
+            """,
+            (streamer_id,)
+        ).fetchone()
+
+        total_coins = int(coins_row["total_coins"] or 0) if coins_row else 0
+        total_gifts = int(coins_row["total_gifts_sent"] or 0) if coins_row else 0
+
+        usd_per_diamond = float(cfg.get("usd_per_diamond") or 0.005)
+        usd_to_eur = float(cfg.get("usd_to_eur_rate") or 0.92)
+        gross_rate = float(cfg.get("gross_usd_per_coin") or 0.0106)
+
+        earned_net_eur = round(total_coins * usd_per_diamond * usd_to_eur, 2)
+        earned_net_usd = round(total_coins * usd_per_diamond, 2)
+        earned_gross_eur = round(total_coins * gross_rate * usd_to_eur, 2)
+        earned_gross_usd = round(total_coins * gross_rate, 2)
+
+        remaining_eur = max(0.0, round(court_costs_target - earned_net_eur, 2))
+        progress_pct = min(100.0, round((earned_net_eur / court_costs_target) * 100, 2)) if court_costs_target > 0 else 100.0
+
+        # Stream-Sessions zur Berechnung von Streamingzeit & Stundensatz
+        sessions_rows = conn.execute(
+            """
+            SELECT 
+                id, started_at, ended_at, peak_viewers, status,
+                (SELECT COALESCE(SUM(total_coins), 0) FROM gift_events WHERE session_id = ss.id) as session_coins
+            FROM stream_sessions ss
+            WHERE streamer_id = ?
+            ORDER BY id DESC
+            """,
+            (streamer_id,)
+        ).fetchall()
+
+        total_sessions = len(sessions_rows)
+        total_seconds_streamed = 0
+        active_session = None
+
+        for s in sessions_rows:
+            sd = dict(s)
+            if sd["status"] == "active" and not active_session:
+                active_coins = int(sd["session_coins"] or 0)
+                active_net_eur = round(active_coins * usd_per_diamond * usd_to_eur, 2)
+                active_session = {
+                    "id": sd["id"],
+                    "started_at": sd["started_at"],
+                    "peak_viewers": sd["peak_viewers"],
+                    "coins": active_coins,
+                    "net_eur": active_net_eur,
+                }
+            if sd.get("started_at") and sd.get("ended_at"):
+                try:
+                    s_str = str(sd["started_at"]).replace("Z", "")
+                    e_str = str(sd["ended_at"]).replace("Z", "")
+                    if "T" in s_str:
+                        t_start = datetime.fromisoformat(s_str)
+                        t_end = datetime.fromisoformat(e_str)
+                    else:
+                        t_start = datetime.strptime(s_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
+                        t_end = datetime.strptime(e_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
+                    dur = (t_end - t_start).total_seconds()
+                    if 60 < dur < 86400:
+                        total_seconds_streamed += dur
+                except Exception:
+                    pass
+
+        total_hours_streamed = max(1.0, total_seconds_streamed / 3600.0)
+        avg_net_per_session = round(earned_net_eur / max(1, total_sessions), 2)
+        avg_net_per_hour = round(earned_net_eur / total_hours_streamed, 2)
+
+        hourly_rate_effective = max(5.50, avg_net_per_hour)
+        session_rate_effective = max(20.0, avg_net_per_session)
+
+        hours_remaining = math.ceil(remaining_eur / hourly_rate_effective) if remaining_eur > 0 else 0
+        sessions_remaining = math.ceil(remaining_eur / session_rate_effective) if remaining_eur > 0 else 0
+        days_remaining_streaming = math.ceil(sessions_remaining / 1.8) if sessions_remaining > 0 else 0
+
+        # Gift-Äquivalente
+        universe_net = 44999 * usd_per_diamond * usd_to_eur # ~207 EUR
+        lion_net = 29999 * usd_per_diamond * usd_to_eur     # ~138 EUR
+        rose_net = 1 * usd_per_diamond * usd_to_eur         # ~0.0046 EUR
+
+        universes_remaining = math.ceil(remaining_eur / universe_net) if universe_net > 0 else 0
+        lions_remaining = math.ceil(remaining_eur / lion_net) if lion_net > 0 else 0
+        roses_remaining = math.ceil(remaining_eur / rose_net) if rose_net > 0 else 0
+
+        # JVA (Gefängnis) Vergleich
+        jva_daily_wage = 2.00
+        jva_days_needed = math.ceil(court_costs_target / jva_daily_wage)
+        jva_years_needed = round(jva_days_needed / 365.25, 1)
+
+        sentence_days = int(sentence_months * 30.5) # 7 Monate = ~213 Tage
+        sentence_jva_earnings = round(sentence_days * jva_daily_wage, 2)
+
+        # Top 5 Kautions-Helfer (Top Spender)
+        top_gifters_rows = conn.execute(
+            """
+            SELECT 
+                sender_username,
+                MAX(sender_nickname) as sender_nickname,
+                COALESCE(SUM(total_coins), 0) as total_coins,
+                COUNT(id) as gift_count
+            FROM gift_events
+            WHERE streamer_id = ?
+            GROUP BY sender_username
+            ORDER BY total_coins DESC
+            LIMIT 5
+            """,
+            (streamer_id,)
+        ).fetchall()
+
+        top_gifters = []
+        for tg in top_gifters_rows:
+            c_val = int(tg["total_coins"] or 0)
+            tg_net = round(c_val * usd_per_diamond * usd_to_eur, 2)
+            pct_of_costs = round((tg_net / court_costs_target) * 100, 2) if court_costs_target > 0 else 0
+            top_gifters.append({
+                "username": tg["sender_username"],
+                "nickname": tg["sender_nickname"] or tg["sender_username"],
+                "coins": c_val,
+                "net_eur": tg_net,
+                "pct_of_target": pct_of_costs,
+                "relief_hours": round(tg_net / hourly_rate_effective, 1),
+            })
+
+        # Letzte 8 Geschenke für den Live-Schuldenabbau Ticker
+        recent_gifts_rows = conn.execute(
+            """
+            SELECT id, gift_name, diamond_count, repeat_count, total_coins,
+                   sender_username, sender_nickname, created_at
+            FROM gift_events
+            WHERE streamer_id = ?
+            ORDER BY id DESC
+            LIMIT 8
+            """,
+            (streamer_id,)
+        ).fetchall()
+
+        recent_gifts = []
+        for rg in recent_gifts_rows:
+            rg_coins = int(rg["total_coins"] or 0)
+            rg_net = round(rg_coins * usd_per_diamond * usd_to_eur, 2)
+            recent_gifts.append({
+                "id": rg["id"],
+                "gift_name": rg["gift_name"],
+                "repeat_count": rg["repeat_count"],
+                "coins": rg_coins,
+                "net_eur": rg_net,
+                "sender_username": rg["sender_username"],
+                "sender_nickname": rg["sender_nickname"] or rg["sender_username"],
+                "created_at": str(rg["created_at"]),
+            })
+
+        return {
+            "ok": True,
+            "streamer": s_dict,
+            "court_costs_target": court_costs_target,
+            "sentence_months": sentence_months,
+            "sentence_days": sentence_days,
+            "earned_net_eur": earned_net_eur,
+            "earned_net_usd": earned_net_usd,
+            "earned_gross_eur": earned_gross_eur,
+            "total_coins": total_coins,
+            "total_gifts": total_gifts,
+            "remaining_eur": remaining_eur,
+            "progress_pct": progress_pct,
+            "total_sessions": total_sessions,
+            "total_hours_streamed": round(total_hours_streamed, 1),
+            "avg_net_per_session": avg_net_per_session,
+            "avg_net_per_hour": avg_net_per_hour,
+            "hourly_rate_effective": hourly_rate_effective,
+            "hours_remaining": hours_remaining,
+            "sessions_remaining": sessions_remaining,
+            "days_remaining_streaming": days_remaining_streaming,
+            "gifts_remaining": {
+                "universes": universes_remaining,
+                "lions": lions_remaining,
+                "roses": roses_remaining,
+            },
+            "gift_unit_values": {
+                "universe_net": round(universe_net, 2),
+                "lion_net": round(lion_net, 2),
+                "rose_net": round(rose_net, 4),
+            },
+            "jva_comparison": {
+                "daily_wage": jva_daily_wage,
+                "sentence_days": sentence_days,
+                "sentence_earnings": sentence_jva_earnings,
+                "days_needed": jva_days_needed,
+                "years_needed": jva_years_needed,
+                "shortfall": round(court_costs_target - sentence_jva_earnings, 2),
+            },
+            "is_live": bool(s_dict.get("is_live")),
+            "current_viewers": s_dict.get("current_viewers") or 0,
+            "active_session": active_session,
+            "top_gifters": top_gifters,
+            "recent_gifts": recent_gifts,
+        }
 
 

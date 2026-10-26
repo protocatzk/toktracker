@@ -34,6 +34,7 @@ from database import (
     get_chat_messages,
     get_dashboard_overview,
     get_db,
+    get_dkm_tracker_data,
     get_donor_crm,
     get_donor_details,
     get_donor_radar_data,
@@ -440,6 +441,27 @@ async def public_panel(request: Request):
         context={
             "telegram_bot_username": tg_diag.get("bot_username") or "",
             "telegram_state": tg_diag.get("state") or "offline",
+        },
+    )
+
+
+@app.get("/dkm", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/public/dkm", response_class=HTMLResponse, include_in_schema=False)
+async def dkm_tracker_page(request: Request):
+    """
+    Temporäres Gag-Portal: DKM Justiz- & Knast-Tracker.
+    Berechnet wie lange DKM noch streamen muss, um die Gerichtskosten zu begleichen.
+    """
+    tg_diag = telegram_bot_service.get_diagnostics()
+    session_token = request.cookies.get("toktracker_admin_session", "")
+    is_admin = bool(admin_auth_manager.verify_session_token(session_token))
+    return templates.TemplateResponse(
+        request=request,
+        name="dkm_tracker.html",
+        context={
+            "telegram_bot_username": tg_diag.get("bot_username") or "",
+            "telegram_state": tg_diag.get("state") or "offline",
+            "is_admin": is_admin,
         },
     )
 
@@ -1136,6 +1158,17 @@ async def api_public_analytics(
 ):
     init_db()
     return await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+
+
+@app.get(
+    "/api/public/dkm-tracker",
+    tags=["Public Panel API"],
+    summary="Öffentliche Echtzeit-Statistiken für das DKM Gag- & Justiz-Portal",
+)
+async def api_public_dkm_tracker():
+    init_db()
+    data = await asyncio.to_thread(get_dkm_tracker_data)
+    return data
 
 
 @app.get(

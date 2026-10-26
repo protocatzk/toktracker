@@ -36,6 +36,8 @@ class SettingsUpdateRequest(BaseModel):
         None,
         description="Telegram-Bot Zugriffsmodus: 'whitelist' (nur freigeschaltete Personen) oder 'public' (alle Nutzer)",
     )
+    dkm_court_costs_target: Optional[float] = Field(None, gt=0, description="Gerichtskosten für DKM Gag-Tracker in EUR")
+    dkm_sentence_months: Optional[int] = Field(None, ge=1, description="Haftstrafe für DKM in Monaten")
 
 
 class TelegramUserPermissionRequest(BaseModel):

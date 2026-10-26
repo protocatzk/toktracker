@@ -179,6 +179,12 @@ async function loadOverview() {
                 document.getElementById("setGrossUsdPerCoin").value = data.settings.gross_usd_per_coin;
                 document.getElementById("setUsdToEur").value = data.settings.usd_to_eur_rate;
                 document.getElementById("setPollInterval").value = data.settings.poll_interval_seconds;
+                if (document.getElementById("setDkmCourtCosts") && data.settings.dkm_court_costs_target !== undefined) {
+                    document.getElementById("setDkmCourtCosts").value = data.settings.dkm_court_costs_target;
+                }
+                if (document.getElementById("setDkmSentenceMonths") && data.settings.dkm_sentence_months !== undefined) {
+                    document.getElementById("setDkmSentenceMonths").value = data.settings.dkm_sentence_months;
+                }
             }
             const modeSel = document.getElementById("selectTelegramMode");
             if (modeSel && activeEl !== modeSel && data.settings.telegram_access_mode) {
@@ -2949,16 +2955,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("formSettings").addEventListener("submit", async (e) => {
         e.preventDefault();
-        await fetch("/api/settings", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                usd_per_diamond: parseFloat(document.getElementById("setUsdPerDiamond").value),
-                gross_usd_per_coin: parseFloat(document.getElementById("setGrossUsdPerCoin").value),
-                usd_to_eur_rate: parseFloat(document.getElementById("setUsdToEur").value),
-                poll_interval_seconds: parseInt(document.getElementById("setPollInterval").value, 10),
-            }),
-        });
+        const payload = {
+            usd_per_diamond: parseFloat(document.getElementById("setUsdPerDiamond").value),
+            gross_usd_per_coin: parseFloat(document.getElementById("setGrossUsdPerCoin").value),
+            usd_to_eur_rate: parseFloat(document.getElementById("setUsdToEur").value),
+            poll_interval_seconds: parseInt(document.getElementById("setPollInterval").value, 10),
+        };
+        const dkmCostsEl = document.getElementById("setDkmCourtCosts");
+        if (dkmCostsEl && dkmCostsEl.value) {
+            payload.dkm_court_costs_target = parseFloat(dkmCostsEl.value);
+        }
+        const dkmMonthsEl = document.getElementById("setDkmSentenceMonths");
+        if (dkmMonthsEl && dkmMonthsEl.value) {
+            payload.dkm_sentence_months = parseInt(dkmMonthsEl.value, 10);
+        }
+        try {
+            const res = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.ok) {
+                alert(`✅ Parameter erfolgreich gespeichert!\nGerichtskosten DKM Ziel: ${payload.dkm_court_costs_target ? payload.dkm_court_costs_target + ' €' : 'gespeichert'}`);
+            } else {
+                alert(`⚠️ Fehler beim Speichern: ${data.detail || res.statusText || 'Unbekannter Fehler'}`);
+            }
+        } catch (err) {
+            alert(`⚠️ Netzwerkfehler: ${err.message}`);
+        }
         loadOverview();
     });
 
