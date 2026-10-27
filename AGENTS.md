@@ -65,7 +65,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | [`services/scheduler/`](./services/scheduler) | **TokTracker Scheduler Service**. Verwaltet wiederkehrende Aufgaben: automatischen 24h-Report, periodisches Speicherplatz-Monitoring (alle 15 Min) sowie Chat-Cleanup und Cache-Refresh. |
 | [`tiktok_service.py`](./tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
 | [`telegram_service.py`](./telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
-| [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `nginx-proxy` und `acme-companion` (SSL). |
+| [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `docker-socket-proxy` (nur lesende Docker-API) sowie `nginx-proxy` und `acme-companion` (SSL). |
 | [`templates/`](./templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
 | [`static/`](./static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
 

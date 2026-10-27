@@ -9,7 +9,7 @@ import os
 import shutil
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -17,8 +17,12 @@ from config import config
 
 logger = logging.getLogger("toktracker.system")
 
-# Pfad zum Docker Unix Domain Socket
-DOCKER_SOCKET_PATH = os.environ.get("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
+# Docker-API-Zugriff:
+# 1. Bevorzugt über den docker-socket-proxy (nur lesende Endpunkte freigegeben),
+#    damit der Web-Container keinen direkten Zugriff auf den Docker-Socket braucht.
+# 2. Fallback: direkter Unix-Socket (lokale Entwicklung / Altinstallationen).
+DOCKER_PROXY_URL = os.environ.get("DOCKER_PROXY_URL", "http://docker-socket-proxy:2375").strip().rstrip("/")
+DOCKER_SOCKET_PATH = os.environ.get("DOCKER_SOCKET_PATH", "/var/run/docker.sock").strip()
 
 # Cache für System-Metriken (15 Sekunden TTL gegen Spamming)
 _cached_metrics: Optional[Dict[str, Any]] = None
@@ -231,21 +235,36 @@ def _get_database_storage() -> Dict[str, Any]:
     }
 
 
+def _build_docker_client() -> Tuple[Optional[httpx.Client], str]:
+    """
+    Liefert einen HTTP-Client für die Docker-API und eine Beschreibung des Endpunkts.
+
+    Reihenfolge: docker-socket-proxy (TCP) -> Unix-Socket -> None (nicht verfügbar).
+    Der Proxy gibt ausschließlich lesende Endpunkte frei; der Web-Container braucht
+    damit keinen Zugriff auf /var/run/docker.sock.
+    """
+    if DOCKER_PROXY_URL:
+        return httpx.Client(base_url=DOCKER_PROXY_URL, timeout=2.5), f"proxy:{DOCKER_PROXY_URL}"
+    if DOCKER_SOCKET_PATH and os.path.exists(DOCKER_SOCKET_PATH):
+        return httpx.Client(transport=httpx.HTTPTransport(uds=DOCKER_SOCKET_PATH), timeout=2.5), f"unix:{DOCKER_SOCKET_PATH}"
+    return None, ""
+
+
 def _fetch_docker_metrics() -> Dict[str, Any]:
-    """Fragt über den gemounteten Docker-Socket Metriken der TokTracker-Container & Volumes ab."""
-    if not os.path.exists(DOCKER_SOCKET_PATH):
+    """Fragt Container- und Volume-Metriken über den Docker-Socket-Proxy ab."""
+    client, endpoint = _build_docker_client()
+    if client is None:
         return {
             "available": False,
-            "error": f"Docker-Socket '{DOCKER_SOCKET_PATH}' nicht vorhanden (lokale Ausführung oder nicht gemountet)",
+            "error": "Docker-API nicht konfiguriert (DOCKER_PROXY_URL) und kein Socket vorhanden",
             "containers": [],
             "volumes": [],
         }
 
     try:
-        transport = httpx.HTTPTransport(uds=DOCKER_SOCKET_PATH)
-        with httpx.Client(transport=transport, timeout=2.5) as client:
+        with client:
             # 1. Containers schnell abfragen (OHNE teures size=true, um dockerd CPU-Spikes zu verhindern)
-            c_resp = client.get("http://docker/v1.41/containers/json?all=true")
+            c_resp = client.get("/v1.41/containers/json?all=true")
             if c_resp.status_code != 200:
                 return {
                     "available": False,
@@ -286,7 +305,7 @@ def _fetch_docker_metrics() -> Dict[str, Any]:
                 cpu_pct = 0.0
 
                 try:
-                    s_resp = client.get(f"http://docker/v1.41/containers/{c['Id']}/stats?stream=false")
+                    s_resp = client.get(f"/v1.41/containers/{c['Id']}/stats?stream=false")
                     if s_resp.status_code == 200:
                         s_data = s_resp.json()
                         m_stats = s_data.get("memory_stats", {})
@@ -344,7 +363,7 @@ def _fetch_docker_metrics() -> Dict[str, Any]:
             total_images_mb = 0.0
 
             try:
-                df_resp = client.get("http://docker/v1.41/system/df")
+                df_resp = client.get("/v1.41/system/df")
                 if df_resp.status_code == 200:
                     df_data = df_resp.json()
                     v_list = df_data.get("Volumes") or []
@@ -375,7 +394,7 @@ def _fetch_docker_metrics() -> Dict[str, Any]:
 
             return {
                 "available": True,
-                "socket_path": DOCKER_SOCKET_PATH,
+                "api_endpoint": endpoint,
                 "containers": tracked_containers,
                 "volumes": volumes_info,
                 "total_volumes_mb": round(total_volumes_mb, 1),

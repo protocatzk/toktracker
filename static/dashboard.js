@@ -3362,7 +3362,7 @@ function renderSystemHealth(health) {
     if (elTbody) {
         const containers = docker.containers || [];
         if (!docker.available) {
-            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Docker Socket (/var/run/docker.sock) ist nicht gemountet oder nicht erreichbar (${escapeHtml(docker.error || 'Host-Fallback aktiv')}).</td></tr>`;
+            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Docker-API (Socket-Proxy) ist nicht erreichbar (${escapeHtml(docker.error || 'Host-Fallback aktiv')}).</td></tr>`;
         } else if (containers.length === 0) {
             elTbody.innerHTML = `<tr><td colspan="7" class="muted">Keine überwachten TokTracker-Container gefunden.</td></tr>`;
         } else {
