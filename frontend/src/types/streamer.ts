@@ -63,3 +63,19 @@ export interface Streamer {
   last_seen_live?: string | null;
   created_at?: string;
 }
+
+export interface StreamerDetailResponse {
+  streamer: Streamer;
+  summary: {
+    total_coins: number;
+    usd_net: number;
+    eur_net: number;
+    usd_gross: number;
+    eur_gross: number;
+  };
+  gift_breakdown: any[];
+  top_gifters?: any[];
+  sessions?: any[];
+  recent_sessions?: any[];
+  recent_events?: any[];
+}

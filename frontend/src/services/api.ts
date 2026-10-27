@@ -1,6 +1,7 @@
 import type {
   OverviewResponse,
   Streamer,
+  StreamerDetailResponse,
   Settings,
   Battle,
 } from "../types";
@@ -82,13 +83,15 @@ class ApiService {
   async getStreamerDetail(
     streamerId: number,
     period = "all"
-  ): Promise<{
-    streamer: Streamer;
-    summary: any;
-    gift_breakdown: any[];
-    sessions: any[];
-  }> {
-    return this.request(`/api/streamers/${streamerId}?period=${encodeURIComponent(period)}`);
+  ): Promise<StreamerDetailResponse> {
+    return this.request<StreamerDetailResponse>(`/api/streamers/${streamerId}?period=${encodeURIComponent(period)}`);
+  }
+
+  async getStreamerDetails(
+    streamerId: number,
+    period = "all"
+  ): Promise<StreamerDetailResponse> {
+    return this.getStreamerDetail(streamerId, period);
   }
 
   // Battles

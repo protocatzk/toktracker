@@ -4,6 +4,8 @@ import { GiftEvent } from "./gift";
 export interface OverviewTotals {
   streamer_count: number;
   live_count: number;
+  active_workers_count?: number;
+  total_diamonds_collected?: number;
   total_coins: number;
   eur_net: number;
   usd_net: number;
@@ -72,4 +74,13 @@ export interface OverviewResponse {
   telegram_users: TelegramUser[];
   settings: Settings;
   system: SystemStatus;
+  public_banner?: {
+    enabled: boolean;
+    title: string;
+    text: string;
+    style: string;
+    btn_text: string;
+    btn_url: string;
+    tag_text?: string;
+  };
 }
