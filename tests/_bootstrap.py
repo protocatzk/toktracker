@@ -68,6 +68,7 @@ if not _ALREADY_BOOTSTRAPPED:
     os.environ["ALLOW_API_KEY_QUERY"] = "1"
     os.environ["TRUST_PROXY_HEADERS"] = "1"
     os.environ["SESSION_COOKIE_SECURE"] = "auto"
+    os.environ["LOG_LEVEL"] = "WARNING"  # Test-Läufe nicht mit INFO-Logs fluten
     os.environ[_BOOTSTRAP_FLAG] = "1"
 
 TEST_DB_PATH = _DB_PATH

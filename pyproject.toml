@@ -32,6 +32,7 @@ files = [
     "shared/ratelimit.py",
     "shared/privacy.py",
     "shared/config.py",
+    "shared/db",
 ]
 
 [tool.pytest.ini_options]

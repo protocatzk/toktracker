@@ -57,22 +57,23 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
-| [`shared/`](file:///home/toktracker/toktrackerapp/shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `database.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py` sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py` und `memory_bus.py`). |
-| [`services/api/`](file:///home/toktracker/toktrackerapp/services/api) / [`app.py`](file:///home/toktracker/toktrackerapp/app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
-| [`services/ingest/`](file:///home/toktracker/toktrackerapp/services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
-| [`services/bot/`](file:///home/toktracker/toktrackerapp/services/bot) | **Telegram-Bot Service**. Läuft als geschütztes Singleton mit Leader-Lock (`tt:lock:bot:leader`). Reagiert auf Bot-Befehle und verarbeitet RPC-Anfragen (z.B. Login-Codes an Admins senden) via Redis. |
-| [`services/scheduler/`](file:///home/toktracker/toktrackerapp/services/scheduler) | **TokTracker Scheduler Service**. Verwaltet wiederkehrende Aufgaben: automatischen 24h-Report, periodisches Speicherplatz-Monitoring (alle 15 Min) sowie Chat-Cleanup und Cache-Refresh. |
-| [`tiktok_service.py`](file:///home/toktracker/toktrackerapp/tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
-| [`telegram_service.py`](file:///home/toktracker/toktrackerapp/telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
-| [`docker-compose.yml`](file:///home/toktracker/toktrackerapp/docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `nginx-proxy` und `acme-companion` (SSL). |
-| [`templates/`](file:///home/toktracker/toktrackerapp/templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
-| [`static/`](file:///home/toktracker/toktrackerapp/static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
+| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py` sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
+| [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, Wrapper, `get_db`), `schema`, `settings`, `users`, `streamers`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`, `sqlite_import`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
+| [`services/api/`](./services/api) / [`app.py`](./app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
+| [`services/ingest/`](./services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
+| [`services/bot/`](./services/bot) | **Telegram-Bot Service**. Läuft als geschütztes Singleton mit Leader-Lock (`tt:lock:bot:leader`). Reagiert auf Bot-Befehle und verarbeitet RPC-Anfragen (z.B. Login-Codes an Admins senden) via Redis. |
+| [`services/scheduler/`](./services/scheduler) | **TokTracker Scheduler Service**. Verwaltet wiederkehrende Aufgaben: automatischen 24h-Report, periodisches Speicherplatz-Monitoring (alle 15 Min) sowie Chat-Cleanup und Cache-Refresh. |
+| [`tiktok_service.py`](./tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
+| [`telegram_service.py`](./telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
+| [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `nginx-proxy` und `acme-companion` (SSL). |
+| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
+| [`static/`](./static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
 
 ---
 
 ## 4. Datenmodell & Datenbankarchitektur
 
-Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectionWrapper`, `DBRow`) in [`database.py`](./database.py). Alle Queries nutzen `?` als Platzhalter (wird für MySQL intern zu `%s` konvertiert).
+Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectionWrapper`, `DBRow`) in [`shared/db/_base.py`](./shared/db/_base.py). Alle Queries nutzen `?` als Platzhalter (wird für MySQL intern zu `%s` konvertiert).
 
 ### Kern-Tabellen:
 1. **`streamers`**:
@@ -107,7 +108,7 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 
 ### C. Dashboard & Reporting
 - Das Dashboard pollt `/api/overview?period=today` (oder `24h`, `7d`, `all`).
-- [`database.py`](./database.py) aggregiert Gesamteinnahmen, Rechner-Kurse (EUR/USD), Top-Spender und Streamer-Rankings.
+- [`shared/db/analytics.py`](./shared/db/analytics.py) aggregiert Gesamteinnahmen, Rechner-Kurse (EUR/USD), Top-Spender und Streamer-Rankings.
 - Ein automatischer Telegram-Job (`_scheduled_24h_report_job`) sendet alle 24h eine Zusammenfassung in den konfigurierten Chat.
 
 ---
@@ -117,13 +118,14 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
 
 1. **Dual-Database Kompatibilität wahren**:
-   - Niemals SQLite-spezifische Syntax verwenden, die auf MySQL fehlschlägt (z.B. `INSERT OR REPLACE` vs. `ON DUPLICATE KEY UPDATE`). In [`database.py`](./database.py) existieren bereits Methoden wie `_init_sqlite_schema()` und `_init_mysql_schema()`.
+   - Niemals SQLite-spezifische Syntax verwenden, die auf MySQL fehlschlägt (z.B. `INSERT OR REPLACE` vs. `ON DUPLICATE KEY UPDATE`). In [`shared/db/schema.py`](./shared/db/schema.py) existieren bereits Methoden wie `_init_sqlite_schema()` und `_init_mysql_schema()`.
    - Bei Tabellen- oder Spaltenänderungen **beide** Schemas und Migrationen pflegen.
 
 2. **Threading & Asyncio Isolation**:
    - `tiktok_service.py` nutzt dedizierte Worker-Threads mit eigenen Event-Loops. Blockierende I/O-Operationen müssen vorsichtig gehandhabt werden.
    - Der Telegram-Bot läuft asynchron im Hauptprozess unter FastAPI. Niemals den Event-Loop mit synchronen Endlosschleifen blockieren.
    - DB-Zugriffe immer über den Kontextmanager `with get_db() as conn:` kapseln.
+   - Neue DB-Funktionen im passenden Modul unter `shared/db/` ergänzen und in `shared/db/__init__.py` re-exportieren.
 
 3. **API & Schemas**:
    - Neue Request/Response-Objekte in [`schemas.py`](./schemas.py) definieren.
