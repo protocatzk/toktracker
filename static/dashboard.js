@@ -172,13 +172,30 @@ async function loadOverview() {
             }
         }
 
+        cachedStreamers = data.streamers || [];
+        cachedGifts = data.recent_gifts || [];
+
+        renderStreamerTable();
+        renderGiftLog();
+        renderTelegramUsers(
+            data.telegram_users || [],
+            data.settings ? data.settings.telegram_access_mode : "whitelist"
+        );
+        populateSimulatorSelect(cachedStreamers);
+        populateAnalyticsStreamerSelect(cachedStreamers);
+        populateBattleStreamerSelect(cachedStreamers);
+
         if (data.settings) {
             const activeEl = document.activeElement;
             if (!activeEl || !activeEl.id.startsWith("set")) {
-                document.getElementById("setUsdPerDiamond").value = data.settings.usd_per_diamond;
-                document.getElementById("setGrossUsdPerCoin").value = data.settings.gross_usd_per_coin;
-                document.getElementById("setUsdToEur").value = data.settings.usd_to_eur_rate;
-                document.getElementById("setPollInterval").value = data.settings.poll_interval_seconds;
+                const elUpd = document.getElementById("setUsdPerDiamond");
+                if (elUpd && data.settings.usd_per_diamond !== undefined) elUpd.value = data.settings.usd_per_diamond;
+                const elGross = document.getElementById("setGrossUsdPerCoin");
+                if (elGross && data.settings.gross_usd_per_coin !== undefined) elGross.value = data.settings.gross_usd_per_coin;
+                const elRate = document.getElementById("setUsdToEur");
+                if (elRate && data.settings.usd_to_eur_rate !== undefined) elRate.value = data.settings.usd_to_eur_rate;
+                const elPoll = document.getElementById("setPollInterval");
+                if (elPoll && data.settings.poll_interval_seconds !== undefined) elPoll.value = data.settings.poll_interval_seconds;
             }
             const modeSel = document.getElementById("selectTelegramMode");
             if (modeSel && activeEl !== modeSel && data.settings.telegram_access_mode) {
@@ -201,21 +218,49 @@ async function loadOverview() {
                 updateAdminBannerPreview();
             }
         }
-
-        cachedStreamers = data.streamers || [];
-        cachedGifts = data.recent_gifts || [];
-
-        renderStreamerTable();
-        renderGiftLog();
-        renderTelegramUsers(
-            data.telegram_users || [],
-            data.settings ? data.settings.telegram_access_mode : "whitelist"
-        );
-        populateSimulatorSelect(cachedStreamers);
-        populateAnalyticsStreamerSelect(cachedStreamers);
-        populateBattleStreamerSelect(cachedStreamers);
     } catch (e) {
         console.error("Fehler beim Laden:", e);
+    }
+}
+
+function updateAdminBannerPreview() {
+    const previewEl = document.getElementById("adminBannerPreview");
+    if (!previewEl) return;
+
+    const enabled = Boolean(document.getElementById("setBannerEnabled")?.checked);
+    const style = document.getElementById("setBannerStyle")?.value || "highlight";
+    const title = document.getElementById("setBannerTitle")?.value || "Exklusive Whitelist-Features & Chat-Intelligence";
+    const text = document.getElementById("setBannerText")?.value || "Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!";
+    const btnText = document.getElementById("setBannerBtnText")?.value || "Whitelist anfragen ↗";
+
+    previewEl.className = "announcement-banner " + style;
+    previewEl.style.opacity = enabled ? "1" : "0.5";
+
+    const titleEl = document.getElementById("previewBannerTitle");
+    const textEl = document.getElementById("previewBannerText");
+    const btnEl = document.getElementById("previewBannerBtn");
+    const tagEl = document.getElementById("previewBannerTag");
+    const statusTag = document.getElementById("bannerActiveTag");
+
+    if (titleEl) titleEl.textContent = title;
+    if (textEl) textEl.textContent = text;
+    if (btnEl) btnEl.textContent = btnText;
+
+    if (tagEl) {
+        if (style === "warning") tagEl.textContent = "⚠️ WICHTIG";
+        else if (style === "success") tagEl.textContent = "🟢 STATUS";
+        else if (style === "info") tagEl.textContent = "ℹ️ INFO";
+        else tagEl.textContent = "✨ WHITELIST PROMO";
+    }
+
+    if (statusTag) {
+        if (enabled) {
+            statusTag.textContent = "BANNER AKTIV";
+            statusTag.className = "status-tag live";
+        } else {
+            statusTag.textContent = "BANNER DEAKTIVIERT";
+            statusTag.className = "status-tag off";
+        }
     }
 }
 
@@ -2981,46 +3026,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // =========================================================
     // ÖFFENTLICHES ANKÜNDIGUNGS- & WHITELIST-BANNER VERWALTUNG
     // =========================================================
-    function updateAdminBannerPreview() {
-        const previewEl = document.getElementById("adminBannerPreview");
-        if (!previewEl) return;
-
-        const enabled = Boolean(document.getElementById("setBannerEnabled")?.checked);
-        const style = document.getElementById("setBannerStyle")?.value || "highlight";
-        const title = document.getElementById("setBannerTitle")?.value || "Exklusive Whitelist-Features & Chat-Intelligence";
-        const text = document.getElementById("setBannerText")?.value || "Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!";
-        const btnText = document.getElementById("setBannerBtnText")?.value || "Whitelist anfragen ↗";
-
-        previewEl.className = "announcement-banner " + style;
-        previewEl.style.opacity = enabled ? "1" : "0.5";
-
-        const titleEl = document.getElementById("previewBannerTitle");
-        const textEl = document.getElementById("previewBannerText");
-        const btnEl = document.getElementById("previewBannerBtn");
-        const tagEl = document.getElementById("previewBannerTag");
-        const statusTag = document.getElementById("bannerActiveTag");
-
-        if (titleEl) titleEl.textContent = title;
-        if (textEl) textEl.textContent = text;
-        if (btnEl) btnEl.textContent = btnText;
-
-        if (tagEl) {
-            if (style === "warning") tagEl.textContent = "⚠️ WICHTIG";
-            else if (style === "success") tagEl.textContent = "🟢 STATUS";
-            else if (style === "info") tagEl.textContent = "ℹ️ INFO";
-            else tagEl.textContent = "✨ WHITELIST PROMO";
-        }
-
-        if (statusTag) {
-            if (enabled) {
-                statusTag.textContent = "BANNER AKTIV";
-                statusTag.className = "status-tag live";
-            } else {
-                statusTag.textContent = "BANNER DEAKTIVIERT";
-                statusTag.className = "status-tag off";
-            }
-        }
-    }
+    updateAdminBannerPreview();
 
     // Input-Listeners für Live-Vorschau
     ["setBannerEnabled", "setBannerStyle", "setBannerTitle", "setBannerText", "setBannerBtnText", "setBannerBtnUrl"].forEach((id) => {

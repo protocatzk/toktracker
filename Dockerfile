@@ -52,8 +52,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://127.0.0.1:5000/ || exit 1
 
-# 10. Startbefehl: Uvicorn mit genau 1 Worker
-# WICHTIG: --workers 1 ist zwingend erforderlich, da TikTokLive-Worker und der
-# Telegram-Bot als Singletons im Prozess laufen. Mehrere Worker würden dieselben
-# Streams doppelt tracken und Telegram-Polling-Konflikte auslösen.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "1"]
+# 10. Startbefehl: Uvicorn für TokTracker API & Dashboard mit uvloop
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "2", "--loop", "uvloop"]
