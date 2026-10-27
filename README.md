@@ -7,6 +7,7 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![MariaDB](https://img.shields.io/badge/MariaDB-11-003545?logo=mariadb&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 ---
 
@@ -127,6 +128,30 @@ Geldspalten sind in MySQL/MariaDB `DECIMAL(14,4)` (exakte Cent-Beträge), SQLite
 
 ---
 
+## Rechtliche Hinweise
+
+Dieses Projekt ist **nicht mit TikTok, ByteDance oder verbundenen Unternehmen
+verbunden** und wird von diesen nicht unterstützt oder genehmigt. „TikTok" ist
+eine Marke der jeweiligen Inhaber.
+
+- Die Anwendung greift auf öffentliche Live-Streams über eine **inoffizielle
+  Schnittstelle** (`TikTokLive`) zu. Die Nutzung erfolgt auf eigenes Risiko;
+  die TikTok-Nutzungsbedingungen können automatisierte Zugriffe untersagen.
+- Alle Einnahmen- und Währungsangaben sind **Schätzungen** auf Basis
+  konfigurierbarer Kurse. Sie sind keine Finanz-, Steuer- oder Rechtsberatung
+  und keine Grundlage für Buchhaltung oder Auszahlungen.
+- Wer die Anwendung betreibt, ist selbst **Verantwortlicher im Sinne der
+  DSGVO** für die verarbeiteten Daten (u. a. Telegram-IDs, Chat-Nachrichten,
+  Spender-Namen) und muss Impressum, Datenschutzerklärung und
+  Löschkonzept bereitstellen.
+
 ## Lizenz
 
-Privates Projekt – alle Rechte vorbehalten.
+Der eigene Quellcode steht unter der **MIT-Lizenz** – siehe [LICENSE](./LICENSE).
+Sie erlaubt Nutzung, Veränderung, Weitergabe und kommerziellen Einsatz ohne
+Gegenleistung; die Software wird ohne Gewährleistung bereitgestellt.
+
+**Ausnahme:** Die Kernabhängigkeit `TikTokLive` steht unter **AGPL-3.0**. Wer ein
+daraus gebautes Gesamtpaket (z. B. ein Docker-Image) weitergibt, muss die
+Bedingungen dieser Abhängigkeit einhalten. Details und die Lizenzen aller
+weiteren Komponenten: [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
