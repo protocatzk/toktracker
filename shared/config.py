@@ -81,6 +81,10 @@ class AppConfig:
     session_secret: str = os.getenv("SESSION_SECRET", "").strip()
     admin_password: str = os.getenv("ADMIN_PASSWORD", "").strip()
 
+    # Zugriffssperre: "whitelist" = nur per Telegram freigeschaltete Nutzer (oder API-Key)
+    # kommen an die App; "off" = öffentlicher Betrieb wie zuvor.
+    access_gate: str = os.getenv("ACCESS_GATE", "whitelist").strip().lower()
+
     # Sicherheits-Härtung (WP 1): Cookie-Flags, Proxy-Vertrauen, API-Doku, API-Key per Query
     session_cookie_secure: str = os.getenv("SESSION_COOKIE_SECURE", "auto").strip().lower()
     trust_proxy_headers: bool = _env_bool("TRUST_PROXY_HEADERS", True)
@@ -127,6 +131,11 @@ class AppConfig:
                 self.mysql_database = parsed.path.strip("/")
 
         self._init_session_secret()
+        if self.access_gate not in ("off", "whitelist"):
+            logger.warning(
+                "Ungültiger ACCESS_GATE-Wert '%s' – verwende 'whitelist' (fail-closed).", self.access_gate
+            )
+            self.access_gate = "whitelist"
         if self.session_cookie_secure not in ("auto", "1", "0", "true", "false", "yes", "no", "on", "off", "always"):
             logger.warning(
                 "Ungültiger SESSION_COOKIE_SECURE-Wert '%s' – verwende 'auto'.", self.session_cookie_secure
@@ -166,6 +175,10 @@ class AppConfig:
             "SESSION_SECRET nicht gesetzt und keine Ableitungsquelle vorhanden – es wird ein zufälliges "
             "Laufzeit-Secret erzeugt. Alle Admin-Sessions werden bei jedem Neustart ungültig!"
         )
+
+    @property
+    def has_access_gate(self) -> bool:
+        return self.access_gate == "whitelist"
 
     @property
     def has_redis(self) -> bool:
@@ -226,6 +239,7 @@ class AppConfig:
             "tiktok_target_idc": self.tiktok_target_idc if self.has_tiktok_session else "",
             "has_sign_api_key": self.has_sign_api_key,
             "sign_api_key_masked": _mask_secret(self.tiktok_sign_api_key),
+            "access_gate": self.access_gate,
             "has_api_key_protection": self.has_api_key,
             "api_key_query_allowed": self.allow_api_key_query,
             "api_docs_enabled": self.enable_api_docs,

@@ -409,6 +409,13 @@
             const res = await fetch(`/api/miniapp/data?period=${encodeURIComponent(currentPeriod)}`, {
                 headers: getAuthHeaders()
             });
+            if (res.status === 401) {
+                // Zugriffssperre: Nutzer ist nicht per Telegram freigeschaltet.
+                window.location.href = "/login?error=" + encodeURIComponent(
+                    "Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden."
+                );
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             renderMiniApp(data);

@@ -65,6 +65,9 @@ if not _ALREADY_BOOTSTRAPPED:
     os.environ["TELEGRAM_ALLOWED_USERS"] = ""
     os.environ["TELEGRAM_ACCESS_MODE"] = "whitelist"
     os.environ["ENABLE_API_DOCS"] = "0"
+    # Standardmäßig ohne Zugriffssperre testen; tests/test_access_gate.py schaltet
+    # sie gezielt ein (config.access_gate wird dort gepatcht).
+    os.environ["ACCESS_GATE"] = "off"
     os.environ["ALLOW_API_KEY_QUERY"] = "1"
     os.environ["TRUST_PROXY_HEADERS"] = "1"
     os.environ["SESSION_COOKIE_SECURE"] = "auto"

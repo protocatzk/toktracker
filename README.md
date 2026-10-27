@@ -90,11 +90,23 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USERS` | Bot und Whitelist |
 | `SESSION_COOKIE_SECURE` | `auto` (nur HTTPS), `1` oder `0` |
 | `ENABLE_API_DOCS` | `/docs`, `/redoc`, `/openapi.json` freischalten (Default: `0`) |
+| `ACCESS_GATE` | `whitelist` (Default): nur per Telegram freigeschaltete Nutzer/API-Key kommen an die App, alle anderen landen auf `/login`. `off` = öffentlicher Betrieb |
 
 ---
 
 ## Sicherheit & Datenschutz
 
+- **Zugriffssperre:** Mit `ACCESS_GATE=whitelist` (Default) ist die gesamte
+  Anwendung — inklusive `/`, `/public` und aller Daten-APIs — nur für per
+  Telegram freigeschaltete Nutzer und API-Key-Inhaber erreichbar. Öffentlich
+  bleiben ausschließlich `/login`, die Login-Endpunkte, statische Assets,
+  `/api/health` und die Mini-App-Seite (für den Telegram-Login).
+  Nicht freigeschaltete Besucher werden auf `/login` umgeleitet, API-Aufrufe
+  erhalten `401`. Zusätzlich sendet der Server `X-Robots-Tag: noindex` und
+  `robots.txt` verbietet Crawler, solange die Sperre aktiv ist.
+  Deaktivieren: `ACCESS_GATE=off` in der `.env` (danach Neustart).
+- Sessions dauern während der Sperre **24 Stunden** (sonst 7 Tage), damit
+  entzogene Freigaben schnell wirken.
 - Admin-Zugriff nur über Telegram-Login (Widget/OTP) oder API-Key; Sessions sind HMAC-signiert und `HttpOnly`/`Secure` (hinter HTTPS).
 - Auth-Endpunkte sind rate-limitiert; Login-Challenges werden nach 5 Fehlversuchen gesperrt.
 - Rollen: `admin` (voller Zugriff) vs. `user` (Whitelist: Radar und Chat-Intelligence).

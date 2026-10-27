@@ -76,6 +76,7 @@ from schemas import (
     TelegramUserPermissionRequest,
     TrackActionRequest,
 )
+from shared.access_gate import is_exempt_path, session_grants_access, wants_json
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_client import bot_client as telegram_bot_service
 from shared.bus import get_bus
@@ -477,6 +478,64 @@ def _provided_api_key(x_api_key: Optional[str], query_api_key: Optional[str]) ->
     return ""
 
 
+@app.middleware("http")
+async def access_gate_middleware(request: Request, call_next):
+    """
+    Zugriffssperre (ACCESS_GATE=whitelist): Nur freigeschaltete Telegram-Nutzer
+    bzw. Inhaber des API-Keys kommen an die App. Nicht freigeschaltete Besucher
+    werden auf /login umgeleitet, API-Aufrufe erhalten 401.
+
+    Als zuletzt registrierte Middleware liegt sie außerhalb der Analytics-Middleware:
+    abgewiesene Anfragen erzeugen damit keine Page-View-/API-Log-Einträge.
+    """
+    if not config.has_access_gate:
+        return await call_next(request)
+
+    path = request.url.path
+    if not is_exempt_path(path):
+        token = (
+            request.cookies.get(AdminAuthManager.COOKIE_NAME)
+            or request.headers.get("x-admin-session")
+            or ""
+        ).strip()
+        if not token:
+            authorization = request.headers.get("authorization", "")
+            if authorization.lower().startswith("bearer "):
+                token = authorization[7:].strip()
+
+        allowed = session_grants_access(admin_auth_manager.verify_session_token(token))
+
+        if not allowed:
+            provided_key = (
+                request.headers.get("x-api-key")
+                or (request.query_params.get("api_key") if config.allow_api_key_query else None)
+                or ""
+            ).strip()
+            if provided_key:
+                configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
+                allowed = _api_key_matches(provided_key, configured_key)
+
+        if not allowed:
+            if wants_json(path, request.headers.get("accept", "")):
+                response = JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": "Zugang nur für freigeschaltete Nutzer. Bitte über /login per Telegram anmelden.",
+                        "access_gate": True,
+                    },
+                )
+            else:
+                message = urllib.parse.quote("Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden.")
+                response = RedirectResponse(url=f"/login?error={message}", status_code=302)
+            response.headers["X-Robots-Tag"] = "noindex, nofollow"
+            return response
+
+    response = await call_next(request)
+    # Solange die Sperre aktiv ist, soll nichts indexiert werden (Personendaten!).
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    return response
+
+
 def verify_admin_or_api_key(
     toktracker_admin_session: Optional[str] = Cookie(default=None),
     x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
@@ -602,7 +661,7 @@ def _set_admin_session_cookie(
     response.set_cookie(
         key=AdminAuthManager.COOKIE_NAME,
         value=session_token,
-        max_age=AdminAuthManager.SESSION_TTL_SECONDS,
+        max_age=admin_auth_manager.session_ttl_seconds(),
         httponly=True,
         secure=_cookie_secure_flag(request),
         samesite="lax",
@@ -681,6 +740,14 @@ async def miniapp_page(request: Request):
             "webapp_url": config.telegram_webapp_url or "",
         },
     )
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    """Während der Sperre: alles verbieten. Sonst: Indexierung erlauben."""
+    if config.has_access_gate:
+        return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
+    return Response("User-agent: *\nAllow: /\n", media_type="text/plain")
 
 
 @app.get("/login", response_class=HTMLResponse, include_in_schema=False)

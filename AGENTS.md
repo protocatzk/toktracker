@@ -115,6 +115,19 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 
 ---
 
+## 5b. Zugriffssperre (ACCESS_GATE)
+
+Standard ist `ACCESS_GATE=whitelist`: Die Zugriffssperre in `app.py`
+(`access_gate_middleware`, Logik in `shared/access_gate.py`) lässt nur
+freigeschaltete Telegram-Nutzer (Session mit `role=admin` oder `is_allowed`) bzw.
+Inhaber des API-Keys durch. Öffentlich bleiben nur Login-Seite/Login-Endpunkte,
+`/static`, `/pictures`, `/api/health`, `/robots.txt` und die Mini-App-Seite.
+Abgewiesene Aufrufe erzeugen keine Analytics-Einträge (Gate liegt außerhalb der
+Analytics-Middleware) und tragen `X-Robots-Tag: noindex`.
+
+Neue öffentliche Endpunkte müssen bewusst in `shared/access_gate.py`
+(`EXEMPT_PATHS`) eingetragen werden — sonst sind sie automatisch gesperrt.
+
 ## 6. Richtlinien für KI-Agenten bei Änderungen
 
 Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:

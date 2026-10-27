@@ -25,7 +25,8 @@ class AdminAuthManager:
 
     COOKIE_NAME = "toktracker_admin_session"
     CHALLENGE_TTL_SECONDS = 600  # 10 Minuten Gültigkeit
-    SESSION_TTL_SECONDS = 86400 * 7  # 7 Tage
+    SESSION_TTL_SECONDS = 86400 * 7  # Standard: 7 Tage (ohne Zugriffssperre)
+    SESSION_TTL_GATED_SECONDS = 86400  # während ACCESS_GATE=whitelist: 24 Stunden
     MAX_CODE_ATTEMPTS = 5  # Fehlversuche pro Challenge, danach gesperrt
 
     def __init__(self) -> None:
@@ -225,6 +226,10 @@ class AdminAuthManager:
         user_identifier = f"@{username}" if username else f"id:{telegram_id}"
         return True, None, user_identifier
 
+    def session_ttl_seconds(self) -> int:
+        """Kürzere Sessions, solange die Zugriffssperre aktiv ist."""
+        return self.SESSION_TTL_GATED_SECONDS if config.has_access_gate else self.SESSION_TTL_SECONDS
+
     def create_session_token(
         self,
         admin_label: str = "telegram_admin",
@@ -236,7 +241,7 @@ class AdminAuthManager:
             "role": role,
             "is_allowed": is_allowed,
             "iat": int(time.time()),
-            "exp": int(time.time()) + self.SESSION_TTL_SECONDS,
+            "exp": int(time.time()) + self.session_ttl_seconds(),
             "nonce": secrets.token_hex(8),
         }
         raw_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
