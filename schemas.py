@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -36,6 +36,12 @@ class SettingsUpdateRequest(BaseModel):
         None,
         description="Telegram-Bot Zugriffsmodus: 'whitelist' (nur freigeschaltete Personen) oder 'public' (alle Nutzer)",
     )
+    public_banner_enabled: Optional[Union[bool, int, str]] = Field(None, description="Öffentliches Banner ein-/ausschalten")
+    public_banner_title: Optional[str] = Field(None, description="Titel des Banners")
+    public_banner_text: Optional[str] = Field(None, description="Textinhalt des Banners")
+    public_banner_style: Optional[str] = Field(None, description="Stil des Banners: highlight | info | success | warning")
+    public_banner_btn_text: Optional[str] = Field(None, description="Beschriftung des Buttons")
+    public_banner_btn_url: Optional[str] = Field(None, description="Ziel-URL des Buttons (optional)")
 
 
 class TelegramUserPermissionRequest(BaseModel):

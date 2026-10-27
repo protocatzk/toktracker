@@ -33,6 +33,12 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "poll_interval_seconds": "45",     # Intervall für Auto-Live-Check wenn Streamer offline ist
     "api_key": "",                     # Optionaler API-Key für externe Bot-Abfragen
     "telegram_access_mode": config.telegram_access_mode if config.telegram_access_mode in ("whitelist", "public") else "whitelist",
+    "public_banner_enabled": "1",      # 1 = Aktiv, 0 = Deaktiviert
+    "public_banner_title": "Exklusive Whitelist-Features & Chat-Intelligence",
+    "public_banner_text": "Schalte erweiterte Analysen wie Chat-Intelligence, Streamer-Vergleiche und das Spender-Radar frei. Kontaktiere unseren Telegram-Bot für eine Freischaltung!",
+    "public_banner_style": "highlight", # highlight | info | success | warning
+    "public_banner_btn_text": "Whitelist anfragen ↗",
+    "public_banner_btn_url": "",       # Leer = autom. Telegram-Bot Link
 }
 
 _db_init_lock = threading.Lock()
@@ -957,6 +963,12 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
         mode = str(data.get("telegram_access_mode", config.telegram_access_mode or "whitelist")).lower()
         if mode not in ("whitelist", "public"):
             mode = "whitelist"
+
+        banner_enabled_raw = str(data.get("public_banner_enabled", DEFAULT_SETTINGS["public_banner_enabled"])).strip().lower()
+        banner_style = str(data.get("public_banner_style", DEFAULT_SETTINGS["public_banner_style"])).strip().lower()
+        if banner_style not in ("highlight", "info", "success", "warning"):
+            banner_style = "highlight"
+
         res = {
             "usd_per_diamond": float(data.get("usd_per_diamond", 0.005)),
             "gross_usd_per_coin": float(data.get("gross_usd_per_coin", 0.0106)),
@@ -965,6 +977,12 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
             "poll_interval_seconds": int(float(data.get("poll_interval_seconds", 45))),
             "api_key": str(data.get("api_key", "")),
             "telegram_access_mode": mode,
+            "public_banner_enabled": banner_enabled_raw in ("1", "true", "yes", "on"),
+            "public_banner_title": str(data.get("public_banner_title", DEFAULT_SETTINGS["public_banner_title"])),
+            "public_banner_text": str(data.get("public_banner_text", DEFAULT_SETTINGS["public_banner_text"])),
+            "public_banner_style": banner_style,
+            "public_banner_btn_text": str(data.get("public_banner_btn_text", DEFAULT_SETTINGS["public_banner_btn_text"])),
+            "public_banner_btn_url": str(data.get("public_banner_btn_url", DEFAULT_SETTINGS["public_banner_btn_url"])),
         }
         _settings_cache = res
         _settings_cache_time = now
@@ -980,6 +998,12 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     val = val.lower()
                     if val not in ("whitelist", "public"):
                         continue
+                elif key == "public_banner_enabled":
+                    val = "1" if str(new_settings[key]).strip().lower() in ("1", "true", "yes", "on") else "0"
+                elif key == "public_banner_style":
+                    val = val.lower()
+                    if val not in ("highlight", "info", "success", "warning"):
+                        val = "highlight"
                 conn.execute(
                     "INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
                     (key, val),
@@ -1599,7 +1623,6 @@ def record_gift_event(
             """,
             (cur.lastrowid,),
         ).fetchone()
-        invalidate_overview_cache()
         return (dict(row) if row else None), True
 
 
@@ -1624,7 +1647,7 @@ def _get_period_cutoff(period: str) -> Optional[str]:
 
 _overview_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _overview_cache_lock = threading.Lock()
-_OVERVIEW_CACHE_TTL = 2.5  # 2.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
+_OVERVIEW_CACHE_TTL = 3.5  # 3.5s TTL verhindert Doppel-Berechnungen bei raschen/parallelen Polls
 
 
 def invalidate_overview_cache() -> None:
@@ -1678,6 +1701,85 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
                 """
             ).fetchall()
 
+        # Batch 1: Alle aktiven Sessions in einer einzigen Abfrage erfassen
+        active_sess_rows = conn.execute(
+            """
+            SELECT id, streamer_id, room_id, started_at, peak_viewers, last_fan_tickets
+            FROM stream_sessions
+            WHERE status = 'active'
+            ORDER BY id DESC
+            """
+        ).fetchall()
+        active_sess_by_streamer: Dict[int, Dict[str, Any]] = {}
+        for as_row in active_sess_rows:
+            sid = as_row["streamer_id"]
+            if sid not in active_sess_by_streamer:
+                active_sess_by_streamer[sid] = dict(as_row)
+
+        # Batch 2: Top-Gifts pro Streamer in einem aggregierten Durchlauf erfassen
+        if cutoff:
+            gift_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, gift_name, SUM(total_coins) AS coins, SUM(repeat_count) AS count
+                FROM gift_events
+                WHERE created_at >= ?
+                GROUP BY streamer_id, gift_name
+                ORDER BY coins DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        else:
+            gift_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, gift_name, SUM(total_coins) AS coins, SUM(repeat_count) AS count
+                FROM gift_events
+                GROUP BY streamer_id, gift_name
+                ORDER BY coins DESC
+                """
+            ).fetchall()
+
+        top_gift_by_streamer: Dict[int, Dict[str, Any]] = {}
+        for grow in gift_sum_rows:
+            sid = grow["streamer_id"]
+            if sid not in top_gift_by_streamer:
+                top_gift_by_streamer[sid] = {
+                    "gift_name": grow["gift_name"],
+                    "coins": int(grow["coins"] or 0),
+                    "count": int(grow["count"] or 0),
+                }
+
+        # Batch 3: Top-Gifter pro Streamer in einem aggregierten Durchlauf erfassen
+        if cutoff:
+            gifter_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, sender_username, MAX(sender_nickname) AS sender_nickname, SUM(total_coins) AS coins
+                FROM gift_events
+                WHERE created_at >= ?
+                GROUP BY streamer_id, sender_username
+                ORDER BY coins DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        else:
+            gifter_sum_rows = conn.execute(
+                """
+                SELECT streamer_id, sender_username, MAX(sender_nickname) AS sender_nickname, SUM(total_coins) AS coins
+                FROM gift_events
+                GROUP BY streamer_id, sender_username
+                ORDER BY coins DESC
+                """
+            ).fetchall()
+
+        top_gifter_by_streamer: Dict[int, Dict[str, Any]] = {}
+        for grow in gifter_sum_rows:
+            sid = grow["streamer_id"]
+            if sid not in top_gifter_by_streamer:
+                top_gifter_by_streamer[sid] = {
+                    "sender_username": grow["sender_username"],
+                    "sender_nickname": grow["sender_nickname"] or grow["sender_username"],
+                    "coins": int(grow["coins"] or 0),
+                }
+
         streamers: List[Dict[str, Any]] = []
         totals = {
             "streamer_count": len(streamer_rows),
@@ -1700,42 +1802,10 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
             d["usd_gross"] = round(coins * cfg["gross_usd_per_coin"], 2)
             d["eur_gross"] = round(d["usd_gross"] * cfg["usd_to_eur_rate"], 2)
 
-            top_gift = conn.execute(
-                """
-                SELECT gift_name, SUM(total_coins) AS coins, SUM(repeat_count) AS count
-                FROM gift_events
-                WHERE streamer_id = ? AND (? IS NULL OR created_at >= ?)
-                GROUP BY gift_name
-                ORDER BY coins DESC
-                LIMIT 1
-                """,
-                (d["id"], cutoff, cutoff),
-            ).fetchone()
-            d["top_gift"] = dict(top_gift) if top_gift else None
-
-            top_gifter = conn.execute(
-                """
-                SELECT sender_username, MAX(sender_nickname) AS sender_nickname, SUM(total_coins) AS coins
-                FROM gift_events
-                WHERE streamer_id = ? AND (? IS NULL OR created_at >= ?)
-                GROUP BY sender_username
-                ORDER BY coins DESC
-                LIMIT 1
-                """,
-                (d["id"], cutoff, cutoff),
-            ).fetchone()
-            d["top_gifter"] = dict(top_gifter) if top_gifter else None
-
-            active_sess = conn.execute(
-                """
-                SELECT id, room_id, started_at, peak_viewers, last_fan_tickets
-                FROM stream_sessions
-                WHERE streamer_id = ? AND status = 'active'
-                ORDER BY id DESC LIMIT 1
-                """,
-                (d["id"],),
-            ).fetchone()
-            d["active_session"] = dict(active_sess) if active_sess else None
+            sid = d["id"]
+            d["top_gift"] = top_gift_by_streamer.get(sid)
+            d["top_gifter"] = top_gifter_by_streamer.get(sid)
+            d["active_session"] = active_sess_by_streamer.get(sid)
 
             streamers.append(d)
 
@@ -4519,7 +4589,6 @@ def get_chat_messages(
         count_sql = f"""
         SELECT COUNT(*) AS total
         FROM chat_messages c
-        JOIN streamers s ON s.id = c.streamer_id
         WHERE {where_sql}
         """
         with get_db() as conn:
@@ -4585,8 +4654,7 @@ def get_stream_sessions(
         ss.id, ss.streamer_id, ss.room_id, ss.title, ss.started_at, ss.ended_at,
         ss.peak_viewers, ss.last_fan_tickets, ss.status,
         s.username AS streamer_username, s.display_name AS streamer_display_name,
-        s.avatar_url AS streamer_avatar_url,
-        (SELECT COUNT(*) FROM chat_messages cm WHERE cm.session_id = ss.id) AS chat_count
+        s.avatar_url AS streamer_avatar_url
     FROM stream_sessions ss
     JOIN streamers s ON s.id = ss.streamer_id
     WHERE {where_sql}
@@ -4596,8 +4664,30 @@ def get_stream_sessions(
     params.extend([max(1, min(limit, 300)), max(0, offset)])
 
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+        if not rows:
+            return []
+
+        session_ids = [r["id"] for r in rows if r.get("id")]
+        chat_counts = {}
+        if session_ids:
+            placeholders = ", ".join(["?"] * len(session_ids))
+            count_sql = f"""
+            SELECT session_id, COUNT(*) AS cnt
+            FROM chat_messages
+            WHERE session_id IN ({placeholders})
+            GROUP BY session_id
+            """
+            for crow in conn.execute(count_sql, session_ids).fetchall():
+                try:
+                    chat_counts[crow["session_id"]] = int(crow["cnt"])
+                except Exception:
+                    pass
+
+        for r in rows:
+            r["chat_count"] = chat_counts.get(r["id"], 0)
+
+        return rows
 
 
 COMMON_CHAT_STOP_WORDS = {

@@ -148,10 +148,52 @@ async function loadPublicOverview(isSilent = false) {
         publicStreamers = data.streamers || [];
         publicGifts = data.recent_gifts || [];
 
+        if (data.banner) {
+            updatePublicBanner(data.banner);
+        }
+
         renderPublicLeaderboard();
         renderPublicGifts();
     } catch (e) {
         if (!isSilent) console.error("Fehler beim Laden der öffentlichen Übersicht:", e);
+    }
+}
+
+function updatePublicBanner(banner) {
+    const el = document.getElementById("publicAnnouncementBanner");
+    if (!el || !banner) return;
+
+    if (!banner.enabled) {
+        el.classList.add("is-hidden");
+        return;
+    }
+
+    const sig = (banner.title || "") + "::" + (banner.text || "");
+    const dismissed = sessionStorage.getItem("toktracker_banner_dismissed");
+    if (dismissed && dismissed === sig) {
+        el.classList.add("is-hidden");
+        return;
+    }
+
+    el.classList.remove("is-hidden", "highlight", "info", "success", "warning");
+    el.classList.add(banner.style || "highlight");
+
+    const titleEl = document.getElementById("pubBannerTitle");
+    const textEl = document.getElementById("pubBannerText");
+    const btnEl = document.getElementById("pubBannerBtn");
+    const btnTextEl = document.getElementById("pubBannerBtnText");
+    const tagEl = document.getElementById("pubBannerTag");
+
+    if (titleEl) titleEl.textContent = banner.title || "Exklusive Whitelist-Features & Chat-Intelligence";
+    if (textEl) textEl.textContent = banner.text || "";
+    if (btnTextEl) btnTextEl.textContent = banner.btn_text || "Whitelist anfragen ↗";
+    if (btnEl && banner.btn_url) btnEl.href = banner.btn_url;
+
+    if (tagEl) {
+        if (banner.style === "warning") tagEl.textContent = "⚠️ WICHTIG";
+        else if (banner.style === "success") tagEl.textContent = "🟢 HINWEIS";
+        else if (banner.style === "info") tagEl.textContent = "ℹ️ INFO";
+        else tagEl.textContent = "✨ WHITELIST PROMO";
     }
 }
 
@@ -1116,10 +1158,20 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("pubSelectBattleMode")?.addEventListener("change", () => loadPublicBattles());
     document.getElementById("pubInputBattleSearch")?.addEventListener("input", () => loadPublicBattles());
 
-    // 7. Schließen des Detail-Panels
+    // 7. Schließen des Detail-Panels & Banner-Dismissal
     document.getElementById("pubBtnCloseDetail")?.addEventListener("click", () => {
         const box = document.getElementById("pubStreamerDetailBox");
         if (box) box.style.display = "none";
+    });
+
+    document.getElementById("btnDismissPubBanner")?.addEventListener("click", () => {
+        const el = document.getElementById("publicAnnouncementBanner");
+        if (el) {
+            el.classList.add("is-hidden");
+            const title = document.getElementById("pubBannerTitle")?.textContent || "";
+            const text = document.getElementById("pubBannerText")?.textContent || "";
+            sessionStorage.setItem("toktracker_banner_dismissed", title + "::" + text);
+        }
     });
 
     // 8. Erste Datenladung
