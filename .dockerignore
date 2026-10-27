@@ -28,4 +28,7 @@ __pycache__/
 # Logs & Temporary files
 *.log
 scratch/
+
+# Tests (not included in production images)
+tests/
 plans/

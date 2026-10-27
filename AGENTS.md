@@ -153,7 +153,11 @@ uvicorn app:app --host 0.0.0.0 --port 5000 --reload
 python migrate_sqlite_to_mysql.py
 ```
 
-### Abhängigkeiten installieren
-```powershell
-pip install -r requirements.txt
+### Tests ausführen (Ressourcensparend, Quotenfrei & Rückstandslos)
+```bash
+# Führt alle Tests im Container aus und löscht die Testdateien danach automatisch:
+./run_tests.sh
+
+# Oder direkt in der lokalen Python-Umgebung:
+python tests/run_tests.py
 ```
