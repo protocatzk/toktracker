@@ -62,12 +62,15 @@ class TestApiEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertIn("telegram_bot", data)
 
     async def test_static_assets_served(self):
-        res_js = await self.client.get("/static/dashboard.js")
-        self.assertEqual(res_js.status_code, 200)
-        self.assertIn("updateAdminBannerPreview", res_js.text)
-
         res_css = await self.client.get("/static/style.css")
         self.assertEqual(res_css.status_code, 200)
+        self.assertIn("--bg-body", res_css.text)
+
+        res_miniapp = await self.client.get("/static/miniapp.css")
+        self.assertEqual(res_miniapp.status_code, 200)
+
+        res_avatar = await self.client.get("/static/avatar_default.png")
+        self.assertEqual(res_avatar.status_code, 200)
 
 
 if __name__ == "__main__":
