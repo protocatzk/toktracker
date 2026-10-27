@@ -72,7 +72,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 ## 4. Datenmodell & Datenbankarchitektur
 
-Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectionWrapper`, `DBRow`) in [`database.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/database.py). Alle Queries nutzen `?` als Platzhalter (wird für MySQL intern zu `%s` konvertiert).
+Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectionWrapper`, `DBRow`) in [`database.py`](./database.py). Alle Queries nutzen `?` als Platzhalter (wird für MySQL intern zu `%s` konvertiert).
 
 ### Kern-Tabellen:
 1. **`streamers`**:
@@ -107,7 +107,7 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 
 ### C. Dashboard & Reporting
 - Das Dashboard pollt `/api/overview?period=today` (oder `24h`, `7d`, `all`).
-- [`database.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/database.py) aggregiert Gesamteinnahmen, Rechner-Kurse (EUR/USD), Top-Spender und Streamer-Rankings.
+- [`database.py`](./database.py) aggregiert Gesamteinnahmen, Rechner-Kurse (EUR/USD), Top-Spender und Streamer-Rankings.
 - Ein automatischer Telegram-Job (`_scheduled_24h_report_job`) sendet alle 24h eine Zusammenfassung in den konfigurierten Chat.
 
 ---
@@ -117,7 +117,7 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
 
 1. **Dual-Database Kompatibilität wahren**:
-   - Niemals SQLite-spezifische Syntax verwenden, die auf MySQL fehlschlägt (z.B. `INSERT OR REPLACE` vs. `ON DUPLICATE KEY UPDATE`). In [`database.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/database.py) existieren bereits Methoden wie `_init_sqlite_schema()` und `_init_mysql_schema()`.
+   - Niemals SQLite-spezifische Syntax verwenden, die auf MySQL fehlschlägt (z.B. `INSERT OR REPLACE` vs. `ON DUPLICATE KEY UPDATE`). In [`database.py`](./database.py) existieren bereits Methoden wie `_init_sqlite_schema()` und `_init_mysql_schema()`.
    - Bei Tabellen- oder Spaltenänderungen **beide** Schemas und Migrationen pflegen.
 
 2. **Threading & Asyncio Isolation**:
@@ -126,8 +126,8 @@ Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
    - DB-Zugriffe immer über den Kontextmanager `with get_db() as conn:` kapseln.
 
 3. **API & Schemas**:
-   - Neue Request/Response-Objekte in [`schemas.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/schemas.py) definieren.
-   - API-Endpunkte in [`app.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/app.py) immer mit Dependency `verify_admin_or_api_key` absichern, es sei denn, sie sind explizit öffentlich (wie `/public` oder `/api/auth/*`).
+   - Neue Request/Response-Objekte in [`schemas.py`](./schemas.py) definieren.
+   - API-Endpunkte in [`app.py`](./app.py) immer mit Dependency `verify_admin_or_api_key` absichern, es sei denn, sie sind explizit öffentlich (wie `/public` oder `/api/auth/*`).
    - Abwärtskompatibilität: Viele Endpunkte sind sowohl unter `/api/...` als auch `/api/v1/...` registriert.
 
 4. **Fehlertoleranz**:
@@ -138,19 +138,30 @@ Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
 ## 7. Wichtige Befehle
 
 ### Anwendung starten
-```powershell
-# Virtuelle Umgebung aktivieren (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
+```bash
+# Kompletter Stack (Produktion)
+docker compose up -d --build
 
-# Server starten (Port 5000)
-python app.py
-# oder via Uvicorn direkt:
-uvicorn app:app --host 0.0.0.0 --port 5000 --reload
+# Nur Web/API-Service neu bauen und starten
+docker compose build app && docker compose up -d app
+
+# Lokal ohne Docker (Port 5000)
+python -m uvicorn app:app --host 0.0.0.0 --port 5000
 ```
 
 ### Migration von SQLite zu MySQL
-```powershell
+```bash
+docker exec toktracker_app python migrate_sqlite_to_mysql.py
+# oder lokal:
 python migrate_sqlite_to_mysql.py
+```
+
+### Qualitätssicherung
+```bash
+ruff check .          # Lint
+mypy                  # Typen (kuratierter Scope, siehe pyproject.toml)
+pytest -q             # Testsuite (isolierte SQLite-DB)
+./run_tests.sh        # Testsuite im laufenden Container (inkl. Redis-Pfade)
 ```
 
 ### Tests ausführen (Ressourcensparend, Quotenfrei & Rückstandslos)

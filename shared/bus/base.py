@@ -61,6 +61,15 @@ class BaseBus(abc.ABC):
         pass
 
     @abc.abstractmethod
+    async def incr_kv(self, key: str, ttl: Optional[int] = None) -> int:
+        """Atomarer Zähler (für Rate-Limits). Setzt beim ersten Treffer eine TTL."""
+        pass
+
+    @abc.abstractmethod
+    def incr_kv_sync(self, key: str, ttl: Optional[int] = None) -> int:
+        pass
+
+    @abc.abstractmethod
     async def scan_keys(self, pattern: str) -> List[str]:
         pass
 

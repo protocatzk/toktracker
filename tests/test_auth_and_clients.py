@@ -2,10 +2,16 @@
 Tests für AdminAuthManager, MonitorClient und BotClient.
 Prüft Challenge-Handling, Cookie-Signierung und Client-Abstraktionen.
 """
+try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
+    from . import _bootstrap  # noqa: F401
+except ImportError:  # pragma: no cover
+    import _bootstrap  # noqa: F401
+
 import unittest
+
 from shared.auth_store import admin_auth_manager
-from shared.monitor_client import monitor_client
 from shared.bot_client import bot_client
+from shared.monitor_client import monitor_client
 
 
 class TestAuthAndClients(unittest.TestCase):

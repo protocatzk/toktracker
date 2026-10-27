@@ -84,7 +84,7 @@
             <button type="button" id="btnRefresh">Aktualisieren</button>
             <a class="btn-link" href="/api/export/gifts.csv">Gifts CSV</a>
             <a class="btn-link" href="/api/export/battles.csv">Battles CSV</a>
-            <a class="btn-link" href="/docs" target="_blank">API Docs</a>
+            {% if docs_enabled %}<a class="btn-link" href="/docs" target="_blank">API Docs</a>{% endif %}
             <button type="button" id="btnThemeToggle" class="mono" title="Zwischen Dark Mode und Light Mode wechseln">Theme: DARK</button>
         </div>
     </div>
@@ -914,6 +914,13 @@
                             </label>
                         </div>
 
+                        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="setPublicShowDonors" style="width: 17px; height: 17px; cursor: pointer;" />
+                            <label for="setPublicShowDonors" style="cursor: pointer; font-weight: 700; font-size: 13px;">
+                                Spender-Namen öffentlich anzeigen (deaktiviert = maskiert, z. B. <code>m***r</code>)
+                            </label>
+                        </div>
+
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
                             <div class="field-group">
                                 <label for="setBannerStyle">Farbschema &amp; Akzent</label>
@@ -1136,7 +1143,7 @@
 <footer class="app-footer">
     <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
     <div>
-        <a href="/donor-radar">🐋 Spender-Radar</a> · <a href="/chat-intelligence">💬 Chat-Intelligence &amp; Wortwolke</a> · <a href="/site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="/">Öffentliches User-Panel</a> · <a href="/docs" target="_blank">API Dokumentation</a> · <a href="/logout">Abmelden</a>
+        <a href="/donor-radar">🐋 Spender-Radar</a> · <a href="/chat-intelligence">💬 Chat-Intelligence &amp; Wortwolke</a> · <a href="/site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="/">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="/docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="/logout">Abmelden</a>
     </div>
 
 </footer>

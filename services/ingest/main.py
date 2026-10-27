@@ -1,11 +1,10 @@
 import asyncio
 import logging
 import signal
-import sys
 
+from services.ingest.coordinator import IngestCoordinator
 from shared.config import config
 from shared.database import init_db
-from services.ingest.coordinator import IngestCoordinator
 
 logging.basicConfig(
     level=logging.INFO,

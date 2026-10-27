@@ -2,9 +2,15 @@
 Tests für Bus-Implementierungen (MemoryBus & RedisBus).
 Prüft KV-Store, PubSub, Leases und RPC ohne externe TikTok-/Telegram-Quoten.
 """
+try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
+    from . import _bootstrap  # noqa: F401
+except ImportError:  # pragma: no cover
+    import _bootstrap  # noqa: F401
+
 import asyncio
 import os
 import unittest
+
 from shared.bus.memory_bus import MemoryBus
 from shared.bus.redis_bus import RedisBus
 

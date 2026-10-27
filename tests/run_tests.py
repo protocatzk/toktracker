@@ -13,6 +13,12 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# Testumgebung (isolierte DB, Secrets) VOR dem Test-Discovery setzen.
+try:
+    from tests import _bootstrap  # noqa: E402,F401
+except ImportError:  # pragma: no cover - z.B. wenn nur der tests-Ordner kopiert wurde
+    import _bootstrap  # noqa: E402,F401
+
 
 def run_all_tests():
     print("=" * 65)

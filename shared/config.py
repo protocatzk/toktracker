@@ -1,9 +1,14 @@
 import hashlib
+import logging
 import os
+import secrets
 from dataclasses import dataclass
 from typing import List, Optional, Set
 from urllib.parse import urlparse
+
 from dotenv import load_dotenv
+
+logger = logging.getLogger("toktracker.config")
 
 # Projekt-Wurzelverzeichnis (/app bzw. Repo-Root)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +32,14 @@ def _parse_csv_list(raw: str) -> List[str]:
     if not raw:
         return []
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Liest ein Boolean aus der Umgebung (1/true/yes/on bzw. 0/false/no/off)."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 @dataclass
@@ -63,6 +76,12 @@ class AppConfig:
     session_secret: str = os.getenv("SESSION_SECRET", "").strip()
     admin_password: str = os.getenv("ADMIN_PASSWORD", "").strip()
 
+    # Sicherheits-Härtung (WP 1): Cookie-Flags, Proxy-Vertrauen, API-Doku, API-Key per Query
+    session_cookie_secure: str = os.getenv("SESSION_COOKIE_SECURE", "auto").strip().lower()
+    trust_proxy_headers: bool = _env_bool("TRUST_PROXY_HEADERS", True)
+    allow_api_key_query: bool = _env_bool("ALLOW_API_KEY_QUERY", True)
+    enable_api_docs: bool = _env_bool("ENABLE_API_DOCS", False)
+
     # TikTokLive Session & Authentifizierung (für altersbeschränkte Streams / höhere Rate-Limits)
     tiktok_session_id: str = os.getenv("TIKTOK_SESSION_ID", "").strip()
     tiktok_target_idc: str = os.getenv("TIKTOK_TARGET_IDC", "eu-ttp2").strip()
@@ -84,6 +103,9 @@ class AppConfig:
     # Optionale externe WebApp / Mini-App URL für Telegram
     telegram_webapp_url: str = os.getenv("TELEGRAM_WEBAPP_URL", os.getenv("WEBAPP_URL", "")).strip()
 
+    # Wird in __post_init__ gesetzt: "env" | "derived" | "ephemeral"
+    session_secret_source: str = ""
+
     def __post_init__(self) -> None:
         if self.database_url.lower().startswith(("mysql://", "mysql+pymysql://", "mariadb://")):
             parsed = urlparse(self.database_url)
@@ -99,9 +121,46 @@ class AppConfig:
             if parsed.path and parsed.path.strip("/"):
                 self.mysql_database = parsed.path.strip("/")
 
-        if not self.session_secret:
+        self._init_session_secret()
+        if self.session_cookie_secure not in ("auto", "1", "0", "true", "false", "yes", "no", "on", "off", "always"):
+            logger.warning(
+                "Ungültiger SESSION_COOKIE_SECURE-Wert '%s' – verwende 'auto'.", self.session_cookie_secure
+            )
+            self.session_cookie_secure = "auto"
+
+    def _init_session_secret(self) -> None:
+        """
+        Härtet die Session-Signierung:
+        1. Explizit gesetztes SESSION_SECRET wird validiert (min. 32 Zeichen).
+        2. Ohne SESSION_SECRET, aber mit Bot-Token und API-Key: deterministische Ableitung
+           (bisheriges Verhalten, damit Sessions Neustarts überleben) + Warnung.
+        3. Sonst: zufälliges Secret zur Laufzeit (sicher, aber Sessions überleben keinen Neustart).
+        """
+        if self.session_secret:
+            if len(self.session_secret) < 32:
+                raise ValueError(
+                    "SESSION_SECRET ist zu kurz (min. 32 Zeichen). "
+                    'Erzeugen mit: python -c "import secrets; print(secrets.token_hex(32))"'
+                )
+            self.session_secret_source = "env"
+            return
+
+        if self.telegram_bot_token and self.api_key:
             seed = f"toktracker-session-{self.telegram_bot_token}-{self.api_key}-{BASE_DIR}"
             self.session_secret = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+            self.session_secret_source = "derived"
+            logger.warning(
+                "SESSION_SECRET nicht gesetzt – Secret wird aus TELEGRAM_BOT_TOKEN + TIKTOK_API_KEY abgeleitet. "
+                "Bitte ein eigenes SESSION_SECRET (32+ Zeichen) in der .env setzen."
+            )
+            return
+
+        self.session_secret = secrets.token_hex(32)
+        self.session_secret_source = "ephemeral"
+        logger.warning(
+            "SESSION_SECRET nicht gesetzt und keine Ableitungsquelle vorhanden – es wird ein zufälliges "
+            "Laufzeit-Secret erzeugt. Alle Admin-Sessions werden bei jedem Neustart ungültig!"
+        )
 
     @property
     def has_redis(self) -> bool:
@@ -163,6 +222,11 @@ class AppConfig:
             "has_sign_api_key": self.has_sign_api_key,
             "sign_api_key_masked": _mask_secret(self.tiktok_sign_api_key),
             "has_api_key_protection": self.has_api_key,
+            "api_key_query_allowed": self.allow_api_key_query,
+            "api_docs_enabled": self.enable_api_docs,
+            "session_secret_source": self.session_secret_source,
+            "session_cookie_secure": self.session_cookie_secure,
+            "trust_proxy_headers": self.trust_proxy_headers,
             "has_web_proxy": bool(self.tiktok_web_proxy),
             "has_telegram_config": bool(self.telegram_bot_token),
             "telegram_access_mode": self.telegram_access_mode,

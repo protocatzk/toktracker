@@ -4,15 +4,15 @@ Erfasst Festplattenspeicher, RAM, CPU sowie Ressourcen aller Docker-Container
 (toktracker_app, toktracker_db, toktracker_nginx, toktracker_ssl) und Volumes.
 """
 
-import html
 import logging
 import os
 import shutil
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
+
 from config import config
 
 logger = logging.getLogger("toktracker.system")
@@ -179,12 +179,12 @@ def _get_database_storage() -> Dict[str, Any]:
             with get_db() as conn:
                 row = conn.execute(
                     """
-                    SELECT 
+                    SELECT
                         ROUND(COALESCE(SUM(data_length + index_length), 0) / 1024 / 1024, 2) AS total_mb,
                         ROUND(COALESCE(SUM(data_length), 0) / 1024 / 1024, 2) AS data_mb,
                         ROUND(COALESCE(SUM(index_length), 0) / 1024 / 1024, 2) AS index_mb,
                         COUNT(*) as table_count
-                    FROM information_schema.tables 
+                    FROM information_schema.tables
                     WHERE table_schema = ?
                     """,
                     (config.mysql_database,),

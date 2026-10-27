@@ -1,11 +1,8 @@
 import asyncio
-import html
 import logging
 import os
 import signal
-import sys
 import time
-from datetime import datetime
 
 from shared.bot_client import bot_client
 from shared.bus import get_bus
@@ -15,8 +12,8 @@ from shared.database import (
     cleanup_old_chat_messages,
     init_db,
 )
-from tiktok_service import refresh_donor_tier_cache
 from system_service import get_system_health
+from tiktok_service import refresh_donor_tier_cache
 
 logging.basicConfig(
     level=logging.INFO,

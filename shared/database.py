@@ -39,6 +39,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "public_banner_style": "highlight", # highlight | info | success | warning
     "public_banner_btn_text": "Whitelist anfragen ↗",
     "public_banner_btn_url": "",       # Leer = autom. Telegram-Bot Link
+    "public_show_donors": "0",         # 0 = Spender-Namen auf öffentlichen Flächen maskieren
 }
 
 _db_init_lock = threading.Lock()
@@ -953,6 +954,9 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
             "public_banner_style": banner_style,
             "public_banner_btn_text": str(data.get("public_banner_btn_text", DEFAULT_SETTINGS["public_banner_btn_text"])),
             "public_banner_btn_url": str(data.get("public_banner_btn_url", DEFAULT_SETTINGS["public_banner_btn_url"])),
+            "public_show_donors": str(
+                data.get("public_show_donors", DEFAULT_SETTINGS["public_show_donors"])
+            ).strip().lower() in ("1", "true", "yes", "on"),
         }
         _settings_cache = res
         _settings_cache_time = now
@@ -961,14 +965,14 @@ def get_settings(force_refresh: bool = False) -> Dict[str, Any]:
 
 def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
     with get_db() as conn:
-        for key in DEFAULT_SETTINGS.keys():
+        for key in DEFAULT_SETTINGS:
             if key in new_settings and new_settings[key] is not None:
                 val = str(new_settings[key]).strip()
                 if key == "telegram_access_mode":
                     val = val.lower()
                     if val not in ("whitelist", "public"):
                         continue
-                elif key == "public_banner_enabled":
+                elif key == "public_banner_enabled" or key == "public_show_donors":
                     val = "1" if str(new_settings[key]).strip().lower() in ("1", "true", "yes", "on") else "0"
                 elif key == "public_banner_style":
                     val = val.lower()
@@ -1145,9 +1149,8 @@ def check_telegram_user_access(
 
         if row_by_id and row_by_uname and row_by_id["id"] != row_by_uname["id"]:
             merged_allowed = max(int(row_by_id["is_allowed"]), int(row_by_uname["is_allowed"]))
-            if int(row_by_id["is_allowed"]) < 0 or int(row_by_uname["is_allowed"]) < 0:
-                if max(int(row_by_id["is_allowed"]), int(row_by_uname["is_allowed"])) < 1:
-                    merged_allowed = -1
+            if (int(row_by_id["is_allowed"]) < 0 or int(row_by_uname["is_allowed"]) < 0) and merged_allowed < 1:
+                merged_allowed = -1
             merged_role = (
                 "admin"
                 if (row_by_id["role"] == "admin" or row_by_uname["role"] == "admin")
@@ -3003,7 +3006,12 @@ def get_battles_list(
             LIMIT ? OFFSET ?
         """
         rows = conn.execute(query_sql, tuple(params + [limit, offset])).fetchall()
-        raw_battles = [dict(r) for r in rows]
+        # `raw_data_json` ist internes TikTok-Payload: nie in Listen-Antworten ausliefern.
+        raw_battles = []
+        for r in rows:
+            item = dict(r)
+            item.pop("raw_data_json", None)
+            raw_battles.append(item)
 
         # Getrackte Streamer zur schnellen Gegnererkennung laden
         all_streamers = conn.execute("SELECT id, username, display_name, avatar_url FROM streamers").fetchall()
@@ -3029,6 +3037,7 @@ def get_battles_list(
                 ).fetchone()
                 if p_res:
                     partner_row = dict(p_res)
+                    partner_row.pop("raw_data_json", None)
 
             # Falls keine battle_id passte, aber Gegner getrackt ist: Zeitfenster prüfen (±180s)
             if not partner_row and is_opp_tracked:
@@ -3052,6 +3061,7 @@ def get_battles_list(
                         ).fetchone()
                         if p_res:
                             partner_row = dict(p_res)
+                            partner_row.pop("raw_data_json", None)
                     except Exception:
                         pass
 
@@ -3296,9 +3306,17 @@ def get_battle_stats(
     }
 
 
-def get_battle_details(battle_id: int) -> Optional[Dict[str, Any]]:
+def get_battle_details(
+    battle_id: int,
+    include_raw: bool = False,
+    include_gifts: bool = False,
+) -> Optional[Dict[str, Any]]:
     """
     Liefert vollständige Details eines Battles inkl. aller Geschenke, die während des Matches empfangen wurden.
+
+    Args:
+        include_raw: Rohes TikTok-Payload (`raw_data_json`) mitliefern (nur für Admin-Pfade).
+        include_gifts: Geschenk-Liste (inkl. Spender-Namen) mitliefern.
     """
     with get_db() as conn:
         b_row = conn.execute(
@@ -3318,9 +3336,11 @@ def get_battle_details(battle_id: int) -> Optional[Dict[str, Any]]:
             return None
 
         battle = dict(b_row)
+        if not include_raw:
+            battle.pop("raw_data_json", None)
 
         gifts = []
-        if battle.get("started_at") and battle.get("ended_at"):
+        if include_gifts and battle.get("started_at") and battle.get("ended_at"):
             g_rows = conn.execute(
                 """
                 SELECT * FROM gift_events
@@ -3347,13 +3367,15 @@ def get_battle_details(battle_id: int) -> Optional[Dict[str, Any]]:
             ).fetchone()
             if p_res:
                 partner_row = dict(p_res)
+                if not include_raw:
+                    partner_row.pop("raw_data_json", None)
 
         if partner_row:
             battle["is_internal"] = True
             battle["partner_battle"] = partner_row
             battle["total_coins"] = (battle.get("coins_earned") or 0) + (partner_row.get("coins_earned") or 0)
             battle["total_eur_net"] = round(float(battle.get("eur_net") or 0.0) + float(partner_row.get("eur_net") or 0.0), 2)
-            if battle.get("started_at") and battle.get("ended_at"):
+            if include_gifts and battle.get("started_at") and battle.get("ended_at"):
                 g2_rows = conn.execute(
                     """
                     SELECT * FROM gift_events
@@ -4463,9 +4485,9 @@ def _build_chat_search_clause(search: str) -> Tuple[Optional[str], List[Any]]:
             clean_u = token.lstrip("@").lower()
             if clean_u:
                 clauses.append("""(
-                    LOWER(c.username) LIKE ? 
-                    OR LOWER(c.nickname) LIKE ? 
-                    OR LOWER(c.comment) LIKE ? 
+                    LOWER(c.username) LIKE ?
+                    OR LOWER(c.nickname) LIKE ?
+                    OR LOWER(c.comment) LIKE ?
                     OR LOWER(s.username) LIKE ?
                 )""")
                 pat = f"%{clean_u}%"
@@ -4475,10 +4497,10 @@ def _build_chat_search_clause(search: str) -> Tuple[Optional[str], List[Any]]:
                 params.append("%@%")
         else:
             clauses.append("""(
-                LOWER(c.comment) LIKE ? 
-                OR LOWER(c.username) LIKE ? 
-                OR LOWER(c.nickname) LIKE ? 
-                OR LOWER(s.username) LIKE ? 
+                LOWER(c.comment) LIKE ?
+                OR LOWER(c.username) LIKE ?
+                OR LOWER(c.nickname) LIKE ?
+                OR LOWER(s.username) LIKE ?
                 OR LOWER(s.display_name) LIKE ?
             )""")
             pat = f"%{token.lower()}%"
@@ -4570,7 +4592,7 @@ def get_chat_messages(
                     total_count = int(cnt_row[0])
 
     query = f"""
-    SELECT 
+    SELECT
         c.id, c.streamer_id, c.session_id, c.user_id, c.username, c.nickname,
         c.avatar_url, c.comment, c.is_whale, c.whale_tier, c.created_at,
         s.username AS streamer_username, s.display_name AS streamer_display_name,
@@ -4590,10 +4612,10 @@ def get_chat_messages(
             rd = dict(r)
             rd["is_whale"] = bool(rd["is_whale"])
             result.append(rd)
-            
+
         if not include_total:
             total_count = len(result)
-            
+
         return result, total_count
 
 
@@ -4620,7 +4642,7 @@ def get_stream_sessions(
 
     where_sql = " AND ".join(where_clauses)
     query = f"""
-    SELECT 
+    SELECT
         ss.id, ss.streamer_id, ss.room_id, ss.title, ss.started_at, ss.ended_at,
         ss.peak_viewers, ss.last_fan_tickets, ss.status,
         s.username AS streamer_username, s.display_name AS streamer_display_name,
@@ -4668,15 +4690,14 @@ COMMON_CHAT_STOP_WORDS = {
     "auf", "über", "unter", "vor", "hinter", "für", "um", "durch", "ohne", "gegen", "wie", "so", "dann",
     "als", "wenn", "weil", "dass", "da", "hier", "dort", "wo", "wer", "was", "warum", "ich", "du", "er",
     "sie", "es", "wir", "ihr", "mich", "dich", "ihn", "uns", "euch", "ihnen", "mir", "dir", "ihm",
-    "mein", "dein", "sein", "unser", "euer", "ihre", "meine", "deine", "seine", "unsere", "eure", "ihren",
+    "mein", "dein", "unser", "euer", "ihre", "meine", "deine", "seine", "unsere", "eure", "ihren",
     "nicht", "noch", "nur", "schon", "jetzt", "wieder", "immer", "mehr", "sehr", "viel", "viele",
     "etwas", "alles", "nichts", "man", "mal", "halt", "doch", "ja", "nein", "bitte", "danke",
     "hallo", "servus", "moin", "guten", "hab", "habe", "hast", "geht", "gehts", "geht's", "kann", "kannst",
     "können", "muss", "musst", "müssen", "will", "willst", "wollen", "soll", "sollte", "macht", "machen",
     "gut", "schlecht", "okay", "ok", "dies", "diese", "dieser", "dieses", "diesem", "diesen",
     # Englisch
-    "the", "and", "or", "but", "in", "on", "at", "to", "for", "with", "from", "by", "is", "are", "was",
-    "were", "be", "been", "have", "has", "had", "do", "does", "did", "can", "will", "would", "should",
+    "the", "and", "or", "but", "on", "at", "to", "for", "with", "from", "by", "is", "are", "were", "be", "been", "have", "has", "had", "do", "does", "did", "can", "would", "should",
     "it", "its", "you", "they", "them", "my", "your", "this", "that", "what", "which", "who", "not", "no", "yes",
 }
 
@@ -4717,7 +4738,7 @@ def get_chat_analysis(
 
     where_sql = " AND ".join(where_clauses)
     query = f"""
-    SELECT 
+    SELECT
         c.id, c.comment, c.username, c.nickname, c.avatar_url,
         c.is_whale, c.whale_tier, c.created_at
     FROM chat_messages c
@@ -4784,17 +4805,28 @@ def get_chat_analysis(
         # 2-Grams (Wortpaare)
         for i in range(len(tokens) - 1):
             w1, w2 = tokens[i], tokens[i + 1]
-            if len(w1) >= 2 and len(w2) >= 2:
-                # Mindestens ein Wort darf kein Stopwort sein
-                if w1 not in COMMON_CHAT_STOP_WORDS or w2 not in COMMON_CHAT_STOP_WORDS:
-                    all_phrases.append(f"{w1} {w2}")
+            # Mindestens ein Wort darf kein Stopwort sein
+            if (
+                len(w1) >= 2
+                and len(w2) >= 2
+                and (w1 not in COMMON_CHAT_STOP_WORDS or w2 not in COMMON_CHAT_STOP_WORDS)
+            ):
+                all_phrases.append(f"{w1} {w2}")
 
         # 3-Grams (3er Phrasen)
         for i in range(len(tokens) - 2):
             w1, w2, w3 = tokens[i], tokens[i + 1], tokens[i + 2]
-            if len(w1) >= 2 and len(w2) >= 2 and len(w3) >= 2:
-                if w1 not in COMMON_CHAT_STOP_WORDS or w2 not in COMMON_CHAT_STOP_WORDS or w3 not in COMMON_CHAT_STOP_WORDS:
-                    all_phrases.append(f"{w1} {w2} {w3}")
+            if (
+                len(w1) >= 2
+                and len(w2) >= 2
+                and len(w3) >= 2
+                and (
+                    w1 not in COMMON_CHAT_STOP_WORDS
+                    or w2 not in COMMON_CHAT_STOP_WORDS
+                    or w3 not in COMMON_CHAT_STOP_WORDS
+                )
+            ):
+                all_phrases.append(f"{w1} {w2} {w3}")
 
     # 1. Wortwolken-Berechnung
     word_counts = Counter(all_words).most_common(limit_words)
@@ -4902,7 +4934,7 @@ def get_chat_export_data(
 
     where_sql = " AND ".join(where_clauses)
     query = f"""
-    SELECT 
+    SELECT
         c.id, c.created_at, s.username AS streamer_username,
         c.session_id, c.user_id, c.username, c.nickname, c.avatar_url,
         c.is_whale, c.whale_tier, c.comment
@@ -4993,7 +5025,7 @@ def get_donor_radar_data(
     having_sql = f"HAVING {' AND '.join(having_clauses)}" if having_clauses else ""
 
     query = f"""
-    SELECT 
+    SELECT
         LOWER(g.sender_username) AS uname_key,
         MAX(g.sender_username) AS username,
         MAX(g.sender_nickname) AS display_name,
@@ -5040,7 +5072,7 @@ def get_donor_radar_data(
 
         # KPIs über alle Spender im Zeitraum
         kpis_query = f"""
-        SELECT 
+        SELECT
             COUNT(DISTINCT uname) as all_donors,
             SUM(CASE WHEN coins >= 10000 THEN 1 ELSE 0 END) as count_whales,
             SUM(CASE WHEN coins >= 2500 AND coins < 10000 THEN 1 ELSE 0 END) as count_sharks,
@@ -5049,7 +5081,7 @@ def get_donor_radar_data(
             SUM(CASE WHEN coins >= 500 THEN coins ELSE 0 END) as sum_whale_coins,
             SUM(CASE WHEN coins >= 500 THEN eur_net ELSE 0 END) as sum_whale_eur_net
         FROM (
-            SELECT 
+            SELECT
                 LOWER(g.sender_username) as uname,
                 SUM(g.total_coins) as coins,
                 SUM(g.eur_net) as eur_net,
@@ -5114,7 +5146,7 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         main_row = conn.execute(
             """
-            SELECT 
+            SELECT
                 MAX(sender_username) as username,
                 MAX(sender_nickname) as display_name,
                 SUM(total_coins) as total_coins,
@@ -5182,7 +5214,7 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
         # Streamer Breakdown
         streamer_rows = conn.execute(
             """
-            SELECT 
+            SELECT
                 g.streamer_id,
                 s.username as streamer_username,
                 s.display_name as streamer_display_name,
@@ -5208,7 +5240,7 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
         # Top 6 Lieblingsgeschenke
         gift_rows = conn.execute(
             """
-            SELECT 
+            SELECT
                 gift_name,
                 gift_icon_url,
                 SUM(repeat_count) as total_sent,
@@ -5226,7 +5258,7 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
         # Letzte 25 Chatnachrichten
         chat_rows = conn.execute(
             """
-            SELECT 
+            SELECT
                 c.id, c.streamer_id, c.comment, c.created_at,
                 s.username as streamer_username, s.display_name as streamer_display_name
             FROM chat_messages c
@@ -5300,7 +5332,7 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
         cutoff_14d = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
         period_rows = conn.execute(
             """
-            SELECT 
+            SELECT
                 g.streamer_id,
                 s.username as streamer_username,
                 s.display_name as streamer_display_name,
@@ -5473,7 +5505,7 @@ def get_recent_whale_gifts(
     Optional gefiltert nach Mindest-Coins und/oder streamer_id.
     """
     query = """
-    SELECT 
+    SELECT
         g.id, g.streamer_id, g.gift_name, g.gift_icon_url, g.diamond_count,
         g.repeat_count, g.total_coins, g.eur_net, g.usd_net, g.eur_gross, g.usd_gross,
         g.sender_username, g.sender_nickname, g.created_at,
@@ -5522,7 +5554,7 @@ def get_all_streamers_summary() -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT 
+            SELECT
                 s.id, s.username, s.display_name, s.avatar_url, s.is_live,
                 s.is_tracking, s.current_viewers, s.last_seen_at,
                 COALESCE(SUM(g.total_coins), 0) as today_coins,
@@ -5576,7 +5608,7 @@ def get_network_loyalty_and_overlap(
 
         # 1. Frontenwechsler ermitteln
         history_query = """
-        SELECT 
+        SELECT
             LOWER(g.sender_username) as uname,
             MAX(g.sender_username) as username,
             MAX(g.sender_nickname) as display_name,
@@ -5728,7 +5760,7 @@ def get_network_loyalty_and_overlap(
 
         # 2. Streamer Overlap Matrix (Gemeinsame Großspender)
         overlap_query = """
-        SELECT 
+        SELECT
             d1.streamer_id as s1_id,
             s1.username as s1_username,
             s1.display_name as s1_display_name,
@@ -5791,7 +5823,7 @@ def get_network_loyalty_and_overlap(
 
             shared_top_rows = conn.execute(
                 """
-                SELECT 
+                SELECT
                     LOWER(g.sender_username) as uname,
                     MAX(g.sender_username) as username,
                     MAX(g.sender_nickname) as display_name,

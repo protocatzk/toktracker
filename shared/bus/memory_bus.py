@@ -1,9 +1,9 @@
 import asyncio
 import fnmatch
-import json
 import logging
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from shared.bus.base import BaseBus
 
@@ -18,6 +18,7 @@ class MemoryBus(BaseBus):
 
     def __init__(self):
         self._kv: Dict[str, Tuple[str, Optional[float]]] = {}
+        self._kv_lock = threading.Lock()
         self._subscribers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
         self._leases: Dict[str, Tuple[str, float]] = {}
         self._rpc_handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
@@ -90,6 +91,27 @@ class MemoryBus(BaseBus):
 
     def delete_kv_sync(self, key: str) -> None:
         self._kv.pop(key, None)
+
+    async def incr_kv(self, key: str, ttl: Optional[int] = None) -> int:
+        return self.incr_kv_sync(key, ttl)
+
+    def incr_kv_sync(self, key: str, ttl: Optional[int] = None) -> int:
+        with self._kv_lock:
+            now = time.time()
+            item = self._kv.get(key)
+            if item and item[1] is not None and now > item[1]:
+                item = None
+            if item is None:
+                value = 1
+                expires_at = (now + ttl) if ttl else None
+            else:
+                try:
+                    value = int(item[0]) + 1
+                except (TypeError, ValueError):
+                    value = 1
+                expires_at = item[1]
+            self._kv[key] = (str(value), expires_at)
+            return value
 
     async def scan_keys(self, pattern: str) -> List[str]:
         return self.scan_keys_sync(pattern)

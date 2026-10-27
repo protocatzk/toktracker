@@ -5,12 +5,12 @@ Ermöglicht Importe wie `from config import config, BASE_DIR` sowie `from shared
 
 from shared.config import (
     BASE_DIR,
-    PROJECT_ROOT,
     ENV_PATH,
+    PROJECT_ROOT,
     AppConfig,
-    config,
     _mask_secret,
     _parse_csv_list,
+    config,
 )
 
 __all__ = [

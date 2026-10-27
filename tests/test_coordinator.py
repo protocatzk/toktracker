@@ -2,9 +2,15 @@
 Tests für IngestCoordinator (services/ingest/coordinator.py).
 Prüft Lease-Handling, Sharding & Heartbeats mit gemocktem TikTokLive-Worker (0 Quota-Verbrauch).
 """
+try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
+    from . import _bootstrap  # noqa: F401
+except ImportError:  # pragma: no cover
+    import _bootstrap  # noqa: F401
+
 import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
+
 from services.ingest.coordinator import IngestCoordinator
 from shared.contracts import PREFIX_HEARTBEAT_INGEST, PREFIX_LEASE
 

@@ -29,15 +29,12 @@ import argparse
 import os
 import re
 import sqlite3
-import sys
 from typing import Optional
 
 from config import config
 from database import (
     PYMYSQL_AVAILABLE,
     MySQLConnectionWrapper,
-    _ensure_column_mysql,
-    _ensure_index_mysql,
     _init_mysql_schema,
 )
 
