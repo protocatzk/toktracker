@@ -12,6 +12,7 @@ import urllib.parse
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
+from telegram.request import HTTPXRequest
 
 try:
     from telegram import (
@@ -268,7 +269,14 @@ class TelegramBotService:
         self._state = "starting"
         self._last_error = ""
         try:
-            builder = Application.builder().token(token)
+            request = HTTPXRequest(
+                connection_pool_size=16,
+                read_timeout=20.0,
+                write_timeout=20.0,
+                connect_timeout=10.0,
+                pool_timeout=10.0,
+                )
+            builder = Application.builder().token(token).request(request)
             self._app = builder.build()
 
             # Lese- & Analyse-Befehle
