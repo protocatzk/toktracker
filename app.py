@@ -1,14 +1,16 @@
 import asyncio
 import csv
 import hashlib
+import hmac
 import io
 import json
+import logging
 import os
 import re
 import time
 import urllib.parse
-from datetime import datetime
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import uvicorn
@@ -21,20 +23,20 @@ from pydantic import BaseModel, Field
 from config import config
 from database import (
     build_streamer_bot_report,
+    check_telegram_user_access,
     clear_demo_data,
     delete_streamer,
     delete_telegram_user,
     get_analytics_data,
     get_api_analytics_overview,
-    get_battles_list,
-    get_battle_stats,
     get_battle_details,
+    get_battle_stats,
+    get_battles_list,
     get_chat_analysis,
     get_chat_export_data,
     get_chat_messages,
     get_dashboard_overview,
     get_db,
-    get_donor_crm,
     get_donor_details,
     get_donor_radar_data,
     get_network_loyalty_and_overlap,
@@ -45,10 +47,9 @@ from database import (
     get_streamer_by_id_or_username,
     get_streamer_detail,
     get_telegram_access_mode,
+    import_from_sqlite_database,
     init_db,
     inspect_sqlite_database,
-    import_from_sqlite_database,
-    check_telegram_user_access,
     list_telegram_users,
     record_api_call,
     record_bot_session,
@@ -74,25 +75,33 @@ from schemas import (
     TelegramUserPermissionRequest,
     TrackActionRequest,
 )
-from system_service import get_system_health
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_client import bot_client as telegram_bot_service
 from shared.bus import get_bus
 from shared.contracts import CHANNEL_SETTINGS_CHANGED
 from shared.database import invalidate_settings_cache
 from shared.monitor_client import monitor_client as monitor_manager
+from shared.privacy import apply_public_privacy, mask_donor_rows
+from shared.ratelimit import check_rate_limit, reset_rate_limit
+from system_service import get_system_health
 from telegram_service import (
     generate_full_report_data,
+)
+from telegram_service import (
     telegram_bot_service as _raw_telegram_bot_service,
 )
 from tiktok_service import (
     TIKTOKLIVE_AVAILABLE,
     UVLOOP_AVAILABLE,
     fetch_tiktok_user_info,
+)
+from tiktok_service import (
     monitor_manager as _raw_monitor_manager,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+logger = logging.getLogger("toktracker.api")
 
 TIKTOK_GIFT_CATALOG = [
     {"id": 5655, "name": "Rose", "diamonds": 1},
@@ -144,7 +153,11 @@ async def lifespan(app_instance: FastAPI):
     3. Startet lokalen Bot (Monolith) oder verbindet Remote-Bus (Microservices)
     """
     _loop = asyncio.get_running_loop()
-    print(f"[TokTracker] Event-Loop: {type(_loop).__module__}.{type(_loop).__name__} (uvloop verfügbar: {UVLOOP_AVAILABLE}, Role: {config.service_role}, Redis: {config.has_redis})")
+    logger.info(
+        "TokTracker Event-Loop: %s (uvloop verfügbar: %s, Role: %s, Redis: %s, Session-Secret: %s)",
+        type(_loop).__name__, UVLOOP_AVAILABLE, config.service_role, config.has_redis,
+        config.session_secret_source,
+    )
 
     init_db()
     with get_db() as conn:
@@ -183,6 +196,10 @@ app = FastAPI(
     ),
     version="2.5.0",
     lifespan=lifespan,
+    # API-Doku nur bei expliziter Freigabe (ENABLE_API_DOCS=1) – reduziert die Angriffsfläche.
+    docs_url="/docs" if config.enable_api_docs else None,
+    redoc_url="/redoc" if config.enable_api_docs else None,
+    openapi_url="/openapi.json" if config.enable_api_docs else None,
 )
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -192,15 +209,58 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
 def _extract_client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
-    x_real = request.headers.get("x-real-ip")
-    if x_real:
-        return x_real.strip()
+    """Ermittelt die Client-IP. Proxy-Header werden nur bei TRUST_PROXY_HEADERS=1 ausgewertet."""
+    if config.trust_proxy_headers:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+        x_real = request.headers.get("x-real-ip")
+        if x_real:
+            return x_real.strip()
     if request.client and request.client.host:
         return request.client.host
     return "127.0.0.1"
+
+
+def _request_is_https(request: Optional[Request]) -> bool:
+    """Erkennt HTTPS auch hinter dem Nginx-Reverse-Proxy (X-Forwarded-Proto)."""
+    if request is None:
+        return False
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
+def _cookie_secure_flag(request: Optional[Request]) -> bool:
+    setting = config.session_cookie_secure
+    if setting in ("1", "true", "yes", "on", "always"):
+        return True
+    if setting in ("0", "false", "no", "off"):
+        return False
+    return _request_is_https(request)
+
+
+def _rate_limited(bucket: str, limit: int, window_seconds: int):
+    """
+    FastAPI-Dependency für Brute-Force-Schutz auf Auth-Endpunkten.
+    Zähler liegen im Bus (Redis/Memory), Schlüssel enthalten nur einen IP-Hash.
+    """
+
+    async def _guard(request: Request) -> None:
+        result = await check_rate_limit(bucket, _extract_client_ip(request), limit, window_seconds)
+        if not result.allowed:
+            logger.warning("Rate-Limit ausgelöst: bucket=%s hits=%s ip=%s", bucket, result.hits, _extract_client_ip(request))
+            raise HTTPException(
+                status_code=429,
+                detail="Zu viele Anfragen. Bitte in einigen Minuten erneut versuchen.",
+                headers={"Retry-After": str(result.retry_after or window_seconds)},
+            )
+
+    return _guard
+
+
+AUTH_LIMIT_WINDOW = 15 * 60  # 15 Minuten
 
 
 def _detect_device_type(user_agent: str) -> str:
@@ -262,7 +322,7 @@ async def track_page_views_middleware(request: Request, call_next):
             if x_api_key or query_api_key:
                 auth_type = "api_key"
                 provided_k = x_api_key or query_api_key
-                api_key_name = "configured" if (configured_key and provided_k == configured_key) else "custom"
+                api_key_name = "configured" if _api_key_matches(provided_k, configured_key) else "custom"
             elif auth_header.lower().startswith("bearer "):
                 auth_type = "bearer"
                 api_key_name = ""
@@ -341,6 +401,22 @@ async def track_page_views_middleware(request: Request, call_next):
     return response
 
 
+def _api_key_matches(provided: str, configured: str) -> bool:
+    """Vergleicht API-Keys in konstanter Zeit (Timing-Angriffe vermeiden)."""
+    if not provided or not configured:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), configured.encode("utf-8"))
+
+
+def _provided_api_key(x_api_key: Optional[str], query_api_key: Optional[str]) -> str:
+    """Header hat Vorrang; Query-Parameter nur bei ALLOW_API_KEY_QUERY=1."""
+    if x_api_key and x_api_key.strip():
+        return x_api_key.strip()
+    if query_api_key and config.allow_api_key_query:
+        return query_api_key.strip()
+    return ""
+
+
 def verify_admin_or_api_key(
     toktracker_admin_session: Optional[str] = Cookie(default=None),
     x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
@@ -359,12 +435,19 @@ def verify_admin_or_api_key(
 
     session_payload = admin_auth_manager.verify_session_token(token)
     if session_payload:
-        return session_payload
+        # Whitelist-Nutzer der Mini-App erhalten Tokens mit role="user" und dürfen
+        # ausschließlich die dafür vorgesehenen Bereiche (Radar/Chat) nutzen.
+        if session_payload.get("role") == "admin":
+            return session_payload
+        raise HTTPException(
+            status_code=403,
+            detail="Zugriff verweigert: Dieser Bereich ist Administratoren vorbehalten.",
+        )
 
     configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = (x_api_key or api_key or "").strip()
-    if configured_key and provided and provided == configured_key:
-        return {"sub": "api_key"}
+    provided = _provided_api_key(x_api_key, api_key)
+    if _api_key_matches(provided, configured_key):
+        return {"sub": "api_key", "role": "admin", "is_allowed": True}
 
     raise HTTPException(
         status_code=401,
@@ -395,8 +478,8 @@ def verify_radar_access(
             return session_payload
 
     configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = (x_api_key or api_key or "").strip()
-    if configured_key and provided and provided == configured_key:
+    provided = _provided_api_key(x_api_key, api_key)
+    if _api_key_matches(provided, configured_key):
         return {"sub": "api_key"}
 
     if get_telegram_access_mode() == "public":
@@ -439,8 +522,8 @@ def verify_chat_intelligence_access(
             )
 
     configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = (x_api_key or api_key or "").strip()
-    if configured_key and provided and provided == configured_key:
+    provided = _provided_api_key(x_api_key, api_key)
+    if _api_key_matches(provided, configured_key):
         return {"sub": "api_key", "role": "admin", "is_allowed": True}
 
     raise HTTPException(
@@ -449,13 +532,19 @@ def verify_chat_intelligence_access(
     )
 
 
-def _set_admin_session_cookie(response: Response, admin_label: str) -> None:
-    token = admin_auth_manager.create_session_token(admin_label=admin_label)
+def _set_admin_session_cookie(
+    response: Response,
+    admin_label: str,
+    request: Optional[Request] = None,
+    token: Optional[str] = None,
+) -> None:
+    session_token = token or admin_auth_manager.create_session_token(admin_label=admin_label)
     response.set_cookie(
         key=AdminAuthManager.COOKIE_NAME,
-        value=token,
+        value=session_token,
         max_age=AdminAuthManager.SESSION_TTL_SECONDS,
         httponly=True,
+        secure=_cookie_secure_flag(request),
         samesite="lax",
         path="/",
     )
@@ -559,8 +648,36 @@ async def admin_login_page(
     )
 
 
+def _is_same_origin_request(request: Request) -> bool:
+    """
+    Grober CSRF-Schutz für zustandsändernde GET-Aufrufe (z.B. /logout):
+    - `Sec-Fetch-Site` wird von allen modernen Browsern gesetzt.
+    - Fehlt der Header (ältere Clients, CLI), wird der Referer geprüft.
+    """
+    site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if site:
+        return site in ("same-origin", "none")
+    referer = (request.headers.get("referer") or "").strip()
+    if not referer:
+        return True  # direkte Navigation/Bookmark (kein Cross-Site-Kontext erkennbar)
+    host = (request.headers.get("host") or "").strip().lower()
+    ref_host = urllib.parse.urlparse(referer).netloc.lower()
+    return bool(ref_host) and ref_host == host
+
+
+@app.post("/logout", include_in_schema=False)
+@app.post("/api/auth/logout", tags=["Admin Authentication"], summary="Meldet die Admin-Session ab")
+async def admin_logout_post():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(key=AdminAuthManager.COOKIE_NAME, path="/")
+    return response
+
+
 @app.get("/logout", include_in_schema=False)
-async def admin_logout():
+async def admin_logout(request: Request):
+    if not _is_same_origin_request(request):
+        # Cross-Site-Logout verhindern (CSRF), ohne die Session zu löschen.
+        return RedirectResponse(url="/login", status_code=302)
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(key=AdminAuthManager.COOKIE_NAME, path="/")
     return response
@@ -577,6 +694,8 @@ async def admin_console(
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url="/login", status_code=302)
+    if session_payload.get("role") != "admin":
+        return RedirectResponse(url="/login?error=Kein+Admin-Zugriff", status_code=302)
 
     init_db()
     monitor_manager.autostart_from_db()
@@ -589,6 +708,7 @@ async def admin_console(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "docs_enabled": config.enable_api_docs,
         },
     )
 
@@ -604,6 +724,8 @@ async def site_analytics_page(
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url="/login", status_code=302)
+    if session_payload.get("role") != "admin":
+        return RedirectResponse(url="/login?error=Kein+Admin-Zugriff", status_code=302)
 
     init_db()
     return templates.TemplateResponse(
@@ -615,6 +737,7 @@ async def site_analytics_page(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "docs_enabled": config.enable_api_docs,
         },
     )
 
@@ -641,6 +764,7 @@ async def donor_radar_page(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "docs_enabled": config.enable_api_docs,
         },
     )
 
@@ -697,6 +821,7 @@ async def chat_intelligence_page(
     "/api/auth/telegram/request",
     tags=["Admin Authentication"],
     summary="Fordert einen 6-stelligen Einmal-Code & 1-Klick-Freigabe über den Telegram-Bot an",
+    dependencies=[Depends(_rate_limited("auth_telegram_request", 5, AUTH_LIMIT_WINDOW))],
 )
 async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequestPayload):
     init_db()
@@ -732,7 +857,7 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
     tags=["Admin Authentication"],
     summary="Prüft, ob die Login-Anfrage in Telegram per 1-Klick-Button freigegeben wurde",
 )
-async def api_auth_telegram_poll(challenge_id: str = Query(..., min_length=8)):
+async def api_auth_telegram_poll(request: Request, challenge_id: str = Query(..., min_length=8)):
     poll_res = admin_auth_manager.poll_challenge(challenge_id)
     if poll_res.get("status") == "approved":
         try:
@@ -750,7 +875,7 @@ async def api_auth_telegram_poll(challenge_id: str = Query(..., min_length=8)):
                 "redirect": "/admin",
             }
         )
-        _set_admin_session_cookie(resp, admin_label=poll_res.get("admin_label", "telegram_admin"))
+        _set_admin_session_cookie(resp, admin_label=poll_res.get("admin_label", "telegram_admin"), request=request)
         return resp
     return {"ok": True, "status": poll_res.get("status", "pending")}
 
@@ -759,8 +884,9 @@ async def api_auth_telegram_poll(challenge_id: str = Query(..., min_length=8)):
     "/api/auth/telegram/verify",
     tags=["Admin Authentication"],
     summary="Prüft den 6-stelligen Telegram Einmal-Code und setzt das Admin-Session-Cookie",
+    dependencies=[Depends(_rate_limited("auth_telegram_verify", 10, AUTH_LIMIT_WINDOW))],
 )
-async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
+async def api_auth_telegram_verify(request: Request, payload: TelegramLoginVerifyPayload):
     admin_label = admin_auth_manager.verify_code(
         code=payload.code,
         challenge_id=payload.challenge_id,
@@ -771,6 +897,7 @@ async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
             detail="Ungültiger oder abgelaufener Einmal-Code. Bitte fordere einen neuen Code per Telegram (/login) an.",
         )
 
+    await reset_rate_limit("auth_telegram_verify", _extract_client_ip(request))
     resp = JSONResponse(
         content={
             "ok": True,
@@ -778,7 +905,7 @@ async def api_auth_telegram_verify(payload: TelegramLoginVerifyPayload):
             "redirect": "/admin",
         }
     )
-    _set_admin_session_cookie(resp, admin_label=admin_label)
+    _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
     return resp
 
 
@@ -819,7 +946,7 @@ async def api_auth_telegram_widget(request: Request, payload: TelegramWidgetAuth
             "redirect": "/admin",
         }
     )
-    _set_admin_session_cookie(resp, admin_label=admin_label)
+    _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
     return resp
 
 
@@ -853,7 +980,7 @@ async def api_auth_telegram_widget_callback(request: Request):
 
     admin_label = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
     resp = RedirectResponse(url="/admin", status_code=302)
-    _set_admin_session_cookie(resp, admin_label=admin_label)
+    _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
     return resp
 
 
@@ -861,8 +988,9 @@ async def api_auth_telegram_widget_callback(request: Request):
     "/api/auth/password",
     tags=["Admin Authentication"],
     summary="Notfall-Login mit konfiguriertem Admin-Passwort",
+    dependencies=[Depends(_rate_limited("auth_password", 5, AUTH_LIMIT_WINDOW))],
 )
-async def api_auth_password(payload: PasswordLoginPayload):
+async def api_auth_password(request: Request, payload: PasswordLoginPayload):
     clean_pwd = payload.password.strip()
     admin_label = admin_auth_manager.verify_code(clean_pwd)
     if not admin_label:
@@ -870,6 +998,7 @@ async def api_auth_password(payload: PasswordLoginPayload):
             status_code=401,
             detail="Ungültiges Admin-Passwort.",
         )
+    await reset_rate_limit("auth_password", _extract_client_ip(request))
     resp = JSONResponse(
         content={
             "ok": True,
@@ -877,7 +1006,7 @@ async def api_auth_password(payload: PasswordLoginPayload):
             "redirect": "/admin",
         }
     )
-    _set_admin_session_cookie(resp, admin_label=admin_label)
+    _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
     return resp
 
 
@@ -893,9 +1022,13 @@ async def api_auth_password(payload: PasswordLoginPayload):
 async def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
     raw = await asyncio.to_thread(get_dashboard_overview, period=period)
 
+    show_donors = bool(get_settings().get("public_show_donors"))
     public_streamers = []
     for s in raw.get("streamers", []):
         uname = s["username"]
+        top_gifter = s.get("top_gifter")
+        if not show_donors and isinstance(top_gifter, dict):
+            top_gifter = mask_donor_rows([top_gifter])[0]
         public_streamers.append(
             {
                 "id": s["id"],
@@ -915,7 +1048,7 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
                 "usd_gross": s.get("usd_gross") or 0.0,
                 "eur_gross": s.get("eur_gross") or 0.0,
                 "top_gift": s.get("top_gift"),
-                "top_gifter": s.get("top_gifter"),
+                "top_gifter": top_gifter,
                 "last_seen_at": s.get("last_seen_at"),
             }
         )
@@ -931,7 +1064,7 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
         "period": raw.get("period", period),
         "totals": raw.get("totals", {}),
         "streamers": public_streamers,
-        "recent_gifts": raw.get("recent_gifts", []),
+        "recent_gifts": mask_donor_rows(raw.get("recent_gifts", [])) if not show_donors else raw.get("recent_gifts", []),
         "rates": {
             "usd_per_diamond": cfg.get("usd_per_diamond", 0.005),
             "gross_usd_per_coin": cfg.get("gross_usd_per_coin", 0.0106),
@@ -965,7 +1098,8 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
 
     s = detail["streamer"]
     uname = s["username"]
-    return {
+    show_donors = bool(get_settings().get("public_show_donors"))
+    payload = {
         "streamer": {
             "id": s["id"],
             "username": uname,
@@ -981,6 +1115,7 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
         "top_gifters": detail.get("top_gifters", []),
         "sessions": detail.get("sessions", []),
     }
+    return apply_public_privacy(payload, show_donors)
 
 
 # =====================================================================
@@ -1037,9 +1172,7 @@ def consolidate_live_battles(
             opp2 = str(b2.get("opponent_username") or "").lower()
 
             matches = False
-            if b1_id and b2_id and b1_id == b2_id:
-                matches = True
-            elif (uname1 and opp1 and uname1 == opp2 and uname2 == opp1):
+            if b1_id and b2_id and b1_id == b2_id or (uname1 and opp1 and uname1 == opp2 and uname2 == opp1):
                 matches = True
             elif b1.get("battle_mode") in ("1v1v1", "1v1v1v1") and b2.get("battle_mode") in ("1v1v1", "1v1v1v1"):
                 # Prüfen, ob Kontrahenten übereinstimmen
@@ -1056,9 +1189,8 @@ def consolidate_live_battles(
     consolidated = []
 
     for group in groups:
-        if filter_streamer_id:
-            if not any(it["streamer_id"] == filter_streamer_id for it in group):
-                continue
+        if filter_streamer_id and not any(it["streamer_id"] == filter_streamer_id for it in group):
+            continue
 
         # Modus ermitteln
         b_mode = "1v1"
@@ -1191,12 +1323,7 @@ def consolidate_live_battles(
             score1 = b1.get("streamer_score", 0) or 0
             score2 = b2.get("streamer_score", 0) or 0
 
-            if filter_streamer_id and item2["streamer_id"] == filter_streamer_id:
-                left_item, right_item = item2, item1
-                left_score, right_score = score2, score1
-                left_coins, right_coins = s2_coins, s1_coins
-                left_eur, right_eur = s2_eur, s1_eur
-            elif not filter_streamer_id and score2 > score1:
+            if filter_streamer_id and item2["streamer_id"] == filter_streamer_id or not filter_streamer_id and score2 > score1:
                 left_item, right_item = item2, item1
                 left_score, right_score = score2, score1
                 left_coins, right_coins = s2_coins, s1_coins
@@ -1321,7 +1448,8 @@ async def api_public_analytics(
     period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
 ):
     init_db()
-    return await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+    data = await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+    return apply_public_privacy(data, bool(get_settings().get("public_show_donors")))
 
 
 @app.get(
@@ -1385,7 +1513,7 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
     # 6. Telegram Bot Info
     tg_diag = telegram_bot_service.get_diagnostics()
 
-    return {
+    payload = {
         "period": period,
         "totals": totals,
         "live_battles": live_battles,
@@ -1403,6 +1531,7 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
             "state": tg_diag.get("state") or "offline",
         },
     }
+    return apply_public_privacy(payload, bool(get_settings().get("public_show_donors")))
 
 
 @app.get(
@@ -1412,7 +1541,7 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
 )
 async def api_miniapp_battle_detail(battle_id: int):
     init_db()
-    battle = get_battle_details(battle_id)
+    battle = await asyncio.to_thread(get_battle_details, battle_id, include_raw=False, include_gifts=False)
     if not battle:
         raise HTTPException(status_code=404, detail="Battle nicht gefunden")
     return battle
@@ -1423,7 +1552,7 @@ async def api_miniapp_battle_detail(battle_id: int):
     tags=["Telegram Mini-App"],
     summary="Authentifiziert den Telegram-Nutzer anhand von WebApp initData (HMAC-SHA256)",
 )
-async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
+async def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, response: Response):
     init_db()
     validated = admin_auth_manager.validate_webapp_init_data(payload.init_data)
     if not validated:
@@ -1459,8 +1588,9 @@ async def api_miniapp_auth(payload: MiniAppAuthRequest, response: Response):
             role="admin" if is_admin else "user",
             is_allowed=is_whitelisted,
         )
-        if is_admin:
-            _set_admin_session_cookie(response, admin_label=user_label)
+        # Auch Whitelist-Nutzer (role=user) erhalten ein Cookie, damit serverseitig
+        # geschützte Seiten (z.B. /chat-intelligence) per Browser-Navigation funktionieren.
+        _set_admin_session_cookie(response, admin_label=user_label, request=request, token=token)
 
     try:
         record_bot_session(
@@ -1601,6 +1731,7 @@ async def api_miniapp_radar(
     "/api/miniapp/auth/request_otp",
     tags=["Telegram Mini-App"],
     summary="Fordert einen 6-stelligen Login-Code an (Fallback für Webbrowser)",
+    dependencies=[Depends(_rate_limited("miniapp_request_otp", 5, AUTH_LIMIT_WINDOW))],
 )
 async def api_miniapp_auth_request_otp(request: Request):
     init_db()
@@ -1616,8 +1747,9 @@ async def api_miniapp_auth_request_otp(request: Request):
     "/api/miniapp/auth/verify_otp",
     tags=["Telegram Mini-App"],
     summary="Verifiziert den 6-stelligen OTP-Code oder das Notfall-Admin-Passwort",
+    dependencies=[Depends(_rate_limited("miniapp_verify_otp", 10, AUTH_LIMIT_WINDOW))],
 )
-async def api_miniapp_auth_verify_otp(payload: MiniAppVerifyCodeRequest, response: Response):
+async def api_miniapp_auth_verify_otp(request: Request, payload: MiniAppVerifyCodeRequest, response: Response):
     admin_label = admin_auth_manager.verify_code(
         code=payload.code,
         challenge_id=payload.challenge_id,
@@ -1627,8 +1759,9 @@ async def api_miniapp_auth_verify_otp(payload: MiniAppVerifyCodeRequest, respons
             status_code=401,
             detail="Ungültiger oder abgelaufener Einmal-Code.",
         )
+    await reset_rate_limit("miniapp_verify_otp", _extract_client_ip(request))
     token = admin_auth_manager.create_session_token(admin_label=admin_label)
-    _set_admin_session_cookie(response, admin_label=admin_label)
+    _set_admin_session_cookie(response, admin_label=admin_label, request=request, token=token)
     return {
         "ok": True,
         "authenticated": True,
@@ -1658,7 +1791,8 @@ async def api_miniapp_analytics(
     streamer_id: Optional[int] = Query(None, description="Optionaler Einzelfilter nach Streamer"),
 ):
     init_db()
-    return get_analytics_data(streamer_id=streamer_id, period=period)
+    data = await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+    return apply_public_privacy(data, bool(get_settings().get("public_show_donors")))
 
 
 # =====================================================================
@@ -1742,7 +1876,7 @@ async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
         )
         return {"ok": True, "user": user_row, "access_mode": get_telegram_access_mode()}
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete(
@@ -1793,6 +1927,7 @@ async def api_v1_streamer_single_report(
 @app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
+    init_db()
     data = await asyncio.to_thread(get_dashboard_overview, period=period)
     for s in data["streamers"]:
         uname = s["username"]
@@ -2286,7 +2421,7 @@ async def api_get_battle_stats(
 @app.get("/api/v1/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_get_battle_detail(battle_id: int):
     init_db()
-    battle = get_battle_details(battle_id)
+    battle = await asyncio.to_thread(get_battle_details, battle_id, include_raw=True, include_gifts=True)
     if not battle:
         raise HTTPException(status_code=404, detail="Battle nicht gefunden")
     return battle
@@ -2677,8 +2812,12 @@ async def api_sqlite_inspect(file_path: Optional[str] = Query(None)):
             ),
         }
         return {"ok": True, "data": inspection}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Fehler bei der Analyse: {exc}")
+    except Exception:
+        logger.exception("SQLite-Analyse fehlgeschlagen")
+        raise HTTPException(
+            status_code=500,
+            detail="Die SQLite-Datei konnte nicht analysiert werden. Details stehen im Server-Log.",
+        ) from None
 
 
 @app.post(
@@ -2709,8 +2848,12 @@ async def api_sqlite_import(payload: Optional[SqliteImportRequest] = None):
         except Exception:
             pass
         return {"ok": True, "result": result}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Fehler beim Importieren: {exc}")
+    except Exception:
+        logger.exception("SQLite-Import fehlgeschlagen")
+        raise HTTPException(
+            status_code=500,
+            detail="Der SQLite-Import ist fehlgeschlagen. Details stehen im Server-Log.",
+        ) from None
 
 
 if __name__ == "__main__":

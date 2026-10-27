@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Union
+
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +43,10 @@ class SettingsUpdateRequest(BaseModel):
     public_banner_style: Optional[str] = Field(None, description="Stil des Banners: highlight | info | success | warning")
     public_banner_btn_text: Optional[str] = Field(None, description="Beschriftung des Buttons")
     public_banner_btn_url: Optional[str] = Field(None, description="Ziel-URL des Buttons (optional)")
+    public_show_donors: Optional[Union[bool, int, str]] = Field(
+        None,
+        description="Spender-Namen auf öffentlichen Flächen anzeigen (1) oder maskieren (0)",
+    )
 
 
 class TelegramUserPermissionRequest(BaseModel):

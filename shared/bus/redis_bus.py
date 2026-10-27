@@ -29,6 +29,15 @@ else
 end
 """
 
+# Atomarer Zähler für Rate-Limits: TTL wird nur beim ersten Treffer gesetzt (fixes Fenster).
+LUA_INCR_KV = """
+local current = redis.call("incr", KEYS[1])
+if tonumber(ARGV[1]) > 0 and current == 1 then
+    redis.call("expire", KEYS[1], tonumber(ARGV[1]))
+end
+return current
+"""
+
 
 class RedisBus(BaseBus):
     """
@@ -39,12 +48,21 @@ class RedisBus(BaseBus):
     def __init__(self, redis_url: str):
         self.redis_url = redis_url
         self._async_client: Optional[aioredis.Redis] = None
+        self._async_loop: Optional[asyncio.AbstractEventLoop] = None
         self._sync_client: Optional[redis.Redis] = None
         self._sync_lock = threading.Lock()
         self._sub_tasks: List[asyncio.Task] = []
         self._running = False
 
     async def connect(self) -> None:
+        loop = asyncio.get_running_loop()
+        # Ein Redis-Async-Client ist an den Event-Loop gebunden, in dem er erzeugt wurde.
+        # Wechselt der Loop (Tests mit mehreren Loops, Reload-Worker), muss der Client
+        # neu aufgebaut werden – sonst gibt es "attached to a different loop"-Fehler.
+        if self._async_client is not None and self._async_loop is not loop:
+            self._async_client = None
+            self._async_loop = None
+
         if self._async_client is None:
             self._async_client = aioredis.from_url(
                 self.redis_url,
@@ -52,6 +70,7 @@ class RedisBus(BaseBus):
                 socket_timeout=5.0,
                 socket_connect_timeout=5.0,
             )
+            self._async_loop = loop
             self._running = True
 
     def _get_sync_client(self) -> redis.Redis:
@@ -175,6 +194,17 @@ class RedisBus(BaseBus):
         client = self._get_sync_client()
         client.delete(key)
 
+    async def incr_kv(self, key: str, ttl: Optional[int] = None) -> int:
+        await self.connect()
+        assert self._async_client is not None
+        res = await self._async_client.eval(LUA_INCR_KV, 1, key, str(int(ttl or 0)))
+        return int(res)
+
+    def incr_kv_sync(self, key: str, ttl: Optional[int] = None) -> int:
+        client = self._get_sync_client()
+        res = client.eval(LUA_INCR_KV, 1, key, str(int(ttl or 0)))
+        return int(res)
+
     async def scan_keys(self, pattern: str) -> List[str]:
         await self.connect()
         assert self._async_client is not None
@@ -253,11 +283,12 @@ class RedisBus(BaseBus):
     async def rpc_listen(self, queue: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         await self.connect()
         assert self._async_client is not None
+        client = self._async_client
 
         async def _worker():
             while self._running:
                 try:
-                    res = await self._async_client.blpop(queue, timeout=1)
+                    res = await client.blpop(queue, timeout=1)
                     if res and len(res) == 2:
                         raw_data = res[1]
                         req = json.loads(raw_data)
@@ -267,8 +298,8 @@ class RedisBus(BaseBus):
                             reply_payload = await reply_payload
 
                         if reply_to and reply_payload is not None:
-                            await self._async_client.rpush(reply_to, json.dumps(reply_payload, default=str))
-                            await self._async_client.expire(reply_to, 30)
+                            await client.rpush(reply_to, json.dumps(reply_payload, default=str))
+                            await client.expire(reply_to, 30)
                 except asyncio.CancelledError:
                     break
                 except Exception as exc:

@@ -215,6 +215,8 @@ async function loadOverview() {
                 if (bTxt) bTxt.value = data.settings.public_banner_btn_text || "";
                 const bUrl = document.getElementById("setBannerBtnUrl");
                 if (bUrl) bUrl.value = data.settings.public_banner_btn_url || "";
+                const showDonors = document.getElementById("setPublicShowDonors");
+                if (showDonors) showDonors.checked = Boolean(data.settings.public_show_donors);
                 updateAdminBannerPreview();
             }
         }
@@ -3047,6 +3049,7 @@ document.addEventListener("DOMContentLoaded", () => {
             public_banner_text: document.getElementById("setBannerText").value.trim(),
             public_banner_btn_text: document.getElementById("setBannerBtnText").value.trim(),
             public_banner_btn_url: document.getElementById("setBannerBtnUrl").value.trim(),
+            public_show_donors: document.getElementById("setPublicShowDonors")?.checked ? 1 : 0,
         };
 
         const res = await fetch("/api/settings", {

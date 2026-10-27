@@ -6,12 +6,12 @@ import logging
 import secrets
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from shared.bus import get_bus
 from shared.config import config
-from shared.contracts import KEY_AUTH_RECENT_LIST, PREFIX_AUTH_CHALLENGE
-from shared.database import check_telegram_user_access, list_telegram_users
+from shared.contracts import PREFIX_AUTH_CHALLENGE
+from shared.database import list_telegram_users
 
 logger = logging.getLogger("toktracker.auth")
 
@@ -26,6 +26,7 @@ class AdminAuthManager:
     COOKIE_NAME = "toktracker_admin_session"
     CHALLENGE_TTL_SECONDS = 600  # 10 Minuten Gültigkeit
     SESSION_TTL_SECONDS = 86400 * 7  # 7 Tage
+    MAX_CODE_ATTEMPTS = 5  # Fehlversuche pro Challenge, danach gesperrt
 
     def __init__(self) -> None:
         self._memory_challenges: Dict[str, Dict[str, Any]] = {}
@@ -87,7 +88,8 @@ class AdminAuthManager:
             "code": code,
             "created_at": now,
             "expires_at": now + self.CHALLENGE_TTL_SECONDS,
-            "status": "pending",  # pending | approved | rejected | consumed
+            "status": "pending",  # pending | approved | rejected | consumed | locked
+            "attempts": 0,
             "admin_label": admin_label,
             "client_info": client_info,
         }
@@ -135,8 +137,25 @@ class AdminAuthManager:
             return {
                 "status": "approved",
                 "admin_label": ch.get("admin_label") or "telegram_admin",
+                "attempts": int(ch.get("attempts") or 0),
             }
-        return {"status": status}
+        return {"status": status, "attempts": int(ch.get("attempts") or 0)}
+
+    def _is_code_challenge_open(self, challenge: Dict[str, Any]) -> bool:
+        return str(challenge.get("status")) in ("pending", "approved")
+
+    def _register_failed_attempt(self, challenge: Dict[str, Any]) -> None:
+        """Zählt einen Fehlversuch und sperrt die Challenge ab MAX_CODE_ATTEMPTS."""
+        attempts = int(challenge.get("attempts") or 0) + 1
+        challenge["attempts"] = attempts
+        if attempts >= self.MAX_CODE_ATTEMPTS:
+            challenge["status"] = "locked"
+            logger.warning(
+                "Login-Challenge %s nach %s Fehlversuchen gesperrt.",
+                challenge.get("challenge_id"),
+                attempts,
+            )
+        self._save_challenge(challenge)
 
     def verify_code(self, code: str, challenge_id: Optional[str] = None) -> Optional[str]:
         clean_code = (code or "").strip().replace(" ", "")
@@ -149,13 +168,15 @@ class AdminAuthManager:
 
         if challenge_id:
             ch = self._load_challenge(challenge_id)
-            if ch and ch.get("status") in ("pending", "approved") and hmac.compare_digest(str(ch.get("code", "")), clean_code):
-                ch["status"] = "consumed"
-                self._save_challenge(ch)
-                return str(ch.get("admin_label") or "telegram_admin")
+            if ch and self._is_code_challenge_open(ch):
+                if hmac.compare_digest(str(ch.get("code", "")), clean_code):
+                    ch["status"] = "consumed"
+                    self._save_challenge(ch)
+                    return str(ch.get("admin_label") or "telegram_admin")
+                self._register_failed_attempt(ch)
 
         for ch in self._list_active_challenges():
-            if ch.get("status") in ("pending", "approved") and hmac.compare_digest(str(ch.get("code", "")), clean_code):
+            if self._is_code_challenge_open(ch) and hmac.compare_digest(str(ch.get("code", "")), clean_code):
                 ch["status"] = "consumed"
                 self._save_challenge(ch)
                 return str(ch.get("admin_label") or "telegram_admin")
