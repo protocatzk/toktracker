@@ -75,6 +75,8 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectionWrapper`, `DBRow`) in [`shared/db/_base.py`](./shared/db/_base.py). Alle Queries nutzen `?` als Platzhalter (wird für MySQL intern zu `%s` konvertiert).
 
+**Geldbeträge:** In MySQL/MariaDB sind `usd_net`, `eur_net`, `usd_gross`, `eur_gross` (Tabellen `gift_events`, `tiktok_battles`) als `DECIMAL(14,4)` definiert; `DBRow` normalisiert `Decimal` beim Lesen zentral zu `float`, damit beide Engines identische Typen liefern. SQLite speichert `REAL` (kein echtes DECIMAL). Migration bestehender Installationen: `python migrate_money_to_decimal.py [--apply]`.
+
 ### Kern-Tabellen:
 1. **`streamers`**:
    - `id`, `username`, `display_name`, `avatar_url`, `is_live`, `follower_count`, `current_viewers`, `peak_viewers`, `total_diamonds`, `is_tracking`, `auto_monitor`, `last_seen_live`.

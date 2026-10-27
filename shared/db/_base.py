@@ -8,6 +8,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Dict, Generator, List, Optional, Sequence
 
 try:
@@ -50,8 +51,15 @@ class DBRow(dict):
     """
 
     def __init__(self, data: Dict[str, Any]) -> None:
-        super().__init__(data)
-        self._values = list(data.values())
+        # MySQL/MariaDB liefert DECIMAL-Spalten als Decimal. Für die restliche
+        # Anwendung (und für JSON-Ausgaben) wird zentral auf float normalisiert,
+        # damit SQLite und MySQL identische Typen liefern.
+        normalized = {
+            key: float(value) if isinstance(value, Decimal) else value
+            for key, value in data.items()
+        }
+        super().__init__(normalized)
+        self._values = list(normalized.values())
 
     def __getitem__(self, key: Any) -> Any:
         if isinstance(key, int):

@@ -114,7 +114,16 @@ pytest -q        # Testsuite, ~3 s
 ./run_tests.sh   # Testsuite im laufenden Container (inkl. Redis-Pfade)
 ```
 
-Die Tests laufen gegen eine temporäre SQLite-Datenbank (`tests/_bootstrap.py`) und berühren niemals Produktionsdaten. CI: `.github/workflows/ci.yml` (Ruff, Mypy, Pytest mit Redis-Service).
+Die Tests laufen gegen eine temporäre SQLite-Datenbank (`tests/_bootstrap.py`) und berühren niemals Produktionsdaten. CI: `.github/workflows/ci.yml` (Ruff, Mypy, Pytest mit Redis-Service, JS-Syntaxcheck).
+
+**Datenbank-Migrationen**
+
+```bash
+docker exec toktracker_app python migrate_money_to_decimal.py           # Dry-Run
+docker exec toktracker_app python migrate_money_to_decimal.py --apply   # ausführen
+```
+
+Geldspalten sind in MySQL/MariaDB `DECIMAL(14,4)` (exakte Cent-Beträge), SQLite nutzt `REAL`.
 
 ---
 
