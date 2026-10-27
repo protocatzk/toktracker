@@ -21,6 +21,14 @@ import uvicorn
 from fastapi import FastAPI, Query, Response
 from pydantic import BaseModel
 
+try:
+    import uvloop
+    uvloop.install()
+    UVLOOP_AVAILABLE = True
+except Exception:
+    uvloop = None  # type: ignore
+    UVLOOP_AVAILABLE = False
+
 from config import config
 from database import get_db, init_db
 from tiktok_service import monitor_manager
@@ -111,6 +119,7 @@ async def health_check():
     return {
         "ok": True,
         "service": "toktracker_worker",
+        "loop_engine": "uvloop" if UVLOOP_AVAILABLE else "asyncio",
         "workers_total": diag.get("workers_total", 0),
         "workers_running": diag.get("workers_running", 0),
         "workers_connected": diag.get("workers_connected", 0),
@@ -175,8 +184,9 @@ async def trigger_sync():
 
 
 def main():
-    logger.info("Starte Worker auf Port %d...", WORKER_PORT)
-    uvicorn.run(app, host="0.0.0.0", port=WORKER_PORT, log_level="info")
+    loop_name = "uvloop" if UVLOOP_AVAILABLE else "asyncio"
+    logger.info("Starte Worker auf Port %d (Event-Loop: %s)...", WORKER_PORT, loop_name)
+    uvicorn.run(app, host="0.0.0.0", port=WORKER_PORT, log_level="info", loop="uvloop" if UVLOOP_AVAILABLE else "auto")
 
 
 if __name__ == "__main__":

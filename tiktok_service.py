@@ -14,6 +14,14 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import httpx
 
+try:
+    import uvloop
+    uvloop.install()
+    UVLOOP_AVAILABLE = True
+except Exception:
+    uvloop = None  # type: ignore
+    UVLOOP_AVAILABLE = False
+
 ENABLE_WORKER = os.getenv("ENABLE_WORKER", "true").lower() in ("true", "1", "yes")
 WORKER_URL = os.getenv("WORKER_URL", "http://worker:5001").rstrip("/")
 
@@ -317,6 +325,7 @@ class WorkerDiagnostics:
     reconnect_attempts: int = 0
     gifts_received_session: int = 0
     coins_received_session: int = 0
+    loop_engine: str = "uvloop" if UVLOOP_AVAILABLE else "asyncio"
 
 
 _known_donor_tiers_cache: Dict[str, str] = {}
@@ -425,6 +434,7 @@ class StreamerWorker:
                 "reconnect_attempts": self.diag.reconnect_attempts,
                 "gifts_received_session": self.diag.gifts_received_session,
                 "coins_received_session": self.diag.coins_received_session,
+                "loop_engine": self.diag.loop_engine,
                 "active_battle": dict(self._active_battle) if self._active_battle else None,
                 "pending_streaks_count": len(self._pending_streaks),
                 "logs": list(self._recent_logs)[:15],
@@ -490,7 +500,12 @@ class StreamerWorker:
             self._log("INFO", "Worker manuell gestoppt (Auto-Start deaktiviert).")
 
     def _thread_main(self) -> None:
-        loop = asyncio.new_event_loop()
+        if UVLOOP_AVAILABLE and uvloop is not None:
+            loop = uvloop.new_event_loop()
+            self._log("DEBUG", "Worker-Thread mit uvloop Event-Loop initialisiert.")
+        else:
+            loop = asyncio.new_event_loop()
+            self._log("DEBUG", "Worker-Thread mit asyncio Event-Loop initialisiert.")
         asyncio.set_event_loop(loop)
         with self._lock:
             self._loop = loop
@@ -2141,6 +2156,8 @@ class StreamerMonitorManager:
         connected_count = sum(1 for s in snapshots if s["state"] == "connected")
         return {
             "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "uvloop_available": UVLOOP_AVAILABLE,
+            "loop_engine": "uvloop" if UVLOOP_AVAILABLE else "asyncio",
             "env_config": config.public_summary(),
             "workers_total": len(snapshots),
             "workers_running": active_count,
