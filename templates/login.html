@@ -1,18 +1,11 @@
-<!DOCTYPE html>
-<html lang="de" data-theme="dark">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>toktracker – Admin Login · Telegram Gateway</title>
-    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <script>
-        (function () {
-            try {
-                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
-                document.documentElement.setAttribute("data-theme", savedTheme);
-            } catch (e) {}
-        })();
+{% extends "base.html" %}
 
+{% block title %}toktracker – Admin Login · Telegram Gateway{% endblock %}
+
+{% block viewport %}width=device-width, initial-scale=1.0, viewport-fit=cover{% endblock %}
+
+{% block head %}
+    <script>
         // Globale Callback-Funktion für das Telegram Login Widget sofort im Head definieren
         window.onTelegramAuth = async function (user) {
             setStatus("Verifiziere Administrator-Berechtigung über Telegram...", "info");
@@ -48,58 +41,11 @@
             box.textContent = message;
         }
     </script>
-    <link rel="stylesheet" href="/static/style.css" />
-    <style>
-        .login-centered-container {
-            max-width: 520px;
-            margin: 48px auto 80px auto;
-        }
-        @media (max-width: 640px) {
-            .login-centered-container {
-                margin: 20px auto 40px auto;
-                padding: 0 4px;
-            }
-        }
-        .status-banner {
-            margin-bottom: 14px;
-            padding: 10px 12px;
-            border: 1px solid var(--border-color);
-            background: var(--bg-subtle);
-            font-family: "JetBrains Mono", Consolas, Monaco, monospace;
-            font-size: 12px;
-            line-height: 1.45;
-            display: none;
-        }
-        .status-banner.error {
-            border-color: var(--tag-danger-border);
-            color: var(--tag-danger-text);
-            background: var(--tag-danger-bg);
-        }
-        .status-banner.success {
-            border-color: #10b981;
-            color: #34d399;
-            background: rgba(16, 185, 129, 0.12);
-        }
-        .status-banner.info {
-            border-color: #38bdf8;
-            color: #38bdf8;
-            background: rgba(56, 189, 248, 0.1);
-        }
-        .login-widget-area {
-            background: var(--bg-subtle);
-            border: 1px solid var(--border-color);
-            padding: 24px 16px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100px;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
+    <link rel="stylesheet" href="/static/login.css?v=1.0.0" />
+    
+{% endblock %}
 
+{% block content %}
 <!-- Kopfbereich: Brand, Gateway-Status & Navigation -->
 <header class="app-header">
     <div class="header-inner">
@@ -206,18 +152,6 @@
 </footer>
 
 <script>
-    function applyTheme(theme) {
-        var normalized = theme === "light" ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", normalized);
-        try {
-            localStorage.setItem("toktracker_theme", normalized);
-        } catch (e) {}
-        var btn = document.getElementById("btnThemeToggle");
-        if (btn) {
-            btn.textContent = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
-        }
-    }
-
     document.addEventListener("DOMContentLoaded", function () {
         applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
 
@@ -261,5 +195,4 @@
         }
     });
 </script>
-</body>
-</html>
+{% endblock %}

@@ -1,24 +1,15 @@
-<!DOCTYPE html>
-<html lang="de" data-theme="dark">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>toktracker – Live TikTok Earnings &amp; Battle Analytics</title>
-    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <script>
-        (function () {
-            try {
-                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
-                document.documentElement.setAttribute("data-theme", savedTheme);
-            } catch (e) {}
-        })();
-    </script>
-    <!-- Bundled Chart.js for responsive analytics -->
-    <script src="/static/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css?v=2.6.0" />
-</head>
-<body>
+{% extends "base.html" %}
 
+{% block title %}toktracker – Live TikTok Earnings &amp; Battle Analytics{% endblock %}
+
+{% block viewport %}width=device-width, initial-scale=1.0, viewport-fit=cover{% endblock %}
+
+{% block head %}
+    <script src="/static/chart.umd.min.js"></script>
+    
+{% endblock %}
+
+{% block content %}
 <!-- Kopfbereich: Brand, Live-Pill & Quick Links -->
 <header class="app-header">
     <div class="header-inner">
@@ -571,5 +562,4 @@
 </footer>
 
 <script src="/static/public.js?v=2.6.0"></script>
-</body>
-</html>
+{% endblock %}

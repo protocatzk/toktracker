@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="{% block viewport %}width=device-width, initial-scale=1.0{% endblock %}" />
+    <title>{% block title %}toktracker{% endblock %}</title>
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <script>
+        (function () {
+            try {
+                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
+                document.documentElement.setAttribute("data-theme", savedTheme);
+            } catch (e) {}
+        })();
+    </script>
+    {% block styles %}<link rel="stylesheet" href="/static/style.css?v=2.6.0" />{% endblock %}
+    <script src="/static/common.js?v=1.0.0"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+{% block content %}{% endblock %}
+</body>
+</html>

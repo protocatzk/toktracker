@@ -1,0 +1,49 @@
+/* TokTracker - Seiten-Styles (aus dem Template ausgelagert) */
+/* Wird nur auf der jeweiligen Seite geladen; Reihenfolge nach style.css bleibt erhalten. */
+
+.login-centered-container {
+            max-width: 520px;
+            margin: 48px auto 80px auto;
+        }
+        @media (max-width: 640px) {
+            .login-centered-container {
+                margin: 20px auto 40px auto;
+                padding: 0 4px;
+            }
+        }
+        .status-banner {
+            margin-bottom: 14px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-subtle);
+            font-family: "JetBrains Mono", Consolas, Monaco, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            display: none;
+        }
+        .status-banner.error {
+            border-color: var(--tag-danger-border);
+            color: var(--tag-danger-text);
+            background: var(--tag-danger-bg);
+        }
+        .status-banner.success {
+            border-color: #10b981;
+            color: #34d399;
+            background: rgba(16, 185, 129, 0.12);
+        }
+        .status-banner.info {
+            border-color: #38bdf8;
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.1);
+        }
+        .login-widget-area {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            padding: 24px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100px;
+            text-align: center;
+        }

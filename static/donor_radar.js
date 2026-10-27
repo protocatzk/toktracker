@@ -101,17 +101,6 @@
         const sym = currency === "USD" ? "$" : "€";
         return Number(val).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + sym;
     }
-
-    function escapeHtml(str) {
-        if (!str) return "";
-        return String(str)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
     function formatTimestamp(isoStr) {
         if (!isoStr) return "-";
         try {

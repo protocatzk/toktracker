@@ -45,6 +45,17 @@ jobs:
       - name: Ruff (Lint)
         run: ruff check .
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: JavaScript-Syntax (node --check)
+        run: |
+          for f in static/*.js; do
+            case "$f" in *chart.umd.min.js) continue;; esac
+            node --check "$f"
+          done
+
       - name: Mypy (Typen, kuratierter Scope)
         run: mypy
 

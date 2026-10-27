@@ -1,20 +1,19 @@
-<!DOCTYPE html>
-<html lang="de" data-theme="dark">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>toktracker Mini-App</title>
-    
-    <!-- Telegram WebApp SDK -->
+{% extends "base.html" %}
+
+{% block title %}toktracker Mini-App{% endblock %}
+
+{% block viewport %}width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover{% endblock %}
+
+{% block styles %}<link rel="stylesheet" href="/static/miniapp.css?v=2.5.1" />{% endblock %}
+
+{% block head %}
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Bundled Chart.js for rich mobile analytics -->
     <script src="/static/chart.umd.min.js"></script>
     
-    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <link rel="stylesheet" href="/static/miniapp.css?v=2.5.1" />
-</head>
-<body>
+    
+{% endblock %}
 
+{% block content %}
 <div class="app-container">
 
     <!-- Mini-App Header -->
@@ -892,5 +891,4 @@
 <div class="ma-toast-container" id="maToastContainer"></div>
 
 <script src="/static/miniapp.js?v=2.5.1"></script>
-</body>
-</html>
+{% endblock %}

@@ -27,29 +27,6 @@ function updateAnalyticsTimestamp() {
         el.textContent = `Stand: ${timeStr}`;
     }
 }
-
-function fmtEUR(v) {
-    return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(v || 0);
-}
-
-function fmtUSD(v) {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v || 0);
-}
-
-function fmtNum(v) {
-    return new Intl.NumberFormat("de-DE").format(v || 0);
-}
-
-function escapeHtml(str) {
-    if (str === null || str === undefined) return "";
-    return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
 function getChartThemeColors() {
     const isDark = (document.documentElement.getAttribute("data-theme") || "dark") === "dark";
     return {
@@ -73,31 +50,6 @@ function getChartThemeColors() {
         ]
     };
 }
-
-function applyTheme(theme) {
-    const normalized = theme === "light" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", normalized);
-    try {
-        localStorage.setItem("toktracker_theme", normalized);
-    } catch (e) {}
-    const btn = document.getElementById("btnThemeToggle");
-    if (btn) {
-        btn.textContent = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
-    }
-    if (cachedAnalyticsData) {
-        if (chartTimelineInstance) { chartTimelineInstance.destroy(); chartTimelineInstance = null; }
-        if (chartCompareInstance) { chartCompareInstance.destroy(); chartCompareInstance = null; }
-        if (chartTimeOfDayInstance) { chartTimeOfDayInstance.destroy(); chartTimeOfDayInstance = null; }
-        if (chartGiftDistInstance) { chartGiftDistInstance.destroy(); chartGiftDistInstance = null; }
-        if (chartTopGiftersInstance) { chartTopGiftersInstance.destroy(); chartTopGiftersInstance = null; }
-        renderTimelineChart(cachedAnalyticsData);
-        renderCompareChart(cachedAnalyticsData);
-        renderTimeOfDayChart(cachedAnalyticsData);
-        renderGiftDistChart(cachedAnalyticsData);
-        renderTopGiftersChart(cachedAnalyticsData);
-    }
-}
-
 function switchTab(tabId) {
     document.querySelectorAll(".tab-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);

@@ -1,23 +1,13 @@
-<!DOCTYPE html>
-<html lang="de" data-theme="dark">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>toktracker – Admin Console · Live Earnings &amp; Analytics</title>
-    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
-    <script>
-        (function () {
-            try {
-                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
-                document.documentElement.setAttribute("data-theme", savedTheme);
-            } catch (e) {}
-        })();
-    </script>
-    <link rel="stylesheet" href="/static/style.css?v=2.5.2" />
-    <script src="/static/chart.umd.min.js"></script>
-</head>
-<body>
+{% extends "base.html" %}
 
+{% block title %}toktracker – Admin Console · Live Earnings &amp; Analytics{% endblock %}
+
+{% block head %}
+    <script src="/static/chart.umd.min.js"></script>
+    
+{% endblock %}
+
+{% block content %}
 <!-- Kopfbereich: toktracker Brand & Systemstatus-Pills -->
 <header class="app-header">
     <div class="header-inner">
@@ -1149,5 +1139,4 @@
 </footer>
 
 <script src="/static/dashboard.js?v=2.9.0"></script>
-</body>
-</html>
+{% endblock %}

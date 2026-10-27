@@ -246,16 +246,6 @@
             maximumFractionDigits: 2,
         }).format(val || 0);
     }
-
-    function escapeHtml(str) {
-        if (!str) return "";
-        return String(str)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;");
-    }
-
     function getRelativeTime(timestamp) {
         if (!timestamp) return "";
         try {
