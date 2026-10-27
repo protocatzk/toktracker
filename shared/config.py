@@ -17,7 +17,12 @@ ENV_PATH = os.path.join(BASE_DIR, ".env")
 
 # Lädt lokal die .env-Datei (sofern vorhanden).
 # In Produktion (Docker / Systemd / Cloud) gesetzte echte Umgebungsvariablen haben Vorrang (override=False).
-load_dotenv(dotenv_path=ENV_PATH, override=False)
+# Nicht lesbare Dateien dürfen den Start nicht verhindern: In Containern kommen die
+# Werte ohnehin aus der Prozess-Umgebung (compose env_file), die Datei ist dort optional.
+try:
+    load_dotenv(dotenv_path=ENV_PATH, override=False)
+except OSError as _env_err:  # z.B. PermissionError bei falschen File-Rechten
+    logger.warning(".env konnte nicht gelesen werden (%s): %s", ENV_PATH, _env_err)
 
 
 def _mask_secret(value: str) -> str:
