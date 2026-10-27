@@ -40,6 +40,54 @@ class TestSessionSecretHardening(unittest.TestCase):
         self.assertEqual(cfg.session_cookie_secure, "auto")
 
 
+class TestCookieSecureFlag(unittest.TestCase):
+    """Secure-Flag des Session-Cookies: Auto-Erkennung hinter Nginx (X-Forwarded-Proto)."""
+
+    @staticmethod
+    def _request(scheme="http", forwarded_proto=None):
+        from starlette.requests import Request
+
+        headers = []
+        if forwarded_proto is not None:
+            headers.append((b"x-forwarded-proto", forwarded_proto.encode()))
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "scheme": scheme,
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "headers": headers,
+            "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 80),
+        })
+
+    def test_auto_enables_secure_behind_https_proxy(self):
+        from app import _cookie_secure_flag
+
+        self.assertTrue(_cookie_secure_flag(self._request(scheme="http", forwarded_proto="https")))
+        self.assertTrue(_cookie_secure_flag(self._request(scheme="https")))
+
+    def test_auto_keeps_local_http_working(self):
+        from app import _cookie_secure_flag
+
+        self.assertFalse(_cookie_secure_flag(self._request(scheme="http")))
+        self.assertFalse(_cookie_secure_flag(None))
+
+    def test_explicit_setting_wins(self):
+        from app import _cookie_secure_flag
+        from shared.config import config
+
+        original = config.session_cookie_secure
+        try:
+            config.session_cookie_secure = "1"
+            self.assertTrue(_cookie_secure_flag(self._request(scheme="http")))
+            config.session_cookie_secure = "0"
+            self.assertFalse(_cookie_secure_flag(self._request(scheme="https")))
+        finally:
+            config.session_cookie_secure = original
+
+
 class TestPrivacyMasking(unittest.TestCase):
     def test_mask_name_keeps_shape_but_hides_identity(self):
         self.assertEqual(mask_name("maxmuster"), "m*******r")

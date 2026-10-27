@@ -102,6 +102,14 @@ from tiktok_service import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Einheitliches Logging: ohne Handler verschluckt Python INFO/WARNING aus eigenen
+# Modulen (uvicorn konfiguriert nur seine eigenen Logger).
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
+    )
+
 logger = logging.getLogger("toktracker.api")
 
 TIKTOK_GIFT_CATALOG = [

@@ -8,6 +8,7 @@ try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
 except ImportError:  # pragma: no cover
     import _bootstrap  # noqa: F401
 
+import os
 import unittest
 import uuid
 
@@ -39,14 +40,13 @@ class TestMemoryBusLeases(unittest.IsolatedAsyncioTestCase):
 
 class TestRedisBusLeases(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from tests._bootstrap import TEST_REDIS_URL
-
-        if not TEST_REDIS_URL:
+        redis_url = os.environ.get("REDIS_URL", "").strip()
+        if not redis_url:
             self.skipTest("Kein Test-Redis konfiguriert (TOKTRACKER_TEST_REDIS_URL)")
 
         from shared.bus.redis_bus import RedisBus
 
-        self.bus = RedisBus(TEST_REDIS_URL)
+        self.bus = RedisBus(redis_url)
         self.key = f"tt:lease:test:{uuid.uuid4().hex}"
 
     async def asyncTearDown(self):
