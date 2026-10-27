@@ -301,7 +301,19 @@ const bannerText = computed(() => bannerData.value.text || "");
 const bannerStyle = computed(() => bannerData.value.style || "highlight");
 const bannerBtnText = computed(() => bannerData.value.btn_text || "");
 const bannerBtnUrl = computed(() => bannerData.value.btn_url || "");
-const bannerTagText = computed(() => bannerData.value.tag_text || "HINWEIS");
+const bannerTagText = computed(() => {
+  if (bannerData.value.tag_text) return bannerData.value.tag_text;
+  switch (bannerStyle.value) {
+    case "warning":
+      return "⚠️ WICHTIG";
+    case "success":
+      return "🟢 STATUS";
+    case "info":
+      return "ℹ️ INFO";
+    default:
+      return "✨ WHITELIST PROMO";
+  }
+});
 
 const filteredStreamers = computed(() => {
   if (!searchQuery.value.trim()) return streamers.value;
@@ -319,7 +331,7 @@ async function loadData() {
     const res = await api.getPublicOverview(period.value);
     totals.value = res.totals || totals.value;
     streamers.value = res.streamers || [];
-    bannerData.value = res.public_banner || {};
+    bannerData.value = res.banner || res.public_banner || {};
   } catch (err) {
     console.error("Fehler beim Laden der Public-Daten:", err);
   } finally {
@@ -505,6 +517,113 @@ onMounted(() => {
   width: 100%;
   margin: 0 auto;
   padding: 24px 24px 48px;
+}
+
+/* Announcement Banner */
+.announcement-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 22px;
+  border-radius: 14px;
+  margin-bottom: 24px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  transition: all 0.25s ease;
+}
+
+.announcement-banner.highlight {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.16), rgba(217, 119, 6, 0.08));
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 24px rgba(245, 158, 11, 0.12);
+}
+
+.announcement-banner.warning {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.16), rgba(220, 38, 38, 0.08));
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  box-shadow: 0 4px 24px rgba(239, 68, 68, 0.12);
+}
+
+.announcement-banner.info {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.16), rgba(2, 132, 199, 0.08));
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  box-shadow: 0 4px 24px rgba(14, 165, 233, 0.12);
+}
+
+.announcement-banner.success {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.16), rgba(5, 150, 105, 0.08));
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 4px 24px rgba(16, 185, 129, 0.12);
+}
+
+.banner-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.banner-content {
+  flex: 1;
+}
+
+.banner-content strong {
+  display: block;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 14.5px;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-bottom: 3px;
+  letter-spacing: -0.01em;
+}
+
+.banner-content p {
+  margin: 0;
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.banner-action {
+  flex-shrink: 0;
+}
+
+.btn-primary.sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #2563eb, #38bdf8);
+  border: none;
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.btn-primary.sm:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.5);
+  text-decoration: none;
+}
+
+@media (max-width: 768px) {
+  .announcement-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
 }
 
 /* Toolbar */

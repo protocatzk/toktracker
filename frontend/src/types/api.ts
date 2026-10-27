@@ -74,6 +74,15 @@ export interface OverviewResponse {
   telegram_users: TelegramUser[];
   settings: Settings;
   system: SystemStatus;
+  banner?: {
+    enabled: boolean;
+    title: string;
+    text: string;
+    style: string;
+    btn_text: string;
+    btn_url: string;
+    tag_text?: string;
+  };
   public_banner?: {
     enabled: boolean;
     title: string;

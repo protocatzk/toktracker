@@ -960,6 +960,14 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
             "btn_text": cfg.get("public_banner_btn_text") or "Whitelist anfragen ↗",
             "btn_url": banner_btn_url,
         },
+        "public_banner": {
+            "enabled": bool(cfg.get("public_banner_enabled")),
+            "title": cfg.get("public_banner_title") or "",
+            "text": cfg.get("public_banner_text") or "",
+            "style": cfg.get("public_banner_style") or "highlight",
+            "btn_text": cfg.get("public_banner_btn_text") or "Whitelist anfragen ↗",
+            "btn_url": banner_btn_url,
+        },
     }
 
 
