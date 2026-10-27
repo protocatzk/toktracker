@@ -41,6 +41,20 @@ class TestApiEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertIn("totals", data)
         self.assertIn("streamers", data)
 
+    async def test_health_endpoint_is_public_and_lean(self):
+        res = await self.client.get("/api/health")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["database"], "ok")
+        self.assertIn("bus", body)
+
+    async def test_api_docs_are_disabled_by_default(self):
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            with self.subTest(path=path):
+                res = await self.client.get(path)
+                self.assertEqual(res.status_code, 404)
+
     async def test_admin_auth_protection(self):
         # Ohne Token -> 401
         res_unauth = await self.client.get("/api/overview")

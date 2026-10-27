@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
@@ -241,6 +242,48 @@ def _cookie_secure_flag(request: Optional[Request]) -> bool:
     return _request_is_https(request)
 
 
+# Starke Referenzen auf Hintergrund-Tasks: verhindert, dass der GC laufende
+# Analytics-Writes (record_page_view/record_api_call) vorzeitig einsammelt.
+_BACKGROUND_TASKS: set = set()
+_RECENT_ANALYTICS: Dict[str, float] = {}
+_RECENT_ANALYTICS_LOCK = threading.Lock()
+_ANALYTICS_DEDUPE_SECONDS = 60.0
+
+
+def _spawn_bg(coro: Any) -> None:
+    """Startet einen Hintergrund-Task mit Fehler-Logging und ohne GC-Risiko."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+
+    def _done(finished: asyncio.Task) -> None:
+        _BACKGROUND_TASKS.discard(finished)
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is not None:
+            logger.warning("Hintergrund-Task fehlgeschlagen: %s", exc)
+
+    task.add_done_callback(_done)
+
+
+def _should_track_analytics(key: str) -> bool:
+    """
+    Dedupliziert identische Analytics-Events innerhalb eines kurzen Fensters.
+    Verhindert, dass Polling/Reloads die DB mit identischen Zeilen fluten.
+    """
+    now = time.monotonic()
+    with _RECENT_ANALYTICS_LOCK:
+        last = _RECENT_ANALYTICS.get(key)
+        if last is not None and (now - last) < _ANALYTICS_DEDUPE_SECONDS:
+            return False
+        _RECENT_ANALYTICS[key] = now
+        if len(_RECENT_ANALYTICS) > 4096:
+            cutoff = now - _ANALYTICS_DEDUPE_SECONDS
+            for k in [k for k, ts in _RECENT_ANALYTICS.items() if ts < cutoff]:
+                _RECENT_ANALYTICS.pop(k, None)
+        return True
+
+
 def _rate_limited(bucket: str, limit: int, window_seconds: int):
     """
     FastAPI-Dependency für Brute-Force-Schutz auf Auth-Endpunkten.
@@ -292,15 +335,19 @@ async def track_page_views_middleware(request: Request, call_next):
             dev_type = _detect_device_type(ua)
             ref = request.headers.get("referer", "")
 
-            record_page_view(
-                path=path,
-                visitor_hash=visitor_hash,
-                user_agent=ua,
-                device_type=dev_type,
-                referrer=ref,
-                status_code=response.status_code,
-                response_time_ms=duration_ms,
-            )
+            if _should_track_analytics(f"pv:{visitor_hash}:{path}:{response.status_code}"):
+                _spawn_bg(
+                    asyncio.to_thread(
+                        record_page_view,
+                        path=path,
+                        visitor_hash=visitor_hash,
+                        user_agent=ua,
+                        device_type=dev_type,
+                        referrer=ref,
+                        status_code=response.status_code,
+                        response_time_ms=duration_ms,
+                    )
+                )
         except Exception:
             pass
     elif path.startswith(("/api", "/api/v1")):
@@ -379,7 +426,7 @@ async def track_page_views_middleware(request: Request, call_next):
                     q_str = re.sub(r'(api_key=[^&]{3})[^&]+', r'\1***', q_str)
                     q_str = re.sub(r'(password=[^&]{2})[^&]+', r'\1***', q_str)
 
-                asyncio.create_task(
+                _spawn_bg(
                     asyncio.to_thread(
                         record_api_call,
                         endpoint=path,
@@ -1092,7 +1139,7 @@ async def api_public_streamer_detail(identifier: str, period: str = Query("24h")
     if not s_row:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
-    detail = get_streamer_detail(s_row["id"], period=period)
+    detail = await asyncio.to_thread(get_streamer_detail, s_row["id"], period=period)
     if not detail:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
@@ -1462,7 +1509,7 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
     monitor_manager.autostart_from_db()
 
     # 1. Dashboard-Übersicht & Einnahmen
-    overview = get_dashboard_overview(period=period)
+    overview = await asyncio.to_thread(get_dashboard_overview, period=period)
     totals = overview.get("totals", {})
     totals["total_eur_net"] = totals.get("eur_net", 0.0)
     totals["total_usd_net"] = totals.get("usd_net", 0.0)
@@ -1504,11 +1551,11 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
     live_battles = consolidate_live_battles(diag.get("workers", []), streamer_map)
 
     # 4. Kürzliche Battles
-    battles_resp = get_battles_list(period=period, limit=25)
+    battles_resp = await asyncio.to_thread(get_battles_list, period=period, limit=25)
     recent_battles = battles_resp.get("battles", [])
 
     # 5. Battle Stats
-    battle_stats = get_battle_stats(period=period)
+    battle_stats = await asyncio.to_thread(get_battle_stats, period=period)
 
     # 6. Telegram Bot Info
     tg_diag = telegram_bot_service.get_diagnostics()
@@ -1967,7 +2014,7 @@ async def api_site_analytics(
 ):
     init_db()
     data = get_site_analytics_overview(period=period)
-    overview = get_dashboard_overview(period=period)
+    overview = await asyncio.to_thread(get_dashboard_overview, period=period)
     workers_list = []
     for s in overview.get("streamers", []):
         uname = s["username"]
@@ -2383,7 +2430,8 @@ async def api_get_battles(
 ):
     init_db()
     monitor_manager.autostart_from_db()
-    data = get_battles_list(
+    data = await asyncio.to_thread(
+        get_battles_list,
         streamer_id=streamer_id,
         period=period,
         result_filter=result,
@@ -2394,7 +2442,7 @@ async def api_get_battles(
     )
     # Laufende Battles aus aktiven Workern erfassen (konsolidiert)
     diag = monitor_manager.get_all_diagnostics()
-    overview = get_dashboard_overview(period=period)
+    overview = await asyncio.to_thread(get_dashboard_overview, period=period)
     streamers_summary = {s["id"]: s for s in overview.get("streamers", [])}
     for s in overview.get("streamers", []):
         streamers_summary[s["username"].lower()] = s
@@ -2414,7 +2462,7 @@ async def api_get_battle_stats(
 ):
     init_db()
     monitor_manager.autostart_from_db()
-    return get_battle_stats(streamer_id=streamer_id, period=period)
+    return await asyncio.to_thread(get_battle_stats, streamer_id=streamer_id, period=period)
 
 
 @app.get("/api/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
@@ -2436,6 +2484,44 @@ async def api_system_status():
     return diag
 
 
+def _db_ping_sync() -> None:
+    with get_db() as conn:
+        conn.execute("SELECT 1").fetchone()
+
+
+@app.get(
+    "/api/health",
+    tags=["System & Workers"],
+    summary="Liveness-/Readiness-Check für Docker-Healthchecks und Monitoring (ohne Auth)",
+)
+async def api_health():
+    """
+    Schlanker Healthcheck: prüft DB-Verbindung und (falls konfiguriert) den Bus.
+    Liefert 200 bei OK und 503 bei Degradierung – ohne interne Details preiszugeben.
+    """
+    health = {"status": "ok", "database": "ok", "bus": "ok"}
+
+    try:
+        await asyncio.to_thread(_db_ping_sync)
+    except Exception as exc:  # noqa: BLE001 - Healthcheck darf nie werfen
+        logger.warning("Healthcheck: Datenbank nicht erreichbar (%s)", exc)
+        health["database"] = "error"
+        health["status"] = "degraded"
+
+    if config.has_redis:
+        try:
+            await asyncio.wait_for(
+                get_bus().set_kv("tt:hb:api-health", str(int(time.time())), ttl=30),
+                timeout=2.0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Healthcheck: Bus nicht erreichbar (%s)", exc)
+            health["bus"] = "error"
+            health["status"] = "degraded"
+
+    return JSONResponse(status_code=200 if health["status"] == "ok" else 503, content=health)
+
+
 @app.get("/api/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 @app.get("/api/v1/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_system_health(force_refresh: bool = False):
@@ -2450,7 +2536,7 @@ async def api_streamer_detail(identifier: str, period: str = Query("all")):
     if not s_row:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
-    detail = get_streamer_detail(s_row["id"], period=period)
+    detail = await asyncio.to_thread(get_streamer_detail, s_row["id"], period=period)
     if not detail:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
@@ -2469,10 +2555,11 @@ async def api_add_streamer(payload: StreamerCreateRequest):
     if not username:
         raise HTTPException(status_code=400, detail="Bitte einen gültigen TikTok @username eingeben.")
 
-    profile = fetch_tiktok_user_info(username)
+    profile = await asyncio.to_thread(fetch_tiktok_user_info, username)
     display_name = payload.display_name or profile.get("display_name") or username
 
-    streamer = upsert_streamer(
+    streamer = await asyncio.to_thread(
+        upsert_streamer,
         username=username,
         display_name=display_name,
         avatar_url=profile.get("avatar_url"),
@@ -2504,8 +2591,9 @@ async def api_refresh_streamer(identifier: str):
     if not row:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
-    profile = fetch_tiktok_user_info(row["username"])
-    updated = upsert_streamer(
+    profile = await asyncio.to_thread(fetch_tiktok_user_info, row["username"])
+    updated = await asyncio.to_thread(
+        upsert_streamer,
         username=row["username"],
         display_name=profile.get("display_name") or row["display_name"],
         avatar_url=profile.get("avatar_url") or row["avatar_url"],
@@ -2554,7 +2642,7 @@ async def api_record_gift(payload: GiftCreateRequest):
     init_db()
     streamer_id = payload.streamer_id
     if not streamer_id and payload.username:
-        s = upsert_streamer(username=payload.username)
+        s = await asyncio.to_thread(upsert_streamer, username=payload.username)
         streamer_id = s["id"]
 
     if not streamer_id:
@@ -2563,7 +2651,8 @@ async def api_record_gift(payload: GiftCreateRequest):
     sender_username = payload.sender_username.strip().lstrip("@") or "live_viewer"
     sender_nickname = (payload.sender_nickname or sender_username).strip()
 
-    event, created = record_gift_event(
+    event, created = await asyncio.to_thread(
+        record_gift_event,
         streamer_id=int(streamer_id),
         sender_username=sender_username,
         sender_nickname=sender_nickname,
@@ -2575,9 +2664,8 @@ async def api_record_gift(payload: GiftCreateRequest):
     return {"ok": True, "created": created, "event": event}
 
 
-@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
-    init_db()
+def _fetch_gift_export_rows(streamer_id: Optional[int]) -> List[Dict[str, Any]]:
+    """Synchroner DB-Zugriff für den CSV-Export (läuft via to_thread)."""
     with get_db() as conn:
         if streamer_id:
             rows = conn.execute(
@@ -2599,6 +2687,39 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
                 ORDER BY g.created_at DESC
                 """
             ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _fetch_battle_export_rows(streamer_id: Optional[int]) -> List[Dict[str, Any]]:
+    """Synchroner DB-Zugriff für den Battle-CSV-Export (läuft via to_thread)."""
+    with get_db() as conn:
+        if streamer_id:
+            rows = conn.execute(
+                """
+                SELECT b.*, s.username AS streamer_username
+                FROM tiktok_battles b
+                JOIN streamers s ON s.id = b.streamer_id
+                WHERE b.streamer_id = ?
+                ORDER BY b.started_at DESC
+                """,
+                (streamer_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT b.*, s.username AS streamer_username
+                FROM tiktok_battles b
+                JOIN streamers s ON s.id = b.streamer_id
+                ORDER BY b.started_at DESC
+                """
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
+    init_db()
+    rows = await asyncio.to_thread(_fetch_gift_export_rows, streamer_id)
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
@@ -2656,27 +2777,7 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
 @app.get("/api/export/battles.csv", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_export_battles_csv(streamer_id: Optional[int] = Query(None)):
     init_db()
-    with get_db() as conn:
-        if streamer_id:
-            rows = conn.execute(
-                """
-                SELECT b.*, s.username AS streamer_username
-                FROM tiktok_battles b
-                JOIN streamers s ON s.id = b.streamer_id
-                WHERE b.streamer_id = ?
-                ORDER BY b.started_at DESC
-                """,
-                (streamer_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT b.*, s.username AS streamer_username
-                FROM tiktok_battles b
-                JOIN streamers s ON s.id = b.streamer_id
-                ORDER BY b.started_at DESC
-                """
-            ).fetchall()
+    b_rows = await asyncio.to_thread(_fetch_battle_export_rows, streamer_id)
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
@@ -2711,7 +2812,7 @@ async def api_export_battles_csv(streamer_id: Optional[int] = Query(None)):
             "status",
         ]
     )
-    for r in rows:
+    for r in b_rows:
         writer.writerow(
             [
                 r["id"],

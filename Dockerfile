@@ -48,9 +48,9 @@ USER appuser
 EXPOSE 5000
 
 # 9. Docker Healthcheck zur automatischen Überwachung
-# Prüft alle 30s, ob FastAPI auf Port 5000 HTTP 200 liefert
+# Prüft alle 30s den schlanken /api/health-Endpunkt (DB- und Bus-Ping, ohne Auth)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://127.0.0.1:5000/ || exit 1
+    CMD curl -f http://127.0.0.1:5000/api/health || exit 1
 
 # 10. Startbefehl: Uvicorn für TokTracker API & Dashboard mit uvloop
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "2", "--loop", "uvloop"]

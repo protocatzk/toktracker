@@ -19,8 +19,8 @@ from shared.contracts import (
 
 def check_api() -> bool:
     try:
-        resp = httpx.get(f"http://127.0.0.1:{config.app_port}/", timeout=3.0)
-        return resp.status_code in (200, 302, 307)
+        resp = httpx.get(f"http://127.0.0.1:{config.app_port}/api/health", timeout=3.0)
+        return resp.status_code == 200
     except Exception:
         return False
 
