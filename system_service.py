@@ -7,6 +7,7 @@ Erfasst Festplattenspeicher, RAM, CPU sowie Ressourcen aller Docker-Container
 import logging
 import os
 import shutil
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +24,14 @@ logger = logging.getLogger("toktracker.system")
 # 2. Fallback: direkter Unix-Socket (lokale Entwicklung / Altinstallationen).
 DOCKER_PROXY_URL = os.environ.get("DOCKER_PROXY_URL", "http://docker-socket-proxy:2375").strip().rstrip("/")
 DOCKER_SOCKET_PATH = os.environ.get("DOCKER_SOCKET_PATH", "/var/run/docker.sock").strip()
+
+# /system/df ist teuer (Docker berechnet Volume-/Image-Größen) und braucht
+# deutlich länger als die Container-Abfragen -> eigenes Timeout + eigener Cache.
+_DF_TIMEOUT_SECONDS = 15.0
+_DF_CACHE_TTL = 60.0
+_df_cache: Optional[Dict[str, Any]] = None
+_df_cache_time: float = 0.0
+_df_lock = threading.Lock()
 
 # Cache für System-Metriken (15 Sekunden TTL gegen Spamming)
 _cached_metrics: Optional[Dict[str, Any]] = None
@@ -235,6 +244,77 @@ def _get_database_storage() -> Dict[str, Any]:
     }
 
 
+def _fetch_df_cached(client: httpx.Client) -> Optional[Dict[str, Any]]:
+    """
+    Liefert die ausgewertete /system/df-Antwort (60 s Cache).
+
+    Bei Timeout/Fehler wird der letzte bekannte Stand zurückgegeben, damit die
+    Seite auch dann Volumes zeigt, wenn Docker gerade langsam ist.
+    """
+    global _df_cache, _df_cache_time
+
+    now = time.monotonic()
+    with _df_lock:
+        if _df_cache is not None and (now - _df_cache_time) < _DF_CACHE_TTL:
+            return _df_cache
+
+    try:
+        response = client.get("/v1.41/system/df", timeout=_DF_TIMEOUT_SECONDS)
+    except Exception as exc:
+        logger.warning("Docker /system/df nicht erreichbar: %s", exc)
+        return _df_cache
+
+    if response.status_code != 200:
+        logger.warning("Docker /system/df antwortete mit HTTP %s", response.status_code)
+        return _df_cache
+
+    parsed = _parse_df_response(response.json())
+    with _df_lock:
+        _df_cache = parsed
+        _df_cache_time = time.monotonic()
+    return parsed
+
+
+def _parse_df_response(df_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Wertet die Antwort von `/system/df` aus.
+
+    Docker liefert für ungenutzte Volumes `"UsageData": null` – das muss
+    abgefangen werden, sonst schlägt die komplette Volume-Auswertung still fehl.
+    """
+    volumes_info: List[Dict[str, Any]] = []
+    total_volumes_mb = 0.0
+
+    for volume in df_data.get("Volumes") or []:
+        name = str(volume.get("Name") or "")
+        usage = volume.get("UsageData") or {}
+        size_bytes = usage.get("Size") or 0
+        size_mb = round(size_bytes / (1024 * 1024), 2)
+        total_volumes_mb += size_mb
+
+        clean_name = name
+        for prefix in ("toktrackerapp_", "toktracker_"):
+            if clean_name.startswith(prefix):
+                clean_name = clean_name[len(prefix):]
+
+        volumes_info.append({
+            "name": clean_name,
+            "raw_name": name,
+            "size_mb": size_mb,
+            "ref_count": usage.get("RefCount") or 0,
+        })
+
+    total_images_mb = 0.0
+    for image in df_data.get("Images") or []:
+        total_images_mb += round((image.get("Size") or 0) / (1024 * 1024), 2)
+
+    return {
+        "volumes": volumes_info,
+        "total_volumes_mb": round(total_volumes_mb, 1),
+        "total_images_mb": round(total_images_mb, 1),
+    }
+
+
 def _build_docker_client() -> Tuple[Optional[httpx.Client], str]:
     """
     Liefert einen HTTP-Client für die Docker-API und eine Beschreibung des Endpunkts.
@@ -362,35 +442,11 @@ def _fetch_docker_metrics() -> Dict[str, Any]:
             total_volumes_mb = 0.0
             total_images_mb = 0.0
 
-            try:
-                df_resp = client.get("/v1.41/system/df")
-                if df_resp.status_code == 200:
-                    df_data = df_resp.json()
-                    v_list = df_data.get("Volumes") or []
-                    for v in v_list:
-                        v_name = v.get("Name", "")
-                        v_size = v.get("UsageData", {}).get("Size", 0)
-                        v_mb = round(v_size / (1024 * 1024), 2)
-                        total_volumes_mb += v_mb
-
-                        clean_vname = v_name
-                        for pfx in ("toktrackerapp_", "toktracker_"):
-                            if clean_vname.startswith(pfx):
-                                clean_vname = clean_vname[len(pfx):]
-
-                        volumes_info.append({
-                            "name": clean_vname,
-                            "raw_name": v_name,
-                            "size_mb": v_mb,
-                            "ref_count": v.get("UsageData", {}).get("RefCount", 0),
-                        })
-
-                    # Images
-                    img_list = df_data.get("Images") or []
-                    for img in img_list:
-                        total_images_mb += round(img.get("Size", 0) / (1024 * 1024), 2)
-            except Exception as df_err:
-                logger.debug("DF Fehler: %s", df_err)
+            parsed_df = _fetch_df_cached(client)
+            if parsed_df:
+                volumes_info = parsed_df["volumes"]
+                total_volumes_mb = parsed_df["total_volumes_mb"]
+                total_images_mb = parsed_df["total_images_mb"]
 
             return {
                 "available": True,

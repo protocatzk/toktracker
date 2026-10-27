@@ -73,5 +73,35 @@ class TestDockerClientSelection(unittest.TestCase):
         self.assertEqual(metrics["containers"], [])
 
 
+class TestDfParsing(unittest.TestCase):
+    """Regression: Docker liefert für ungenutzte Volumes `UsageData: null`."""
+
+    def test_parses_volumes_with_and_without_usage_data(self):
+        payload = {
+            "Volumes": [
+                {"Name": "toktrackerapp_mariadb_data", "UsageData": {"Size": 1048576, "RefCount": 1}},
+                {"Name": "toktracker_certs", "UsageData": None},
+                {"Name": "unrelated_volume", "UsageData": {"Size": 0, "RefCount": 0}},
+            ],
+            "Images": [{"Size": 2097152}, {"Size": 0}],
+        }
+        parsed = system_service._parse_df_response(payload)
+
+        self.assertEqual(len(parsed["volumes"]), 3)
+        self.assertEqual(parsed["volumes"][0]["name"], "mariadb_data")
+        self.assertEqual(parsed["volumes"][0]["size_mb"], 1.0)
+        self.assertEqual(parsed["volumes"][1]["name"], "certs")
+        self.assertEqual(parsed["volumes"][1]["size_mb"], 0.0)
+        self.assertEqual(parsed["volumes"][2]["raw_name"], "unrelated_volume")
+        self.assertEqual(parsed["total_volumes_mb"], 1.0)
+        self.assertEqual(parsed["total_images_mb"], 2.0)
+
+    def test_handles_missing_sections(self):
+        parsed = system_service._parse_df_response({})
+        self.assertEqual(parsed["volumes"], [])
+        self.assertEqual(parsed["total_volumes_mb"], 0.0)
+        self.assertEqual(parsed["total_images_mb"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
