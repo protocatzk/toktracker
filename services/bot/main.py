@@ -20,6 +20,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] [bot] %(message)s",
 )
+
+# httpx/httpcore loggen jede Request-URL auf INFO. Die Telegram-Bot-API-URL
+# enthält den Bot-Token – der landet damit im Klartext in den Container-Logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("toktracker.bot_service")
 
 

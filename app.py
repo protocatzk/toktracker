@@ -110,6 +110,11 @@ if not logging.getLogger().handlers:
         format="[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
     )
 
+# httpx/httpcore loggen jede Request-URL auf INFO. Die Telegram-Bot-API-URL
+# enthält den Bot-Token – der landet damit im Klartext in den Container-Logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger("toktracker.api")
 
 TIKTOK_GIFT_CATALOG = [
