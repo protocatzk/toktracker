@@ -30,6 +30,13 @@ end
 """
 
 # Atomarer Zähler für Rate-Limits: TTL wird nur beim ersten Treffer gesetzt (fixes Fenster).
+def _as_text(value: Any) -> Optional[str]:
+    """Normalisiert Redis-Werte (decode_responses=True -> str, Stubs erlauben bytes)."""
+    if value is None:
+        return None
+    return value.decode("utf-8", "replace") if isinstance(value, (bytes, bytearray)) else str(value)
+
+
 LUA_INCR_KV = """
 local current = redis.call("incr", KEYS[1])
 if tonumber(ARGV[1]) > 0 and current == 1 then
@@ -152,12 +159,18 @@ class RedisBus(BaseBus):
     async def add_event(self, stream: str, data: Dict[str, Any], maxlen: int = 5000) -> None:
         await self.connect()
         assert self._async_client is not None
-        fields = {k: json.dumps(v, default=str) if isinstance(v, (dict, list, bool)) else str(v) for k, v in data.items()}
+        fields: Dict[Any, Any] = {
+            k: json.dumps(v, default=str) if isinstance(v, (dict, list, bool)) else str(v)
+            for k, v in data.items()
+        }
         await self._async_client.xadd(stream, fields, maxlen=maxlen, approximate=True)
 
     def add_event_sync(self, stream: str, data: Dict[str, Any], maxlen: int = 5000) -> None:
         client = self._get_sync_client()
-        fields = {k: json.dumps(v, default=str) if isinstance(v, (dict, list, bool)) else str(v) for k, v in data.items()}
+        fields: Dict[Any, Any] = {
+            k: json.dumps(v, default=str) if isinstance(v, (dict, list, bool)) else str(v)
+            for k, v in data.items()
+        }
         client.xadd(stream, fields, maxlen=maxlen, approximate=True)
 
     # Key-Value
@@ -179,11 +192,12 @@ class RedisBus(BaseBus):
     async def get_kv(self, key: str) -> Optional[str]:
         await self.connect()
         assert self._async_client is not None
-        return await self._async_client.get(key)
+        value = await self._async_client.get(key)
+        return _as_text(value)
 
     def get_kv_sync(self, key: str) -> Optional[str]:
         client = self._get_sync_client()
-        return client.get(key)
+        return _as_text(client.get(key))
 
     async def delete_kv(self, key: str) -> None:
         await self.connect()
@@ -212,7 +226,7 @@ class RedisBus(BaseBus):
         cur = 0
         while True:
             cur, batch = await self._async_client.scan(cursor=cur, match=pattern, count=100)
-            keys.extend(batch)
+            keys.extend(_as_text(item) or "" for item in batch)
             if cur == 0:
                 break
         return keys
@@ -223,7 +237,7 @@ class RedisBus(BaseBus):
         cur = 0
         while True:
             cur, batch = client.scan(cursor=cur, match=pattern, count=100)
-            keys.extend(batch)
+            keys.extend(_as_text(item) or "" for item in batch)
             if cur == 0:
                 break
         return keys
