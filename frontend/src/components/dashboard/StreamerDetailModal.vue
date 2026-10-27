@@ -69,7 +69,7 @@
               <tr v-for="(g, idx) in detailData.gift_breakdown" :key="idx">
                 <td><strong class="gift-name">🎁 {{ g.gift_name }}</strong></td>
                 <td class="num-col muted">{{ formatNumber(g.diamond_count) }}</td>
-                <td class="num-col">{{ formatNumber(g.count) }}x</td>
+                <td class="num-col">{{ formatNumber(g.total_quantity || g.count || g.events_count || 1) }}x</td>
                 <td class="num-col font-bold text-cyan">{{ formatNumber(g.total_coins) }}</td>
               </tr>
             </tbody>
@@ -254,6 +254,33 @@ function close() {
 .modal-body {
   padding: 24px;
   overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.modal-body::-webkit-scrollbar,
+.modal-table-wrap::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.modal-body::-webkit-scrollbar-track,
+.modal-table-wrap::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb,
+.modal-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover,
+.modal-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.45);
 }
 
 .metrics-grid-compact {
@@ -312,8 +339,11 @@ function close() {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
-  overflow: hidden;
-  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: auto;
+  max-height: 280px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .modal-table {
@@ -323,14 +353,17 @@ function close() {
 }
 
 .modal-table th {
-  background: rgba(255, 255, 255, 0.03);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #121929;
   color: #94a3b8;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   text-align: left;
 }
 
