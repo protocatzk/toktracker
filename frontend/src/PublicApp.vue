@@ -17,6 +17,7 @@
         </a>
 
         <div class="header-actions" style="display:flex; gap:10px; align-items:center;">
+          <a href="/miniapp" target="_blank" class="btn-link sm secondary">📱 Mini-App ↗</a>
           <button type="button" class="sm secondary" @click="toggleTheme">
             Theme: {{ currentTheme.toUpperCase() }}
           </button>

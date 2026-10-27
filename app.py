@@ -634,6 +634,7 @@ async def site_analytics_page(
 
 
 @app.get("/donor-radar", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/radar", response_class=HTMLResponse, include_in_schema=False)
 async def donor_radar_page(
     request: Request,
     toktracker_admin_session: Optional[str] = Cookie(default=None),

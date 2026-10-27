@@ -32,8 +32,8 @@
           <span class="pill">
             Bot-Zugriff: <strong>{{ (store.settings?.telegram_access_mode || 'whitelist').toUpperCase() }}</strong>
           </span>
-          <a href="/radar" class="pill nav-pill">🎯 Spender-Radar</a>
-          <a href="/chat-intelligence" class="pill nav-pill">💬 Chat-Intelligence</a>
+          <a href="/donor-radar" class="pill nav-pill highlight-pill">🐋 Spender-Radar</a>
+          <a href="/chat-intelligence" class="pill nav-pill highlight-purple">💬 Chat-Intelligence</a>
           <a href="/public" class="pill nav-pill">Öffentliches User-Panel →</a>
           <a href="/logout" class="pill nav-pill danger-pill">Abmelden</a>
         </div>
@@ -168,8 +168,9 @@
       <div class="footer-inner">
         <span class="mono muted">toktracker · LIVE EARNINGS · ANALYTICS</span>
         <div class="footer-links">
-          <a href="/radar">Spender-Radar</a>
-          <a href="/chat-intelligence">Chat-Intelligence</a>
+          <a href="/donor-radar">🐋 Spender-Radar</a>
+          <a href="/chat-intelligence">💬 Chat-Intelligence</a>
+          <a href="/miniapp" target="_blank">📱 Mini-App</a>
           <a href="/public">Öffentliches User-Panel</a>
           <a href="/docs">API Dokumentation</a>
           <a href="/logout">Abmelden</a>
@@ -254,6 +255,16 @@ function toggleTheme() {
 }
 .danger-pill {
   color: #ef4444;
+}
+.highlight-pill {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  font-weight: 700;
+}
+.highlight-purple {
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+  font-weight: 700;
 }
 .tab-nav {
   display: flex;
