@@ -58,7 +58,8 @@ class TestDatabaseFacade(unittest.TestCase):
 
     def test_facade_is_thin(self):
         path = os.path.join(os.path.dirname(__file__), "..", "shared", "database.py")
-        lines = [ln for ln in open(path, encoding="utf-8").read().splitlines() if ln.strip()]
+        with open(path, encoding="utf-8") as handle:
+            lines = [ln for ln in handle.read().splitlines() if ln.strip()]
         self.assertLess(len(lines), 30, "shared/database.py soll nur eine Re-Export-Fassade bleiben")
 
     def test_every_public_db_function_is_reexported(self):
@@ -68,11 +69,12 @@ class TestDatabaseFacade(unittest.TestCase):
             module_name = os.path.basename(path)[:-3]
             if module_name == "__init__":
                 continue
-            tree = ast.parse(open(path, encoding="utf-8").read())
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
             for node in tree.body:
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not node.name.startswith("__"):
-                    if node.name not in db_pkg.__all__:
-                        missing.append(f"{module_name}.{node.name}")
+                is_definition = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                if is_definition and not node.name.startswith("__") and node.name not in db_pkg.__all__:
+                    missing.append(f"{module_name}.{node.name}")
         self.assertEqual(missing, [], "Nicht re-exportiert: " + ", ".join(missing))
 
     def test_modules_import_independently(self):
