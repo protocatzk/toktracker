@@ -530,6 +530,10 @@ async def miniapp_page(request: Request):
     Mobile-First Telegram Mini-App & WebApp (/miniapp):
     Kompakte Übersicht über Live-Matches, Einnahmen, Streamer und Geschenke.
     """
+    vue_miniapp = os.path.join(VITE_DIST_DIR, "miniapp.html")
+    if os.path.isfile(vue_miniapp):
+        return FileResponse(vue_miniapp)
+
     tg_diag = telegram_bot_service.get_diagnostics()
     return templates.TemplateResponse(
         request=request,
@@ -552,6 +556,10 @@ async def admin_login_page(
     """
     if admin_auth_manager.verify_session_token(toktracker_admin_session):
         return RedirectResponse(url="/admin", status_code=302)
+
+    vue_login = os.path.join(VITE_DIST_DIR, "login.html")
+    if os.path.isfile(vue_login):
+        return FileResponse(vue_login)
 
     tg_diag = telegram_bot_service.get_diagnostics()
     bot_username = (tg_diag.get("bot_username") or "toktrackeragent").lstrip("@")
@@ -620,6 +628,10 @@ async def site_analytics_page(
         return RedirectResponse(url="/login", status_code=302)
 
     init_db()
+    vue_analytics = os.path.join(VITE_DIST_DIR, "site-analytics.html")
+    if os.path.isfile(vue_analytics):
+        return FileResponse(vue_analytics)
+
     return templates.TemplateResponse(
         request=request,
         name="site_analytics.html",
