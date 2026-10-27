@@ -32,14 +32,14 @@ try:
     from TikTokLive.client.errors import AgeRestrictedError, UserOfflineError
     from TikTokLive.client.web.web_settings import WebDefaults
     from TikTokLive.events import (
+        CommentEvent,
         ConnectEvent,
         DisconnectEvent,
         GiftEvent,
+        LinkMicArmiesEvent,
+        LinkMicBattleEvent,
         LiveEndEvent,
         RoomUserSeqEvent,
-        LinkMicBattleEvent,
-        LinkMicArmiesEvent,
-        CommentEvent,
     )
     TIKTOKLIVE_AVAILABLE = True
 
@@ -68,7 +68,9 @@ try:
             try:
                 data = resp.json()
             except Exception:
-                raise UserOfflineError(f"Streamer @{unique_id} ist offline (kein aktiver Live-JSON-Feed).")
+                raise UserOfflineError(
+                    f"Streamer @{unique_id} ist offline (kein aktiver Live-JSON-Feed)."
+                ) from None
             if data.get("message") == "user_not_found":
                 raise UserOfflineError(f"Streamer @{unique_id} existiert nicht oder streamt nicht.")
             return data
@@ -104,28 +106,26 @@ def is_streamer_offline_error(exc: Exception) -> bool:
         return True
     if "JSONDecodeError" in err_cls or ("Expecting value" in err_str and "column 1" in err_str):
         return True
-    if err_cls in ("FailedParseRoomIdError", "UserNotFoundError"):
-        return True
-    return False
+    return err_cls in ("FailedParseRoomIdError", "UserNotFoundError")
 
-from config import config
-from database import (
-    end_stream_session,
-    get_auto_monitor_streamers,
-    get_settings,
-    record_gift_event,
-    start_stream_session,
-    update_stream_session_metrics,
-    update_streamer_runtime_state,
-    record_battle_start,
-    update_battle_scores,
-    record_battle_finish,
+
+from config import config  # noqa: E402
+from database import (  # noqa: E402
     batch_record_chat_messages,
     cleanup_old_chat_messages,
-    get_known_donor_tiers,
+    end_stream_session,
+    get_auto_monitor_streamers,
     get_donor_tier,
+    get_known_donor_tiers,
+    get_settings,
+    record_battle_finish,
+    record_battle_start,
+    record_gift_event,
+    start_stream_session,
+    update_battle_scores,
+    update_stream_session_metrics,
+    update_streamer_runtime_state,
 )
-
 
 logger = logging.getLogger("tiktok_service")
 if not logger.handlers:
@@ -664,7 +664,6 @@ class StreamerWorker:
                     await self._interruptible_sleep(float(poll_sec))
                     continue
 
-            except Exception as exc:
                 err_name = type(exc).__name__
                 err_text = f"{err_name}: {exc}"
                 with self._lock:
@@ -1222,13 +1221,9 @@ class StreamerWorker:
                 else:
                     # 1v1 oder 2v2
                     is_streamer_side = False
-                    if streamer_uid and (anchor_id == streamer_uid or streamer_uid in team_user_uids):
+                    if streamer_uid and (anchor_id == streamer_uid or streamer_uid in team_user_uids) or teammate_uid and (anchor_id == teammate_uid or teammate_uid in team_user_uids):
                         is_streamer_side = True
-                    elif teammate_uid and (anchor_id == teammate_uid or teammate_uid in team_user_uids):
-                        is_streamer_side = True
-                    elif opp1_uid and (anchor_id == opp1_uid or opp1_uid in team_user_uids):
-                        is_streamer_side = False
-                    elif opp2_uid and (anchor_id == opp2_uid or opp2_uid in team_user_uids):
+                    elif opp1_uid and (anchor_id == opp1_uid or opp1_uid in team_user_uids) or opp2_uid and (anchor_id == opp2_uid or opp2_uid in team_user_uids):
                         is_streamer_side = False
                     elif idx == 0:
                         is_streamer_side = True
@@ -1675,8 +1670,6 @@ class StreamerWorker:
                 streamer_rank=computed_rank,
                 battle_mode=active.get("battle_mode", "1v1"),
             )
-        except Exception as exc:
-            logger.debug("Fehler beim Beenden des aktiven Battles für @%s: %s", self.username, exc)
         except Exception as exc:
             logger.debug("Fehler beim Beenden des aktiven Battles für @%s: %s", self.username, exc)
 

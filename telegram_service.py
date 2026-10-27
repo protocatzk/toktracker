@@ -1,17 +1,12 @@
 import asyncio
-import base64
-import hashlib
-import hmac
 import html
-import json
 import logging
 import os
-import secrets
 import time
-import urllib.parse
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
+
 from telegram.request import HTTPXRequest
 
 try:

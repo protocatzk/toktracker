@@ -4,12 +4,10 @@ import logging
 import math
 import os
 import secrets
-import signal
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, Set
 
 from shared.bus import get_bus
-from shared.config import config
 from shared.contracts import (
     CHANNEL_COMMANDS,
     CHANNEL_RECONCILE,
@@ -19,9 +17,8 @@ from shared.contracts import (
 )
 from shared.database import (
     get_auto_monitor_streamers,
-    update_streamer_runtime_state,
 )
-from tiktok_service import StreamerWorker, monitor_manager, refresh_donor_tier_cache
+from tiktok_service import monitor_manager
 
 logger = logging.getLogger("toktracker.ingest_coordinator")
 

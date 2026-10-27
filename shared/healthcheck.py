@@ -5,8 +5,9 @@ Wird von Docker HEALTHCHECK verwendet:
 """
 
 import sys
-import time
+
 import httpx
+
 from shared.bus import get_bus
 from shared.config import config
 from shared.contracts import (
