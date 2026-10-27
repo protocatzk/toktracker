@@ -65,8 +65,9 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | [`tiktok_service.py`](file:///home/toktracker/toktrackerapp/tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
 | [`telegram_service.py`](file:///home/toktracker/toktrackerapp/telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
 | [`docker-compose.yml`](file:///home/toktracker/toktrackerapp/docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `nginx-proxy` und `acme-companion` (SSL). |
-| [`templates/`](file:///home/toktracker/toktrackerapp/templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
-| [`static/`](file:///home/toktracker/toktrackerapp/static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
+| [`frontend/`](file:///home/toktracker/toktrackerapp/frontend) | **Vue 3 + TypeScript Frontend Suite (Vite & Pinia)**. Multi-Page SPA für Admin-Dashboard (`index.html`) und öffentliches Portal (`public.html`). Nutzt typisierte Pinia-Stores, Chart.js und wird via Docker Multi-Stage Build kompilationsfrei in Produktion ausgeliefert. |
+| [`templates/`](file:///home/toktracker/toktrackerapp/templates) | **Jinja2-HTML-Templates**: `index.html` & `public.html` (Fallback-Templates), `login.html` (Web-Login mit Telegram-2FA). |
+| [`static/`](file:///home/toktracker/toktrackerapp/static) | **Frontend-Assets**: Globale Icons, Stylesheet (`style.css`), Chart.js Bundle und Legacy-Fallback Skripte. |
 
 ---
 

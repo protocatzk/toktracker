@@ -1,7 +1,22 @@
 # ==============================================================================
-# TokTracker - Production Dockerfile
-# Multi-purpose: FastAPI Dashboard + TikTokLive Worker Threads + Telegram Bot
+# TokTracker - Production Dockerfile (Multi-Stage)
+# Stage 1: Vue 3 + TypeScript Frontend Builder (Vite)
+# Stage 2: Python 3.11 Runtime (FastAPI + Workers)
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Stage 1: Frontend Build (Zero-Node Runtime in Production)
+# ------------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-builder
+WORKDIR /build
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# ------------------------------------------------------------------------------
+# Stage 2: Python Backend Runtime
+# ------------------------------------------------------------------------------
 FROM python:3.11-slim
 
 # Metadaten
@@ -40,6 +55,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 # 6. Anwendungscode kopieren und Dateiberechtigungen an appuser übergeben
 COPY --chown=appuser:appgroup . /app
+COPY --from=frontend-builder --chown=appuser:appgroup /build/dist /app/frontend/dist
 
 # 7. Zum nicht-privilegierten Benutzer wechseln
 USER appuser

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>toktracker – Admin Console · Live Earnings &amp; Analytics</title>
+    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <script>
+        (function () {
+            try {
+                var savedTheme = localStorage.getItem("toktracker_theme") || "dark";
+                document.documentElement.setAttribute("data-theme", savedTheme);
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

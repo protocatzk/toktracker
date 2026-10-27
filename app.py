@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -188,6 +188,11 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 if os.path.isdir(os.path.join(BASE_DIR, "pictures")):
     app.mount("/pictures", StaticFiles(directory=os.path.join(BASE_DIR, "pictures")), name="pictures")
+
+VITE_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
+if os.path.isdir(os.path.join(VITE_DIST_DIR, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(VITE_DIST_DIR, "assets")), name="vite_assets")
+
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
@@ -481,12 +486,15 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/public", response_class=HTMLResponse, include_in_schema=False)
-@app.get("/panel", response_class=HTMLResponse, include_in_schema=False)
 async def public_panel(request: Request):
     """
     Startseite (/): Öffentliches User-Panel für Zuschauer (Read-Only).
     """
     init_db()
+    vue_public = os.path.join(VITE_DIST_DIR, "public.html")
+    if os.path.isfile(vue_public):
+        return FileResponse(vue_public)
+
     tg_diag = telegram_bot_service.get_diagnostics()
     bot_uname = (tg_diag.get("bot_username") or "toktrackeragent").lstrip("@")
     settings = get_settings()
@@ -567,12 +575,13 @@ async def admin_logout():
 
 
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/panel", response_class=HTMLResponse, include_in_schema=False)
 async def admin_console(
     request: Request,
     toktracker_admin_session: Optional[str] = Cookie(default=None),
 ):
     """
-    Geschütztes Admin-Panel (/admin). Leitet ohne gültige Telegram-Session auf /login weiter.
+    Geschütztes Admin-Panel (/admin oder /panel). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
@@ -580,6 +589,11 @@ async def admin_console(
 
     init_db()
     monitor_manager.autostart_from_db()
+
+    vue_index = os.path.join(VITE_DIST_DIR, "index.html")
+    if os.path.isfile(vue_index):
+        return FileResponse(vue_index)
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
