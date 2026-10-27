@@ -2,13 +2,19 @@
 Tests für Datenbank-Operationen und Aggregationen (shared/database.py).
 Prüft Datenintegrität und Dual-Database-Kompatibilität ohne externe Netzwerkaufrufe.
 """
+try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
+    from . import _bootstrap  # noqa: F401
+except ImportError:  # pragma: no cover
+    import _bootstrap  # noqa: F401
+
 import unittest
+
 from shared.database import (
+    get_all_streamers_summary,
+    get_auto_monitor_streamers,
+    get_dashboard_overview,
     get_db,
     get_settings,
-    get_dashboard_overview,
-    get_auto_monitor_streamers,
-    get_all_streamers_summary,
 )
 
 

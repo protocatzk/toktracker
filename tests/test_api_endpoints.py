@@ -2,8 +2,15 @@
 Tests für FastAPI REST-API & Web-Dashboard Endpunkte.
 Prüft Public- und Admin-Routen, Auth-Absicherung und JSON-Schemas in-process (0 Netzwerk-Overhead).
 """
+try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
+    from . import _bootstrap  # noqa: F401
+except ImportError:  # pragma: no cover
+    import _bootstrap  # noqa: F401
+
 import unittest
+
 import httpx
+
 from app import app
 from shared.auth_store import admin_auth_manager
 
