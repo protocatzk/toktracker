@@ -647,6 +647,10 @@ async def donor_radar_page(
         return RedirectResponse(url="/login", status_code=302)
 
     init_db()
+    vue_radar = os.path.join(VITE_DIST_DIR, "donor-radar.html")
+    if os.path.isfile(vue_radar):
+        return FileResponse(vue_radar)
+
     return templates.TemplateResponse(
         request=request,
         name="donor_radar.html",
@@ -689,6 +693,10 @@ async def chat_intelligence_page(
         )
 
     init_db()
+    vue_ci = os.path.join(VITE_DIST_DIR, "chat-intelligence.html")
+    if os.path.isfile(vue_ci):
+        return FileResponse(vue_ci)
+
     return templates.TemplateResponse(
         request=request,
         name="chat_intelligence.html",

@@ -16,6 +16,8 @@ export default defineConfig({
       input: {
         admin: fileURLToPath(new URL("index.html", import.meta.url)),
         public: fileURLToPath(new URL("public.html", import.meta.url)),
+        donorRadar: fileURLToPath(new URL("donor-radar.html", import.meta.url)),
+        chatIntelligence: fileURLToPath(new URL("chat-intelligence.html", import.meta.url)),
       },
     },
   },
