@@ -152,7 +152,7 @@ eine Marke der jeweiligen Inhaber.
 - Alle Einnahmen- und Währungsangaben sind **Schätzungen** auf Basis
   konfigurierbarer Kurse. Sie sind keine Finanz-, Steuer- oder Rechtsberatung
   und keine Grundlage für Buchhaltung oder Auszahlungen.
-- Wer die Anwendung betreibt, ist selbst **Verantwortlicher im Sinne der
+- Wer die Anwendung öffentlich betreibt, ist selbst **Verantwortlicher im Sinne der
   DSGVO** für die verarbeiteten Daten (u. a. Telegram-IDs, Chat-Nachrichten,
   Spender-Namen) und muss Impressum, Datenschutzerklärung und
   Löschkonzept bereitstellen.
