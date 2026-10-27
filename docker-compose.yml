@@ -1,8 +1,24 @@
-version: '3.8'
-
 services:
   # ============================================================================
-  # 1. TokTracker Web Dashboard & Worker Service
+  # 1. Redis Message-Bus & Shared State (Microservices IPC & Leases)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: toktracker_redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    expose:
+      - "6379"
+    networks:
+      - toktracker_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================================
+  # 2. TokTracker Web Dashboard & REST API
   # ============================================================================
   app:
     build:
@@ -10,6 +26,7 @@ services:
       dockerfile: Dockerfile
     container_name: toktracker_app
     restart: unless-stopped
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "2", "--loop", "uvloop"]
     expose:
       - "5000"
     env_file:
@@ -17,6 +34,8 @@ services:
     environment:
       - APP_HOST=0.0.0.0
       - APP_PORT=5000
+      - SERVICE_ROLE=api
+      - REDIS_URL=redis://redis:6379/0
       - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
@@ -28,15 +47,122 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     group_add:
       - "${DOCKER_GID:-988}"
     networks:
       - toktracker_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
   # ============================================================================
-  # 2. MariaDB Datenbank (Produktion)
+  # 3. TikTokLive Ingest Worker (Horizontal skalierbar per Lease-Sharding)
+  # ============================================================================
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "services.ingest.main"]
+    env_file:
+      - .env
+    environment:
+      - SERVICE_ROLE=ingest
+      - REDIS_URL=redis://redis:6379/0
+      - DB_ENGINE=mysql
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - toktracker_net
+    healthcheck:
+      test: ["CMD", "python", "-m", "shared.healthcheck", "ingest"]
+      interval: 20s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ============================================================================
+  # 4. Telegram-Bot Service (Singleton mit Leader-Lock)
+  # ============================================================================
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: toktracker_bot
+    restart: unless-stopped
+    command: ["python", "-m", "services.bot.main"]
+    env_file:
+      - .env
+    environment:
+      - SERVICE_ROLE=bot
+      - REDIS_URL=redis://redis:6379/0
+      - DB_ENGINE=mysql
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - toktracker_net
+    healthcheck:
+      test: ["CMD", "python", "-m", "shared.healthcheck", "bot"]
+      interval: 20s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ============================================================================
+  # 5. TokTracker Scheduler (24h-Reports, Disk-Health, DB-Cleanup)
+  # ============================================================================
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: toktracker_scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "services.scheduler.main"]
+    env_file:
+      - .env
+    environment:
+      - SERVICE_ROLE=scheduler
+      - REDIS_URL=redis://redis:6379/0
+      - DB_ENGINE=mysql
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    group_add:
+      - "${DOCKER_GID:-988}"
+    networks:
+      - toktracker_net
+    healthcheck:
+      test: ["CMD", "python", "-m", "shared.healthcheck", "scheduler"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ============================================================================
+  # 6. MariaDB Datenbank (Produktion)
   # ============================================================================
   db:
     image: mariadb:11
@@ -60,7 +186,7 @@ services:
       retries: 5
 
   # ============================================================================
-  # 3. Nginx Reverse Proxy (Öffentlich erreichbar über Port 80 & 443)
+  # 7. Nginx Reverse Proxy (Öffentlich erreichbar über Port 80 & 443)
   # ============================================================================
   nginx-proxy:
     image: nginxproxy/nginx-proxy:alpine
@@ -80,7 +206,7 @@ services:
       - app
 
   # ============================================================================
-  # 4. Let's Encrypt SSL Companion (Automatisches Zertifikat & Auto-Renewal)
+  # 8. Let's Encrypt SSL Companion (Automatisches Zertifikat & Auto-Renewal)
   # ============================================================================
   acme-companion:
     image: nginxproxy/acme-companion:latest

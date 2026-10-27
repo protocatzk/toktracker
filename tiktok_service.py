@@ -14,6 +14,20 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 import httpx
 
 try:
+    import uvloop  # Drop-in-Ersatz für den asyncio-Event-Loop (nur Linux/macOS)
+    UVLOOP_AVAILABLE = True
+except ImportError:  # z.B. Windows-Entwicklung
+    uvloop = None  # type: ignore[assignment]
+    UVLOOP_AVAILABLE = False
+
+
+def new_event_loop() -> asyncio.AbstractEventLoop:
+    """Erzeugt einen neuen Event-Loop – bevorzugt uvloop, sonst Standard-asyncio."""
+    if uvloop is not None:
+        return uvloop.new_event_loop()
+    return asyncio.new_event_loop()
+
+try:
     from TikTokLive import TikTokLiveClient
     from TikTokLive.client.errors import AgeRestrictedError, UserOfflineError
     from TikTokLive.client.web.web_settings import WebDefaults
@@ -485,7 +499,7 @@ class StreamerWorker:
             self._log("INFO", "Worker manuell gestoppt (Auto-Start deaktiviert).")
 
     def _thread_main(self) -> None:
-        loop = asyncio.new_event_loop()
+        loop = new_event_loop()
         asyncio.set_event_loop(loop)
         with self._lock:
             self._loop = loop

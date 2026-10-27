@@ -75,13 +75,22 @@ from schemas import (
     TrackActionRequest,
 )
 from system_service import get_system_health
+from shared.auth_store import AdminAuthManager, admin_auth_manager
+from shared.bot_client import bot_client as telegram_bot_service
+from shared.bus import get_bus
+from shared.contracts import CHANNEL_SETTINGS_CHANGED
+from shared.database import invalidate_settings_cache
+from shared.monitor_client import monitor_client as monitor_manager
 from telegram_service import (
-    AdminAuthManager,
-    admin_auth_manager,
     generate_full_report_data,
-    telegram_bot_service,
+    telegram_bot_service as _raw_telegram_bot_service,
 )
-from tiktok_service import TIKTOKLIVE_AVAILABLE, fetch_tiktok_user_info, monitor_manager
+from tiktok_service import (
+    TIKTOKLIVE_AVAILABLE,
+    UVLOOP_AVAILABLE,
+    fetch_tiktok_user_info,
+    monitor_manager as _raw_monitor_manager,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -131,25 +140,39 @@ async def lifespan(app_instance: FastAPI):
     """
     FastAPI Lifespan:
     1. Initialisiert die Datenbank (SQLite oder MySQL)
-    2. Startet automatisch alle TikTokLive-Worker für Streamer, die in der DB mit
-       auto_monitor=1 oder is_tracking=1 markiert sind
-    3. Startet optional den Telegram-Bot-Service (fehlertolerant isoliert: falls der Bot
-       nicht starten kann, laufen FastAPI und das Web-Interface garantiert trotzdem weiter)
+    2. Startet oder benachrichtigt Ingest-Worker für markierte Streamer
+    3. Startet lokalen Bot (Monolith) oder verbindet Remote-Bus (Microservices)
     """
+    _loop = asyncio.get_running_loop()
+    print(f"[TokTracker] Event-Loop: {type(_loop).__module__}.{type(_loop).__name__} (uvloop verfügbar: {UVLOOP_AVAILABLE}, Role: {config.service_role}, Redis: {config.has_redis})")
+
     init_db()
     with get_db() as conn:
         count = conn.execute("SELECT COUNT(*) FROM streamers").fetchone()[0]
         if count == 0:
             seed_demo_data()
 
-    monitor_manager.autostart_from_db()
+    if config.service_role in ("all", "monolith"):
+        monitor_manager.set_local_manager(_raw_monitor_manager)
+        telegram_bot_service.set_local_bot(_raw_telegram_bot_service)
+        monitor_manager.autostart_from_db()
+        await telegram_bot_service.start()
+    else:
+        monitor_manager.set_local_manager(None)
+        telegram_bot_service.set_local_bot(None)
+        monitor_manager.autostart_from_db()
 
-    await telegram_bot_service.start()
+    if config.has_redis:
+        try:
+            await get_bus().subscribe(CHANNEL_SETTINGS_CHANGED, lambda msg: invalidate_settings_cache())
+        except Exception:
+            pass
 
     yield
 
-    await telegram_bot_service.stop()
-    monitor_manager.stop_all()
+    if config.service_role in ("all", "monolith"):
+        await telegram_bot_service.stop()
+        monitor_manager.stop_all()
 
 
 app = FastAPI(
@@ -2274,14 +2297,14 @@ async def api_get_battle_detail(battle_id: int):
 async def api_system_status():
     diag = monitor_manager.get_all_diagnostics()
     diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
-    diag["system_health"] = get_system_health()
+    diag["system_health"] = await asyncio.to_thread(get_system_health)
     return diag
 
 
 @app.get("/api/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 @app.get("/api/v1/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
 async def api_system_health(force_refresh: bool = False):
-    return get_system_health(force_refresh=force_refresh)
+    return await asyncio.to_thread(get_system_health, force_refresh)
 
 
 @app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
@@ -2603,6 +2626,11 @@ async def api_get_settings():
 async def api_update_settings(payload: SettingsUpdateRequest):
     init_db()
     updated = update_settings(payload.model_dump(exclude_none=True))
+    if config.has_redis:
+        try:
+            get_bus().publish_sync(CHANNEL_SETTINGS_CHANGED, {"action": "settings_changed"})
+        except Exception:
+            pass
     return {"ok": True, "settings": updated}
 
 
@@ -2686,4 +2714,10 @@ async def api_sqlite_import(payload: Optional[SqliteImportRequest] = None):
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host=config.app_host, port=config.app_port, reload=False)
+    uvicorn.run(
+        "app:app",
+        host=config.app_host,
+        port=config.app_port,
+        reload=False,
+        loop="uvloop" if UVLOOP_AVAILABLE else "asyncio",
+    )

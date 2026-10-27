@@ -17,34 +17,38 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 ---
 
-## 2. Architektur & Komponenten
+## 2. Architektur & Komponenten (Microservices + Redis Bus)
 
 ```
                               ┌─────────────────────────┐
                               │    TikTok Livestreams   │
                               └────────────┬────────────┘
-                                           │ WebSocket / Proto
+                                           │ WebSocket / Protobuf
                                            ▼
-┌──────────────────────┐      ┌─────────────────────────┐
-│     Telegram-Bot     │◄────►│    tiktok_service.py    │
-│ (telegram_service.py)│      │  (StreamerWorker & Mgr) │
-└──────────┬───────────┘      └────────────┬────────────┘
-           │                               │
-           │                               ▼
-           │                  ┌─────────────────────────┐
-           │                  │       database.py       │
-           │                  │   (SQLite / MySQL Dual) │
-           │                  └────────────┬────────────┘
-           ▼                               ▲
-┌──────────────────────┐                   │
-│        app.py        │───────────────────┘
-│  (FastAPI & Web-UI)  │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│  Templates & Static  │
-│  (HTML, JS, CSS)     │
-└──────────────────────┘
+┌──────────────────────┐      ┌─────────────────────────┐      ┌──────────────────────┐
+│     Telegram-Bot     │      │   TikTok Ingest Worker  │      │ TokTracker Scheduler │
+│   (services/bot)     │      │   (services/ingest)     │      │ (services/scheduler) │
+└──────────┬───────────┘      └────────────┬────────────┘      └──────────┬───────────┘
+           │                               │                              │
+           │                               │                              │
+           ▼                               ▼                              ▼
+    ┌────────────────────────────────────────────────────────────────────────────┐
+    │                 Redis 7 (Message-Bus, Leases & Shared State)               │
+    │  - tt:events (Streams)     - tt:cmd:* (PubSub)        - tt:rpc:bot (RPC)   │
+    │  - tt:lease:* (Sharding)   - tt:diag:* (Telemetrie)   - tt:auth:* (Login)  │
+    └────────────────────────────────────────────────────────────────────────────┘
+                                           ▲
+                                           │
+┌──────────────────────┐      ┌────────────┴────────────┐
+│      Nginx & SSL     │◄────►│   TokTracker Web & API  │
+│  (Reverse Proxy/ACME)│      │     (services/api)      │
+└──────────────────────┘      └────────────┬────────────┘
+                                           │
+                                           ▼
+                              ┌─────────────────────────┐
+                              │  MariaDB / MySQL Engine │
+                              │   (shared/database.py)  │
+                              └─────────────────────────┘
 ```
 
 ---
@@ -53,16 +57,16 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
-| [`app.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/app.py) | **Haupteinstiegspunkt (FastAPI)**. Verwaltet Lifespan (DB-Init, Worker-Autostart, Telegram-Bot-Start), Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*` und `/api/v1/*`), Authentifizierung, CSV-Exporte und Demo-Daten. |
-| [`config.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/config.py) | **Zentrale Konfiguration (`AppConfig`)**. Lädt Umgebungsvariablen (`.env`), verwaltet DB-Verbindungsdaten, TikTok-Session-Keys, Proxies, Telegram-Token und Admin-Passwörter. |
-| [`database.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/database.py) | **Datenzugriffsschicht (DAL)**. Unterstützt transparent SQLite und MySQL. Beinhaltet Tabellenschemata, Indizes, CRUD-Funktionen, Finanzberechnungen, Zeitraum-Aggregationen (`today`, `24h`, `7d`, `30d`, `all`) und Bot-Report-Builder. |
-| [`tiktok_service.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/tiktok_service.py) | **TikTok-Monitoring-Engine**. Verwaltet `StreamerWorker` in separaten Threads/Asyncio-Loops. Behandelt WebSocket-Events (`ConnectEvent`, `GiftEvent`, `RoomUserSeqEvent`, `LiveEndEvent`, `DisconnectEvent`), Streak-Aggregation und Reconnect-Supervisor. |
-| [`telegram_service.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/telegram_service.py) | **Telegram-Bot & 2FA-Manager**. `TelegramBotService` stellt Bot-Befehle (`/start`, `/report`, `/streamer`, etc.) und periodische 24h-Reports bereit. `AdminAuthManager` steuert Web-Login-Challenges mit 1-Click-Approve via Telegram-Button oder 6-stelligem Code. |
-| [`schemas.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/schemas.py) | **Pydantic-Modelle**. DTOs für API-Validierung (Streamer anlegen, Tracking-Aktionen, manuelle Geschenke, Einstellungen, Telegram-Nutzer-Berechtigungen). |
-| [`migrate_sqlite_to_mysql.py`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/migrate_sqlite_to_mysql.py) | **Migrationsskript**. Überträgt Tabellen, Datentypen und Einträge verlustfrei von lokaler SQLite in eine MySQL/MariaDB-Instanz. |
-| [`templates/`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
-| [`static/`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
-| [`pictures/`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/pictures) | Bot-Bilder (`welcome_banner.jpg`, `bot_avatar.jpg`, `daily_report_banner.jpg`) und [`BOT_DESCRIPTIONS.md`](file:///C:/Users/heliac/PycharmProjects/FlaskProject1/pictures/BOT_DESCRIPTIONS.md) für BotFather. |
+| [`shared/`](file:///home/toktracker/toktrackerapp/shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `database.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py` sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py` und `memory_bus.py`). |
+| [`services/api/`](file:///home/toktracker/toktrackerapp/services/api) / [`app.py`](file:///home/toktracker/toktrackerapp/app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
+| [`services/ingest/`](file:///home/toktracker/toktrackerapp/services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
+| [`services/bot/`](file:///home/toktracker/toktrackerapp/services/bot) | **Telegram-Bot Service**. Läuft als geschütztes Singleton mit Leader-Lock (`tt:lock:bot:leader`). Reagiert auf Bot-Befehle und verarbeitet RPC-Anfragen (z.B. Login-Codes an Admins senden) via Redis. |
+| [`services/scheduler/`](file:///home/toktracker/toktrackerapp/services/scheduler) | **TokTracker Scheduler Service**. Verwaltet wiederkehrende Aufgaben: automatischen 24h-Report, periodisches Speicherplatz-Monitoring (alle 15 Min) sowie Chat-Cleanup und Cache-Refresh. |
+| [`tiktok_service.py`](file:///home/toktracker/toktrackerapp/tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
+| [`telegram_service.py`](file:///home/toktracker/toktrackerapp/telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
+| [`docker-compose.yml`](file:///home/toktracker/toktrackerapp/docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `nginx-proxy` und `acme-companion` (SSL). |
+| [`templates/`](file:///home/toktracker/toktrackerapp/templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
+| [`static/`](file:///home/toktracker/toktrackerapp/static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
 
 ---
 
@@ -149,7 +153,11 @@ uvicorn app:app --host 0.0.0.0 --port 5000 --reload
 python migrate_sqlite_to_mysql.py
 ```
 
-### Abhängigkeiten installieren
-```powershell
-pip install -r requirements.txt
+### Tests ausführen (Ressourcensparend, Quotenfrei & Rückstandslos)
+```bash
+# Führt alle Tests im Container aus und löscht die Testdateien danach automatisch:
+./run_tests.sh
+
+# Oder direkt in der lokalen Python-Umgebung:
+python tests/run_tests.py
 ```
