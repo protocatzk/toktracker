@@ -66,8 +66,8 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | [`tiktok_service.py`](./tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
 | [`telegram_service.py`](./telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
 | [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `docker-socket-proxy` (nur lesende Docker-API) sowie `nginx-proxy` und `acme-companion` (SSL). |
-| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `landing.html` (öffentliche Infoseite unter `/`), `index.html` (Admin-Dashboard), `stats.html` (read-only Moderator-Statistiken), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
-| [`static/`](./static) | **Frontend-Assets**: `landing.css` (öffentliche Infoseite), `dashboard.js` (Dashboard-Logik, Polling, Charts), `stats.js` (read-only Statistik-Seite), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
+| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `landing.html` (öffentliche Infoseite unter `/`), `index.html` (Admin-Dashboard), `stats.html` (read-only Moderator-Statistiken), `access.html` (Whitelist, Anfragen & Rollen), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
+| [`static/`](./static) | **Frontend-Assets**: `landing.css` (öffentliche Infoseite), `dashboard.js` (Dashboard-Logik, Polling, Charts), `stats.js` (read-only Statistik-Seite), `access.js`/`access.css` (Zugriffsverwaltung), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
 
 ---
 
@@ -140,6 +140,25 @@ API-Keys werden intern als `admin` behandelt. Endpunkte sichern sich über
 `require_permission(<capability>)` ab; `verify_admin_or_api_key` bleibt der
 Admin-only-Fallback. Neue geschützte Endpunkte müssen ein passendes Recht
 verwenden, statt pauschal `verify_admin_or_api_key` zu nehmen.
+
+### Bot-Rechte (`bot.*`)
+
+Telegram-Befehle sind ebenfalls an die Rechte-Matrix gekoppelt, nutzen aber
+eigene `bot.*`-Capabilities. Dadurch lässt sich die Bot-Oberfläche unabhängig
+von den Web-Modulen steuern. Die zentrale Zuordnung liegt in
+[`shared/permissions.py`](./shared/permissions.py) in
+`BOT_COMMAND_PERMISSIONS` / `BOT_COMMAND_ALIASES`.
+
+Jeder neue Bot-Befehl muss dort eingetragen und im Handler über
+`_authorize(..., require_permission=PERM_BOT_*)` geprüft werden. Die Tests in
+[`tests/test_bot_permissions.py`](./tests/test_bot_permissions.py) erzwingen,
+dass jeder registrierte `CommandHandler` eine Capability besitzt und der
+Handler sie tatsächlich prüft. `/id` bleibt bewusst ohne Prüfung, weil der
+Befehl nur den eigenen Status anzeigt.
+
+Die dedizierte Verwaltungsoberfläche unter `/access` bündelt Whitelist, offene
+Anfragen, Sperren und die Rollen-/Rechte-Matrix. Sie erfordert
+`users.manage`; Änderungen laufen über die bestehenden Telegram-Nutzer-APIs.
 
 Die öffentliche Infoseite unter `/` wird über `LANDING_PAGE_ENABLED=1`
 (Default) aktiviert und ist bewusst für alle erreichbar. Bei `0` liefert `/`

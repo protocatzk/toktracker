@@ -85,6 +85,8 @@ from shared.database import invalidate_settings_cache
 from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
     ALL_PERMISSIONS,
+    BOT_COMMAND_LABELS,
+    BOT_COMMAND_PERMISSIONS,
     PERM_ANALYTICS_VIEW,
     PERM_CHATINTEL_VIEW,
     PERM_CRM_EDIT,
@@ -98,10 +100,14 @@ from shared.permissions import (
     PERM_SYSTEM_MANAGE,
     PERM_SYSTEM_VIEW,
     PERM_USERS_MANAGE,
+    PERMISSION_LABELS,
     ROLE_ADMIN,
+    ROLE_LABELS,
     ROLE_MODERATOR,
+    ROLE_PERMISSIONS,
     ROLE_USER,
     ROLE_VIEWER,
+    ROLES,
     has_permission,
     is_blocked,
     normalize_role,
@@ -925,6 +931,85 @@ async def admin_console(
     )
 
 
+@app.get("/access", response_class=HTMLResponse, include_in_schema=False)
+async def access_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Dedizierte Verwaltung von Whitelist, offenen Anfragen und Rollen.
+
+    Die Seite bündelt die bestehenden Telegram-Nutzer-Endpunkte und zeigt die
+    zentrale Rechte-Matrix inklusive der bot.*-Capabilities an. Schreibzugriffe
+    laufen weiterhin über die serverseitig geschützten APIs.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login?next=/access", status_code=302)
+    if not has_permission(session_payload, PERM_USERS_MANAGE):
+        return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
+
+    init_db()
+
+    role_columns = [
+        {
+            "value": role,
+            "label": ROLE_LABELS[role],
+            "permissions": ROLE_PERMISSIONS[role],
+        }
+        for role in ROLES
+    ]
+    web_permissions = [
+        {"key": permission, "label": PERMISSION_LABELS.get(permission, permission)}
+        for permission in sorted(ALL_PERMISSIONS)
+        if not permission.startswith("bot.")
+    ]
+    bot_permissions = [
+        {"key": permission, "label": PERMISSION_LABELS.get(permission, permission)}
+        for permission in sorted(ALL_PERMISSIONS)
+        if permission.startswith("bot.")
+    ]
+    bot_commands = []
+    for command, required in BOT_COMMAND_PERMISSIONS.items():
+        allowed_roles = [
+            role
+            for role in ROLES
+            if required is None or required in ROLE_PERMISSIONS[role]
+        ]
+        bot_commands.append(
+            {
+                "command": command,
+                "label": BOT_COMMAND_LABELS.get(command, f"/{command}"),
+                "permission": required,
+                "roles": [ROLE_LABELS[role] for role in allowed_roles],
+            }
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="access.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "role": normalize_role(session_payload.get("role")),
+            "role_label": role_label(session_payload.get("role")),
+            "permissions": sorted(session_permissions(session_payload)),
+            "is_admin": normalize_role(session_payload.get("role")) == ROLE_ADMIN,
+            "docs_enabled": config.enable_api_docs,
+            "access_mode": get_telegram_access_mode(),
+            "role_columns": role_columns,
+            "role_options": role_columns,
+            "web_permissions": web_permissions,
+            "bot_permissions": bot_permissions,
+            "bot_commands": bot_commands,
+            "can_manage_settings": has_permission(session_payload, PERM_SETTINGS_MANAGE),
+        },
+    )
+
+
 @app.get("/site-analytics", response_class=HTMLResponse, include_in_schema=False)
 async def site_analytics_page(
     request: Request,
@@ -990,6 +1075,7 @@ async def stats_page(
             "can_view_radar": has_permission(session_payload, PERM_RADAR_VIEW),
             "can_view_chatintel": has_permission(session_payload, PERM_CHATINTEL_VIEW),
             "can_view_system": has_permission(session_payload, PERM_SYSTEM_VIEW),
+            "can_manage_users": has_permission(session_payload, PERM_USERS_MANAGE),
             "docs_enabled": config.enable_api_docs,
         },
     )

@@ -68,14 +68,15 @@ from shared.bus import get_bus
 from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
-    PERM_ANALYTICS_VIEW,
-    PERM_CRM_EDIT,
-    PERM_PUBLIC_VIEW,
-    PERM_RADAR_VIEW,
-    PERM_SETTINGS_MANAGE,
-    PERM_STREAMERS_MANAGE,
-    PERM_SYSTEM_VIEW,
-    PERM_USERS_MANAGE,
+    PERM_BOT_ADMIN_LOGIN,
+    PERM_BOT_ANALYTICS_VIEW,
+    PERM_BOT_CRM_EDIT,
+    PERM_BOT_PUBLIC_VIEW,
+    PERM_BOT_RADAR_VIEW,
+    PERM_BOT_SETTINGS_MANAGE,
+    PERM_BOT_STREAMERS_MANAGE,
+    PERM_BOT_SYSTEM_VIEW,
+    PERM_BOT_USERS_MANAGE,
     ROLE_USER,
     normalize_role,
     permissions_for,
@@ -697,7 +698,7 @@ class TelegramBotService:
         """
         if not update.effective_message or not update.effective_user:
             return
-        access = await self._authorize(update, require_admin=True)
+        access = await self._authorize(update, require_permission=PERM_BOT_ADMIN_LOGIN)
         if not access:
             return
 
@@ -752,7 +753,11 @@ class TelegramBotService:
             "",
         )
 
-        if not access.get("is_admin"):
+        access_perms = permissions_for(
+            normalize_role(access.get("role")),
+            1 if access.get("allowed") else 0,
+        )
+        if not access.get("allowed") or PERM_BOT_ADMIN_LOGIN not in access_perms:
             await query.answer("⛔ Nur Administratoren dürfen Logins freigeben.", show_alert=True)
             return
 
@@ -1170,7 +1175,7 @@ class TelegramBotService:
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_user:
             return
-        access = await self._authorize(update, require_permission=PERM_PUBLIC_VIEW)
+        access = await self._authorize(update, require_permission=PERM_BOT_PUBLIC_VIEW)
         if not access:
             return
 
@@ -1195,7 +1200,7 @@ class TelegramBotService:
         ]
         sections.append("<b>🌐 Öffentliche Befehle:</b>\n" + "\n".join(public_lines))
 
-        if PERM_ANALYTICS_VIEW in perms:
+        if PERM_BOT_ANALYTICS_VIEW in perms:
             sections.append(
                 "<b>📊 Statistik-Befehle:</b>\n"
                 "• <code>/overview [heute|24h|7d|30d|all]</code> – Finanz- &amp; Performance-Dashboard\n"
@@ -1204,7 +1209,7 @@ class TelegramBotService:
                 "• <code>/status</code> – Laufzeit-Status aller TikTokLive-Worker"
             )
 
-        if PERM_RADAR_VIEW in perms:
+        if PERM_BOT_RADAR_VIEW in perms:
             sections.append(
                 "<b>🐋 Whitelist-Befehle:</b>\n"
                 "• <code>/radar [all|whale|shark|dolphin|vip]</code> – Spender-Radar &amp; Rangliste\n"
@@ -1215,17 +1220,17 @@ class TelegramBotService:
             )
 
         admin_lines: List[str] = []
-        if access["is_admin"]:
+        if PERM_BOT_ADMIN_LOGIN in perms:
             admin_lines.append("• <code>/login</code> – Einmal-Code für das Web-Admin-Panel (<code>/admin</code>)")
-        if PERM_STREAMERS_MANAGE in perms:
+        if PERM_BOT_STREAMERS_MANAGE in perms:
             admin_lines.append("• <code>/add &lt;username&gt;</code> – Streamer hinzufügen &amp; Worker starten")
             admin_lines.append("• <code>/track &lt;username&gt;</code> | <code>/stop &lt;username&gt;</code> – Worker steuern")
             admin_lines.append("• <code>/alert &lt;@username&gt;</code> – Live-Alert in diesem Chat aktivieren")
-        if PERM_USERS_MANAGE in perms:
+        if PERM_BOT_USERS_MANAGE in perms:
             admin_lines.append("• <code>/allow &lt;id|@user&gt; [viewer|user|moderator|admin]</code> – Nutzer freischalten")
             admin_lines.append("• <code>/revoke &lt;id|@user&gt;</code> – Zugriff entziehen (oder per Reply!)")
             admin_lines.append("• <code>/users</code> – Nutzerliste &amp; Anfragen anzeigen")
-        if PERM_SETTINGS_MANAGE in perms:
+        if PERM_BOT_SETTINGS_MANAGE in perms:
             admin_lines.append("• <code>/mode &lt;whitelist|public&gt;</code> – Zugriffsmodus umschalten")
         if admin_lines:
             sections.append("<b>🔐 Verwaltungs-Befehle:</b>\n" + "\n".join(admin_lines))
@@ -1271,7 +1276,7 @@ class TelegramBotService:
     async def _cmd_miniapp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        access = await self._authorize(update, require_permission=PERM_PUBLIC_VIEW)
+        access = await self._authorize(update, require_permission=PERM_BOT_PUBLIC_VIEW)
         if not access:
             return
 
@@ -1330,7 +1335,7 @@ class TelegramBotService:
     async def _cmd_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        if not await self._authorize(update, require_permission=PERM_ANALYTICS_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_ANALYTICS_VIEW):
             return
 
         hours = 24
@@ -1350,7 +1355,7 @@ class TelegramBotService:
     async def _cmd_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_ANALYTICS_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_ANALYTICS_VIEW):
             return
 
         if not context.args:
@@ -1523,7 +1528,7 @@ class TelegramBotService:
     async def _cmd_overview(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_ANALYTICS_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_ANALYTICS_VIEW):
             return
 
         period = "today"
@@ -1613,7 +1618,7 @@ class TelegramBotService:
     async def _cmd_radar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_RADAR_VIEW):
             return
 
         tier = "all"
@@ -1681,7 +1686,7 @@ class TelegramBotService:
     async def _cmd_whales(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_RADAR_VIEW):
             return
 
         min_coins = 1000
@@ -1795,7 +1800,7 @@ class TelegramBotService:
     async def _cmd_donor(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        access = await self._authorize(update, require_permission=PERM_RADAR_VIEW)
+        access = await self._authorize(update, require_permission=PERM_BOT_RADAR_VIEW)
         if not access:
             return
 
@@ -1811,7 +1816,7 @@ class TelegramBotService:
         text, markup = await asyncio.to_thread(
             self._format_donor_view,
             uname,
-            PERM_CRM_EDIT in access["permissions"],
+            PERM_BOT_CRM_EDIT in access["permissions"],
         )
         await update.effective_message.reply_text(
             text,
@@ -1826,7 +1831,7 @@ class TelegramBotService:
     async def _cmd_vip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_RADAR_VIEW):
             return
 
         args = context.args or []
@@ -1860,7 +1865,7 @@ class TelegramBotService:
             await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
             return
 
-        if not await self._authorize(update, require_permission=PERM_CRM_EDIT):
+        if not await self._authorize(update, require_permission=PERM_BOT_CRM_EDIT):
             return
 
         first = args[0].lower().strip()
@@ -1948,7 +1953,7 @@ class TelegramBotService:
     async def _cmd_loyalty(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_RADAR_VIEW):
             return
 
         days = 14
@@ -2003,7 +2008,7 @@ class TelegramBotService:
     async def _cmd_streamers(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_PUBLIC_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_PUBLIC_VIEW):
             return
 
         text, markup = await asyncio.to_thread(self._format_streamers_view)
@@ -2061,7 +2066,7 @@ class TelegramBotService:
     async def _cmd_gifts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_PUBLIC_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_PUBLIC_VIEW):
             return
 
         streamer_ident = context.args[0].strip().lstrip("@") if context.args else None
@@ -2111,14 +2116,14 @@ class TelegramBotService:
         text = None
         markup = None
 
-        if action in ("overview_period", "overview_streamer") and PERM_ANALYTICS_VIEW not in access_perms:
-            await _deny_permission(PERM_ANALYTICS_VIEW)
+        if action in ("overview_period", "overview_streamer") and PERM_BOT_ANALYTICS_VIEW not in access_perms:
+            await _deny_permission(PERM_BOT_ANALYTICS_VIEW)
             return
-        if action in ("radar_tier", "whales_min", "donor_refresh", "loyalty_days") and PERM_RADAR_VIEW not in access_perms:
-            await _deny_permission(PERM_RADAR_VIEW)
+        if action in ("radar_tier", "whales_min", "donor_refresh", "loyalty_days") and PERM_BOT_RADAR_VIEW not in access_perms:
+            await _deny_permission(PERM_BOT_RADAR_VIEW)
             return
-        if action == "donor_vip_toggle" and PERM_CRM_EDIT not in access_perms:
-            await _deny_permission(PERM_CRM_EDIT)
+        if action == "donor_vip_toggle" and PERM_BOT_CRM_EDIT not in access_perms:
+            await _deny_permission(PERM_BOT_CRM_EDIT)
             return
 
         if action == "overview_period":
@@ -2148,7 +2153,7 @@ class TelegramBotService:
             text, markup = await asyncio.to_thread(
                 self._format_donor_view,
                 uname,
-                PERM_CRM_EDIT in access_perms,
+                PERM_BOT_CRM_EDIT in access_perms,
             )
         elif action == "loyalty_days":
             await query.answer()
@@ -2180,7 +2185,7 @@ class TelegramBotService:
     async def _cmd_add_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_STREAMERS_MANAGE):
             return
 
         if not context.args:
@@ -2210,7 +2215,7 @@ class TelegramBotService:
     async def _cmd_track_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_STREAMERS_MANAGE):
             return
         if not context.args:
             await update.effective_message.reply_text(
@@ -2227,7 +2232,7 @@ class TelegramBotService:
     async def _cmd_stop_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_STREAMERS_MANAGE):
             return
         if not context.args:
             await update.effective_message.reply_text(
@@ -2244,7 +2249,7 @@ class TelegramBotService:
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_SYSTEM_VIEW):
+        if not await self._authorize(update, require_permission=PERM_BOT_SYSTEM_VIEW):
             return
         diag = monitor_manager.get_all_diagnostics()
         workers = diag.get("workers", [])
@@ -2280,7 +2285,7 @@ class TelegramBotService:
     async def _cmd_allow_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_USERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_USERS_MANAGE):
             return
 
         reply_msg = update.effective_message.reply_to_message
@@ -2336,7 +2341,7 @@ class TelegramBotService:
     async def _cmd_revoke_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_USERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_USERS_MANAGE):
             return
 
         reply_msg = update.effective_message.reply_to_message
@@ -2381,7 +2386,7 @@ class TelegramBotService:
     async def _cmd_list_users(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_USERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_USERS_MANAGE):
             return
 
         users = await asyncio.to_thread(list_telegram_users)
@@ -2409,7 +2414,7 @@ class TelegramBotService:
             or not update.effective_user
         ):
             return
-        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_STREAMERS_MANAGE):
             return
 
         chat = update.effective_chat
@@ -2523,7 +2528,7 @@ class TelegramBotService:
     async def _cmd_access_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_permission=PERM_SETTINGS_MANAGE):
+        if not await self._authorize(update, require_permission=PERM_BOT_SETTINGS_MANAGE):
             return
 
         if not context.args or context.args[0].lower() not in ("whitelist", "public"):

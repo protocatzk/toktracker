@@ -124,6 +124,9 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
   Chat-Intelligence), `moderator` (Statistiken, Exporte und Systemstatus lesen,
   keine Schreibrechte) und `admin` (voller Zugriff). Die Rechte-Matrix liegt
   zentral in `shared/permissions.py`; API-Keys gelten als `admin`.
+- Bot-Befehle verwenden eigene `bot.*`-Capabilities (zentral in
+  `BOT_COMMAND_PERMISSIONS`), damit Web- und Telegram-Rechte getrennt bleiben.
+  Whitelist, Anfragen, Sperren und die Rechte-Matrix verwaltest du unter `/access`.
 - Spender-Namen sind auf öffentlichen Flächen standardmäßig **maskiert** (`public_show_donors=0`, im Admin-Panel umschaltbar).
 - Interne Rohdaten (`raw_data_json`) werden nie über öffentliche Endpunkte ausgeliefert.
 - Besucher-IPs werden ausschließlich als salted Hash gespeichert.
