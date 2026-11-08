@@ -41,7 +41,7 @@ def inspect_sqlite_database(sqlite_file_path: str) -> Dict[str, Any]:
         ]
 
         table_counts: Dict[str, int] = {}
-        for tbl in ["settings", "streamers", "stream_sessions", "gift_events", "telegram_users", "tiktok_battles"]:
+        for tbl in ["settings", "streamers", "streamer_alerts", "stream_sessions", "gift_events", "telegram_users", "tiktok_battles"]:
             if tbl in existing_tables:
                 try:
                     c = cur.execute(f"SELECT COUNT(*) FROM `{tbl}`").fetchone()[0]
@@ -85,7 +85,7 @@ def import_from_sqlite_database(
     if not os.path.exists(sqlite_file_path):
         raise FileNotFoundError(f"SQLite-Datei nicht gefunden: {sqlite_file_path}")
 
-    all_supported = ["settings", "streamers", "stream_sessions", "gift_events", "telegram_users", "tiktok_battles"]
+    all_supported = ["settings", "streamers", "streamer_alerts", "stream_sessions", "gift_events", "telegram_users", "tiktok_battles"]
     target_tables = [t for t in (import_tables or all_supported) if t in all_supported]
 
     src = sqlite3.connect(sqlite_file_path)
@@ -100,7 +100,7 @@ def import_from_sqlite_database(
         with get_db() as dst:
             # 1. Falls "clean", bereinige die gewählten Tabellen (in umgekehrter Fremdschlüssel-Reihenfolge)
             if mode == "clean":
-                clean_order = ["gift_events", "tiktok_battles", "stream_sessions", "streamers", "telegram_users", "settings"]
+                clean_order = ["gift_events", "tiktok_battles", "stream_sessions", "streamer_alerts", "streamers", "telegram_users", "settings"]
                 for tbl in clean_order:
                     if tbl in target_tables:
                         try:
@@ -154,6 +154,40 @@ def import_from_sqlite_database(
                     imported_stats["streamers"] = len(streamer_rows)
                 except Exception as e:
                     errors.append(f"Streamers Import: {e}")
+
+            # 3b. STREAMER ALERTS (nach Streamern wegen FK)
+            if "streamer_alerts" in target_tables:
+                try:
+                    alert_rows = cur_src.execute(
+                        "SELECT * FROM streamer_alerts ORDER BY id ASC"
+                    ).fetchall()
+                    for r in alert_rows:
+                        d = dict(r)
+                        dst.execute(
+                            """
+                            INSERT OR REPLACE INTO streamer_alerts (
+                                id, streamer_id, chat_id, chat_title,
+                                created_by_telegram_id, created_by_username,
+                                enabled, last_notified_session_id,
+                                last_notified_at, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                d["id"],
+                                d["streamer_id"],
+                                d["chat_id"],
+                                d.get("chat_title") or "",
+                                d.get("created_by_telegram_id"),
+                                d.get("created_by_username") or "",
+                                int(d.get("enabled") or 0),
+                                d.get("last_notified_session_id"),
+                                d.get("last_notified_at"),
+                                d["created_at"],
+                            ),
+                        )
+                    imported_stats["streamer_alerts"] = len(alert_rows)
+                except Exception as e:
+                    errors.append(f"Streamer-Alerts Import: {e}")
 
             # 4. STREAM SESSIONS
             if "stream_sessions" in target_tables:

@@ -19,6 +19,12 @@ from shared.db._base import (  # noqa: F401
     get_db,
     get_mysql_pool,
 )
+from shared.db.alerts import (  # noqa: F401
+    add_streamer_alert,
+    list_streamer_alert_subscriptions,
+    mark_streamer_alert_notified,
+    remove_streamer_alert,
+)
 from shared.db.analytics import (  # noqa: F401
     _OVERVIEW_CACHE_TTL,
     _overview_cache,
@@ -100,6 +106,7 @@ from shared.db.streamers import (  # noqa: F401
     clear_demo_data,
     delete_streamer,
     end_stream_session,
+    get_active_stream_session,
     get_all_streamers_summary,
     get_auto_monitor_streamers,
     get_stream_sessions,
@@ -159,6 +166,7 @@ __all__ = [
     "delete_telegram_user",
     "check_telegram_user_access",
     "get_streamer_by_id_or_username",
+    "get_active_stream_session",
     "get_auto_monitor_streamers",
     "upsert_streamer",
     "update_streamer_runtime_state",
@@ -171,6 +179,10 @@ __all__ = [
     "get_stream_sessions",
     "get_all_streamers_summary",
     "record_gift_event",
+    "add_streamer_alert",
+    "remove_streamer_alert",
+    "list_streamer_alert_subscriptions",
+    "mark_streamer_alert_notified",
     "record_battle_start",
     "update_battle_scores",
     "record_battle_finish",

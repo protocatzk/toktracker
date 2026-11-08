@@ -40,6 +40,7 @@ except ImportError:
 
 from config import BASE_DIR, config
 from database import (
+    add_streamer_alert,
     build_streamer_bot_report,
     check_telegram_user_access,
     get_all_streamers_summary,
@@ -52,7 +53,10 @@ from database import (
     get_settings,
     get_streamer_by_id_or_username,
     get_telegram_access_mode,
+    list_streamer_alert_subscriptions,
     list_telegram_users,
+    mark_streamer_alert_notified,
+    remove_streamer_alert,
     save_donor_crm,
     set_telegram_access_mode,
     toggle_donor_vip,
@@ -60,6 +64,8 @@ from database import (
     upsert_telegram_user_permission,
 )
 from shared.auth_store import AdminAuthManager, admin_auth_manager
+from shared.bus import get_bus
+from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
     PERM_ANALYTICS_VIEW,
@@ -219,6 +225,8 @@ class TelegramBotService:
         self._last_disk_alert_time: float = 0.0
         self._disk_alert_active: bool = False
         self._logs: Deque[Dict[str, str]] = deque(maxlen=40)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._live_alert_subscribed: bool = False
 
     def _log(self, level: str, msg: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -313,6 +321,7 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler("revoke", self._cmd_revoke_user))
             self._app.add_handler(CommandHandler("users", self._cmd_list_users))
             self._app.add_handler(CommandHandler("mode", self._cmd_access_mode))
+            self._app.add_handler(CommandHandler(["alert", "livealert", "livealerts"], self._cmd_alert))
 
             # Callback-Handler für 1-Klick Admin-Login-Freigabe
             self._app.add_handler(
@@ -342,6 +351,8 @@ class TelegramBotService:
             await self._register_bot_commands()
 
             await self._app.start()
+            self._loop = asyncio.get_running_loop()
+            await self._ensure_live_alert_subscription()
             if self._app.updater:
                 await self._app.updater.start_polling(
                     drop_pending_updates=True,
@@ -414,6 +425,7 @@ class TelegramBotService:
             BotCommand("revoke", "[Admin] Nutzer-Berechtigung entziehen / sperren"),
             BotCommand("users", "[Admin] Freigeschaltete Nutzer & offene Anfragen auflisten"),
             BotCommand("mode", "[Admin] Zugriffsmodus wechseln (whitelist oder public)"),
+            BotCommand("alert", "[Admin] Live-Alert für Streamer in diesem Chat verwalten"),
         ]
         try:
             await self._app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
@@ -421,6 +433,111 @@ class TelegramBotService:
             await self._app.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
         except Exception as exc:
             self._log("INFO", f"Hinweis bei set_my_commands: {exc}")
+
+    async def _ensure_live_alert_subscription(self) -> None:
+        """Abonniert Live-Status-Events des Ingest-Workers (einmal pro Prozess)."""
+        if self._live_alert_subscribed:
+            return
+        try:
+            await get_bus().subscribe(CHANNEL_LIVE_STATUS, self._on_live_status_event)
+            self._live_alert_subscribed = True
+            self._log("INFO", "Live-Status-Alerts abonniert.")
+        except Exception as exc:
+            self._log("ERROR", f"Live-Status-Alerts konnten nicht abonniert werden: {exc}")
+
+    def _on_live_status_event(self, payload: Dict[str, Any]) -> None:
+        """Sync-Handler: leitet das Event thread-sicher in den Bot-Event-Loop."""
+        if self._state != "running" or not self._loop or self._loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._send_live_status_alert(payload),
+                self._loop,
+            )
+        except Exception as exc:
+            self._log("ERROR", f"Live-Status-Event konnte nicht eingeplant werden: {exc}")
+
+    async def _send_live_status_alert(self, payload: Dict[str, Any]) -> None:
+        """Verschickt einen Live-Alert an alle abonnierten Chats eines Streamers."""
+        if not self._app or self._state != "running":
+            return
+        try:
+            streamer_id = int(payload.get("streamer_id") or 0)
+            session_id = int(payload.get("session_id") or 0)
+        except (TypeError, ValueError):
+            return
+        if not streamer_id or not session_id:
+            return
+
+        username = str(payload.get("username") or "").strip().lstrip("@")
+        if not username:
+            return
+        display_name = str(payload.get("display_name") or username)
+        title = str(payload.get("title") or "").strip()
+        avatar_url = str(payload.get("avatar_url") or "").strip()
+
+        alerts = await asyncio.to_thread(
+            list_streamer_alert_subscriptions,
+            streamer_id=streamer_id,
+        )
+        if not alerts:
+            return
+
+        stream_url = f"https://www.tiktok.com/@{username}/live"
+        text_lines = [
+            f"🔴 <b>@{html.escape(username)} ist jetzt LIVE!</b>",
+            "",
+            f"<b>{html.escape(display_name)}</b>",
+        ]
+        if title:
+            text_lines.append(f"🎬 {html.escape(title)}")
+        text_lines.append(f'🔗 <a href="{stream_url}">Stream öffnen</a>')
+        text = "\n".join(text_lines)
+        markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("▶️ Stream öffnen", url=stream_url)]]
+        )
+
+        for alert in alerts:
+            try:
+                last_session = alert.get("last_notified_session_id")
+                if last_session is not None and int(last_session) == session_id:
+                    continue
+                chat_id = int(alert.get("chat_id"))
+                sent = False
+                if avatar_url.startswith(("http://", "https://")):
+                    try:
+                        await self._app.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=avatar_url,
+                            caption=text,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=markup,
+                        )
+                        sent = True
+                    except Exception:
+                        sent = False
+                if not sent:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=markup,
+                        disable_web_page_preview=False,
+                    )
+                await asyncio.to_thread(
+                    mark_streamer_alert_notified,
+                    int(alert["id"]),
+                    session_id,
+                )
+                self._log(
+                    "INFO",
+                    f"Live-Alert für @{username} an Chat {chat_id} gesendet.",
+                )
+            except Exception as exc:
+                self._log(
+                    "ERROR",
+                    f"Live-Alert für @{username} an Chat {alert.get('chat_id')} fehlgeschlagen: {exc}",
+                )
 
     async def stop(self) -> None:
         if not self._app:
@@ -1103,6 +1220,7 @@ class TelegramBotService:
         if PERM_STREAMERS_MANAGE in perms:
             admin_lines.append("• <code>/add &lt;username&gt;</code> – Streamer hinzufügen &amp; Worker starten")
             admin_lines.append("• <code>/track &lt;username&gt;</code> | <code>/stop &lt;username&gt;</code> – Worker steuern")
+            admin_lines.append("• <code>/alert &lt;@username&gt;</code> – Live-Alert in diesem Chat aktivieren")
         if PERM_USERS_MANAGE in perms:
             admin_lines.append("• <code>/allow &lt;id|@user&gt; [viewer|user|moderator|admin]</code> – Nutzer freischalten")
             admin_lines.append("• <code>/revoke &lt;id|@user&gt;</code> – Zugriff entziehen (oder per Reply!)")
@@ -2283,6 +2401,124 @@ class TelegramBotService:
                 f"{badge} <code>{tg_id}</code> – <b>{html.escape(uname)}</b>{role_tag}"
             )
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    async def _cmd_alert(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if (
+            not update.effective_message
+            or not update.effective_chat
+            or not update.effective_user
+        ):
+            return
+        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
+            return
+
+        chat = update.effective_chat
+        chat_id = int(chat.id)
+        chat_title = (
+            (chat.title or str(chat_id))
+            if self._is_group_chat(update)
+            else "Privatchat"
+        )
+        tg_user = update.effective_user
+        args = context.args or []
+
+        if not args or args[0].lower() in ("list", "status", "show"):
+            subscriptions = await asyncio.to_thread(
+                list_streamer_alert_subscriptions,
+                chat_id=chat_id,
+            )
+            if not subscriptions:
+                await update.effective_message.reply_text(
+                    "<b>🔔 Live-Alerts</b>\n\n"
+                    "Für diesen Chat sind noch keine Streamer-Alerts aktiv.\n"
+                    "Aktivieren mit <code>/alert &lt;@username&gt;</code>.",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            lines = [
+                "<b>🔔 Live-Alerts für diesen Chat</b>",
+                "────────────────────────",
+            ]
+            for sub in subscriptions:
+                uname = str(sub.get("streamer_username") or "").lstrip("@")
+                live_tag = " 🟢 LIVE" if int(sub.get("streamer_is_live") or 0) else ""
+                lines.append(f"• <b>@{html.escape(uname)}</b>{live_tag}")
+            lines.append(
+                "\n<i>Entfernen mit</i> <code>/alert off &lt;@username&gt;</code>."
+            )
+            await update.effective_message.reply_text(
+                "\n".join(lines), parse_mode=ParseMode.HTML
+            )
+            return
+
+        action = "add"
+        target = args[0]
+        first = target.lower()
+        off_words = ("off", "remove", "del", "delete", "stop", "aus")
+        on_words = ("on", "add", "set", "an")
+        if first in off_words:
+            action = "remove"
+            target = args[1] if len(args) > 1 else ""
+        elif first in on_words:
+            target = args[1] if len(args) > 1 else ""
+        elif len(args) > 1 and args[1].lower() in off_words:
+            action = "remove"
+        elif len(args) > 1 and args[1].lower() in on_words:
+            action = "add"
+
+        if not target:
+            await update.effective_message.reply_text(
+                "Verwendung:\n"
+                "• <code>/alert &lt;@username&gt;</code> – Live-Alert in diesem Chat aktivieren\n"
+                "• <code>/alert off &lt;@username&gt;</code> – Live-Alert deaktivieren\n"
+                "• <code>/alert list</code> – aktive Alerts anzeigen",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        streamer = await asyncio.to_thread(get_streamer_by_id_or_username, target)
+        if not streamer:
+            await update.effective_message.reply_text(
+                f"❌ Streamer <code>{html.escape(str(target).lstrip('@'))}</code> wurde nicht gefunden.\n"
+                "Lege ihn zuerst mit <code>/add &lt;username&gt;</code> an.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        uname = str(streamer.get("username") or target).lstrip("@")
+        if action == "remove":
+            removed = await asyncio.to_thread(
+                remove_streamer_alert,
+                int(streamer["id"]),
+                chat_id,
+            )
+            if removed:
+                msg = f"🔕 Live-Alert für <b>@{html.escape(uname)}</b> wurde in diesem Chat deaktiviert."
+            else:
+                msg = f"ℹ️ Für <b>@{html.escape(uname)}</b> war in diesem Chat kein Live-Alert aktiv."
+            await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+            return
+
+        await asyncio.to_thread(
+            add_streamer_alert,
+            int(streamer["id"]),
+            chat_id,
+            chat_title,
+            int(tg_user.id),
+            (tg_user.username or "").lstrip("@"),
+        )
+        warning = ""
+        if not int(streamer.get("auto_monitor") or 0):
+            warning = (
+                "\n\n⚠️ <i>Hinweis: Der Streamer ist aktuell nicht für Auto-Monitoring "
+                f"markiert. Starte die Überwachung mit</i> <code>/track @{html.escape(uname)}</code>, "
+                "<i>damit Live-Events erkannt werden.</i>"
+            )
+        await update.effective_message.reply_text(
+            f"✅ Live-Alert für <b>@{html.escape(uname)}</b> ist in diesem Chat aktiviert."
+            f"{warning}",
+            parse_mode=ParseMode.HTML,
+        )
 
     async def _cmd_access_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:

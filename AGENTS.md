@@ -12,7 +12,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 - **Live-Event-Tracking**: Erfassen von Geschenken (Coins, Diamonds), Zuschauerzahlen und Stream-Status via `TikTokLive`.
 - **Finanzmetriken**: Präzise Berechnung von Brutto-Kaufwerten (Viewer-Ausgaben) und Netto-Creator-Auszahlungen in **USD ($)** und **EUR (€)**.
 - **Web-Dashboard**: Modernes Web-Interface (Jinja2, CSS, Vanilla JS) für Admins und eine schlanke öffentliche Ansicht (`/public`).
-- **Telegram-Bot Integration**: Automatisierte 24h-Reports, Streamer-Statistiken, Live-Status-Checks und interaktiver 2FA-/1-Click-Login für das Web-Admin-Panel.
+- **Telegram-Bot Integration**: Automatisierte 24h-Reports, Streamer-Statistiken, Live-Status-Checks, Live-Alerts für einzelne Streamer in Gruppen und interaktiver 2FA-/1-Click-Login für das Web-Admin-Panel.
 - **Dual-Database Engine**: Vollständige Unterstützung von **SQLite** (lokal mit WAL-Modus) und **MySQL / MariaDB** (Produktion).
 
 ---
@@ -88,7 +88,9 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
    - Key-Value Store für Währungskurse (`usd_per_diamond`, `gross_usd_per_coin`, `usd_to_eur_rate`, `currency_primary`), Polling-Intervalle, API-Keys und Zugriffsmodi.
 5. **`telegram_users`**:
    - Rollen- & Berechtigungstabelle (`user_id`, `username`, `role` [viewer/user/moderator/admin], `is_allowed` [1=erlaubt, 0=wartend, -1=gesperrt]).
-6. **`admin_challenges`**:
+6. **`streamer_alerts`**:
+   - Live-Alert-Abos pro Streamer und Telegram-Chat (`streamer_id`, `chat_id`, `chat_title`, `created_by_*`, `enabled`, `last_notified_session_id`). Eindeutig pro Streamer/Chat.
+7. **`admin_challenges`**:
    - Temporäre Login-Anfragen für das Web-Dashboard mit Status (`pending`, `approved`, `rejected`, `expired`).
 
 ---
@@ -101,6 +103,7 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 3. Der Worker verbindet sich mit dem TikTok-WebSocket.
 4. Bei Geschenken fängt `on_gift` die Events ab, puffert Combo-/Streak-Geschenke kurz (`_streak_watchdog_loop`) und persistiert sie über `record_gift_event()` in die Datenbank.
 5. Geht ein Streamer offline, schaltet der Supervisor in den Polling-Modus (`_supervisor_loop`), bis der Streamer wieder online geht.
+6. Bei einer neuen Live-Session veröffentlicht `on_connect` ein `live_status`-Event auf `tt:event:live_status`. Der Bot liest die Abos aus `streamer_alerts` und sendet je Chat einen Live-Alert (dedupliziert über `last_notified_session_id`).
 
 ### B. Telegram-Bot 2FA Web-Login
 1. Nutzer öffnet `/login` und fordert Login an.

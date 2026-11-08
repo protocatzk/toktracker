@@ -8,6 +8,7 @@ STREAM_EVENTS = "tt:events"
 CHANNEL_COMMANDS = "tt:cmd:broadcast"
 CHANNEL_RECONCILE = "tt:cmd:reconcile"
 CHANNEL_SETTINGS_CHANGED = "tt:cmd:settings_changed"
+CHANNEL_LIVE_STATUS = "tt:event:live_status"   # Ingest -> Bot: Streamer ist live gegangen
 
 # Bot RPC
 RPC_BOT_QUEUE = "tt:rpc:bot:requests"
