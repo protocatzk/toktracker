@@ -262,6 +262,21 @@ class TestPageRoleMatrix(ApiRoleTestCase):
         self.cookie_headers(ROLE_ADMIN)
         self.assertEqual((await self.client.get("/admin")).status_code, 200)
 
+    async def test_access_page_is_admin_only(self):
+        self.client.cookies.clear()
+        for role in (ROLE_VIEWER, ROLE_USER, ROLE_MODERATOR):
+            self.cookie_headers(role)
+            with self.subTest(role=role):
+                self.assertEqual((await self.client.get("/access")).status_code, 302)
+
+        self.client.cookies.clear()
+        self.cookie_headers(ROLE_ADMIN)
+        res = await self.client.get("/access")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("ZUGRIFF &amp; ROLLEN", res.text)
+        self.assertIn("bot.analytics.view", res.text)
+        self.assertIn("/alert", res.text)
+
     async def test_radar_page_requires_radar_permission(self):
         self.client.cookies.clear()
         self.cookie_headers(ROLE_VIEWER)

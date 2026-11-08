@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+
+{% block title %}toktracker – Zugriff, Whitelist &amp; Rollen{% endblock %}
+
+{% block head %}
+    <link rel="stylesheet" href="/static/access.css?v=1.0.1" />
+{% endblock %}
+
+{% block content %}
+<header class="app-header">
+    <div class="header-inner">
+        <a href="/access" class="brand-block">
+            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <div class="brand-text">
+                <div class="brand-title-row">
+                    <h1 class="brand-title">toktracker</h1>
+                    <span class="brand-mode-tag">ZUGRIFF &amp; ROLLEN</span>
+                </div>
+                <span class="brand-subtitle">WHITELIST · ANFRAGEN · BOT-RECHTE</span>
+            </div>
+        </a>
+        <div class="status-strip">
+            <span class="pill">Rolle: <strong>{{ role_label }}</strong></span>
+            <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+            <span class="pill">Modus: <strong id="accessModePill">{{ access_mode | upper }}</strong></span>
+            {% if is_admin %}<a class="btn-link sm" href="/admin">← Admin-Dashboard</a>{% endif %}
+            <a class="btn-link sm" href="/stats">📈 Statistiken</a>
+            <a class="btn-link primary sm" href="/public">Öffentliches Panel →</a>
+            <a class="btn-link sm" href="/logout">Abmelden</a>
+        </div>
+    </div>
+</header>
+
+<nav class="nav-bar">
+    <div class="nav-inner">
+        <div class="toolbar-controls">
+            <span class="mono muted">Zugriffsverwaltung</span>
+            <span class="mono muted">Stand: <strong id="accessLastUpdate">--:--:--</strong></span>
+        </div>
+        <div class="toolbar-controls">
+            <button type="button" id="btnAccessRefresh" class="primary sm">🔄 Aktualisieren</button>
+            <button type="button" id="btnThemeToggle" class="mono sm" title="Theme wechseln">Theme: DARK</button>
+        </div>
+    </div>
+</nav>
+
+<main class="container">
+    <div id="accessToast" class="access-toast" role="status" aria-live="polite"></div>
+
+    <section class="box access-hero">
+        <div class="box-header">
+            <div>
+                <h2>Wer darf was?</h2>
+                <div class="section-hint">
+                    Whitelist und Rollen gelten gemeinsam für Web und Telegram-Bot.
+                    Bot-Befehle nutzen eigene <code>bot.*</code>-Rechte, damit du die
+                    Bot-Oberfläche unabhängig von den Web-Modulen steuern kannst.
+                </div>
+            </div>
+            <span class="status-tag" id="accessModeBadge">{{ access_mode | upper }}</span>
+        </div>
+
+        <div class="access-mode-row">
+            <label for="accessModeSelect" class="mono"><strong>Zugriffsmodus:</strong></label>
+            {% if can_manage_settings %}
+            <select id="accessModeSelect">
+                <option value="whitelist" {% if access_mode == "whitelist" %}selected{% endif %}>WHITELIST – nur freigeschaltete Nutzer</option>
+                <option value="public" {% if access_mode == "public" %}selected{% endif %}>PUBLIC – Lesezugriff für alle</option>
+            </select>
+            <button type="button" id="btnSaveAccessMode" class="primary sm">Modus speichern</button>
+            {% else %}
+            <span class="status-tag">{{ access_mode | upper }}</span>
+            <span class="muted">Nur Administratoren mit <code>settings.manage</code> dürfen den Modus ändern.</span>
+            {% endif %}
+        </div>
+        <div class="section-hint">
+            <strong>WHITELIST:</strong> Nur freigeschaltete Personen dürfen Bot-Befehle ausführen.
+            <strong>PUBLIC:</strong> Auch Gäste dürfen öffentliche Bot-Befehle nutzen
+            (Rolle <em>Gast</em> mit <code>bot.public.view</code>). Verwaltungs-, Analyse- und
+            Radar-Befehle bleiben trotzdem auf die jeweilige Rolle beschränkt.
+        </div>
+    </section>
+
+    <div class="summary-bar access-summary">
+        <div class="summary-box">
+            <div class="label">Offene Anfragen</div>
+            <div class="val" id="accessPendingCount">0</div>
+            <div class="sub">warten auf Freischaltung</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Freigeschaltet</div>
+            <div class="val" id="accessAllowedCount">0</div>
+            <div class="sub">aktive Whitelist</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Gesperrt</div>
+            <div class="val" id="accessBlockedCount">0</div>
+            <div class="sub">kein Bot-/Web-Zugriff</div>
+        </div>
+        <div class="summary-box">
+            <div class="label">Administratoren</div>
+            <div class="val" id="accessAdminCount">0</div>
+            <div class="sub">Vollzugriff</div>
+        </div>
+    </div>
+
+    <section class="box" id="accessPendingBox">
+        <div class="box-header">
+            <div>
+                <h2>Offene Zugriffsanfragen</h2>
+                <div class="section-hint">
+                    Diese Personen haben den Bot kontaktiert, sind aber noch nicht freigeschaltet.
+                    Freischalten vergibt sofort die gewählte Rolle.
+                </div>
+            </div>
+            <span class="mono muted" id="accessPendingMeta">0 Einträge</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="hide-sm">Telegram-ID</th>
+                        <th>@Username / Name</th>
+                        <th>Herkunft</th>
+                        <th class="hide-md">Zuletzt aktiv</th>
+                        <th>Aktion</th>
+                    </tr>
+                </thead>
+                <tbody id="accessPendingBody">
+                    <tr><td colspan="5" class="muted">Lade Anfragen...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="box">
+        <div class="box-header">
+            <div>
+                <h2>Whitelist &amp; Rollen</h2>
+                <div class="section-hint">
+                    Rolle ändern wirkt sofort auf Web-Sitzung und Bot-Befehle. Gesperrte
+                    Personen verlieren alle Rechte, auch bereits erteilte Bot-Capabilities.
+                </div>
+            </div>
+            <span class="mono muted" id="accessAllowedMeta">0 Einträge</span>
+        </div>
+
+        <form id="formAddAccessUser" class="inline-form access-add-form">
+            <input type="text" id="accessNewIdentifier" placeholder="Telegram-ID oder @username" required />
+            <input type="text" id="accessNewName" placeholder="Name / Notiz (optional)" />
+            <select id="accessNewRole">
+                {% for role in role_options %}
+                <option value="{{ role.value }}" {% if role.value == "user" %}selected{% endif %}>{{ role.label }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="primary sm">Freischalten</button>
+        </form>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="hide-sm">Telegram-ID</th>
+                        <th>@Username / Name</th>
+                        <th>Rolle</th>
+                        <th>Status</th>
+                        <th class="hide-md">Notiz</th>
+                        <th class="hide-md">Zuletzt aktiv</th>
+                        <th>Aktion</th>
+                    </tr>
+                </thead>
+                <tbody id="accessAllowedBody">
+                    <tr><td colspan="7" class="muted">Lade Whitelist...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="box" id="accessBlockedBox">
+        <div class="box-header">
+            <div>
+                <h2>Gesperrte Nutzer</h2>
+                <div class="section-hint">
+                    Gesperrte Personen behalten ihren Datensatz, erhalten aber keinerlei
+                    Rechte (<code>is_allowed = -1</code>).
+                </div>
+            </div>
+            <span class="mono muted" id="accessBlockedMeta">0 Einträge</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="hide-sm">Telegram-ID</th>
+                        <th>@Username / Name</th>
+                        <th>Rolle</th>
+                        <th class="hide-md">Notiz</th>
+                        <th>Aktion</th>
+                    </tr>
+                </thead>
+                <tbody id="accessBlockedBody">
+                    <tr><td colspan="5" class="muted">Keine gesperrten Nutzer.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="box">
+        <div class="box-header">
+            <div>
+                <h2>Rollen- &amp; Rechte-Matrix</h2>
+                <div class="section-hint">
+                    Web-Rechte und Bot-Rechte sind getrennt. Ein Häkchen bedeutet:
+                    Die Rolle besitzt die Capability. Die Matrix wird zentral in
+                    <code>shared/permissions.py</code> gepflegt.
+                </div>
+            </div>
+        </div>
+
+        <div class="access-matrix-grid">
+            <div>
+                <h3 class="access-subtitle">Web-Capabilities</h3>
+                <div class="table-wrap">
+                    <table class="access-matrix">
+                        <thead>
+                            <tr>
+                                <th>Capability</th>
+                                {% for role in role_columns %}
+                                <th class="num-col">{{ role.label }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for perm in web_permissions %}
+                            <tr>
+                                <td>
+                                    <strong>{{ perm.label }}</strong>
+                                    <span class="mono muted access-perm-key">{{ perm.key }}</span>
+                                </td>
+                                {% for role in role_columns %}
+                                <td class="num-col">{% if perm.key in role.permissions %}✓{% else %}<span class="muted">–</span>{% endif %}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="access-subtitle">Bot-Capabilities</h3>
+                <div class="table-wrap">
+                    <table class="access-matrix">
+                        <thead>
+                            <tr>
+                                <th>Capability</th>
+                                {% for role in role_columns %}
+                                <th class="num-col">{{ role.label }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for perm in bot_permissions %}
+                            <tr>
+                                <td>
+                                    <strong>{{ perm.label }}</strong>
+                                    <span class="mono muted access-perm-key">{{ perm.key }}</span>
+                                </td>
+                                {% for role in role_columns %}
+                                <td class="num-col">{% if perm.key in role.permissions %}✓{% else %}<span class="muted">–</span>{% endif %}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="box">
+        <div class="box-header">
+            <div>
+                <h2>Bot-Befehle &amp; benötigte Rechte</h2>
+                <div class="section-hint">
+                    Jeder Befehl wird im Bot über <code>_authorize()</code> gegen die
+                    hier gelistete Capability geprüft. <code>/id</code> bleibt bewusst
+                    ohne Prüfung, weil er nur den eigenen Status anzeigt.
+                </div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Befehl</th>
+                        <th>Capability</th>
+                        <th>Erlaubte Rollen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cmd in bot_commands %}
+                    <tr>
+                        <td class="mono"><strong>{{ cmd.label }}</strong></td>
+                        <td>
+                            {% if cmd.permission %}
+                            <code>{{ cmd.permission }}</code>
+                            {% else %}
+                            <span class="status-tag live">immer erlaubt</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ cmd.roles | join(", ") }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/access.js?v=1.0.0"></script>
+{% endblock %}
