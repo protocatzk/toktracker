@@ -335,7 +335,7 @@
         // Step A: Telegram Native WebApp initData
         if (tg && tg.initData) {
             try {
-                const res = await fetch("/api/miniapp/auth", {
+                const res = await fetch("api/miniapp/auth", {
                     method: "POST",
                     headers: { "Content-Type": "application/json", "Accept": "application/json" },
                     body: JSON.stringify({ init_data: tg.initData })
@@ -361,7 +361,7 @@
 
         // Step B: Check stored session token / cookie status
         try {
-            const res = await fetch("/api/miniapp/auth/status", {
+            const res = await fetch("api/miniapp/auth/status", {
                 headers: getAuthHeaders()
             });
             if (res.ok) {
@@ -443,12 +443,12 @@
         if (elements.btnRefresh) elements.btnRefresh.classList.add("spinning");
 
         try {
-            const res = await fetch(`/api/miniapp/data?period=${encodeURIComponent(currentPeriod)}`, {
+            const res = await fetch(`api/miniapp/data?period=${encodeURIComponent(currentPeriod)}`, {
                 headers: getAuthHeaders()
             });
             if (res.status === 401) {
                 // Zugriffssperre: Nutzer ist nicht per Telegram freigeschaltet.
-                window.location.href = "/login?error=" + encodeURIComponent(
+                window.location.href = "login?error=" + encodeURIComponent(
                     "Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden."
                 );
                 return;
@@ -550,7 +550,7 @@
                                 <div class="ffa-row-item ${p.is_tracked ? 'is-tracked' : ''}">
                                     <div class="ffa-player-meta">
                                         <span class="ffa-rank-tag" style="${idx === 0 ? 'color:#f59e0b;' : ''}">${rankBadges[idx] || `#${idx+1}`}</span>
-                                        <img src="${escapeHtml(p.avatar_url || '/static/avatar_default.png')}" class="ffa-avatar-small" onerror="this.src='/static/avatar_default.png'">
+                                        <img src="${escapeHtml(p.avatar_url || 'static/avatar_default.png')}" class="ffa-avatar-small" onerror="this.src='static/avatar_default.png'">
                                         <div style="min-width:0;">
                                             <div class="ffa-name">${escapeHtml(p.display_name || p.username || '')}</div>
                                             <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">@${escapeHtml(p.username || '')}</div>
@@ -592,7 +592,7 @@
                         <div class="battle-arena-1v1">
                             <div class="combatant-side">
                                 <div class="combatant-avatar-wrap">
-                                    <img src="${escapeHtml(sA.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                    <img src="${escapeHtml(sA.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sA.display_name || sA.username || '')}</div>
                                 <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
@@ -603,7 +603,7 @@
 
                             <div class="combatant-side">
                                 <div class="combatant-avatar-wrap">
-                                    <img src="${escapeHtml(sB.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                    <img src="${escapeHtml(sB.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sB.display_name || sB.username || '')}</div>
                                 <div class="combatant-score" style="color: #ec4899;">${formatNumber(oScore)}</div>
@@ -627,9 +627,9 @@
 
             const mode = b.battle_mode || "1v1";
             const sName = item.display_name || item.username;
-            const sAvatar = item.avatar_url || "/static/avatar_default.png";
+            const sAvatar = item.avatar_url || "static/avatar_default.png";
             const oName = b.opponent_display_name || b.opponent_username || "Gegner";
-            const oAvatar = b.opponent_avatar_url || "/static/avatar_default.png";
+            const oAvatar = b.opponent_avatar_url || "static/avatar_default.png";
 
             const sScore = b.streamer_score || 0;
             const oScore = b.opponent_score || 0;
@@ -647,7 +647,7 @@
                     <div class="battle-arena-1v1">
                         <div class="combatant-side">
                             <div class="combatant-avatar-wrap">
-                                <img src="${escapeHtml(sAvatar)}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                <img src="${escapeHtml(sAvatar)}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(sName)}</div>
                             <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
@@ -657,7 +657,7 @@
 
                         <div class="combatant-side">
                             <div class="combatant-avatar-wrap">
-                                <img src="${escapeHtml(oAvatar)}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                <img src="${escapeHtml(oAvatar)}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(oName)}</div>
                             <div class="combatant-score" style="color: #ef4444;">${formatNumber(oScore)}</div>
@@ -704,7 +704,7 @@
                     {
                         username: b.streamer_username,
                         display_name: b.streamer_display_name || b.streamer_username,
-                        avatar_url: b.streamer_avatar_url || '/static/avatar_default.png',
+                        avatar_url: b.streamer_avatar_url || 'static/avatar_default.png',
                         score: sScore,
                         is_tracked: true,
                         eur_net: b.eur_net,
@@ -712,14 +712,14 @@
                     {
                         username: b.opponent_username || "Gegner 1",
                         display_name: b.opponent_display_name || b.opponent_username || "Gegner 1",
-                        avatar_url: b.opponent_avatar_url || '/static/avatar_default.png',
+                        avatar_url: b.opponent_avatar_url || 'static/avatar_default.png',
                         score: oScore,
                         is_tracked: false,
                     },
                     {
                         username: b.opponent2_username || "Gegner 2",
                         display_name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
-                        avatar_url: b.opponent2_avatar_url || '/static/avatar_default.png',
+                        avatar_url: b.opponent2_avatar_url || 'static/avatar_default.png',
                         score: b.opponent2_score || 0,
                         is_tracked: false,
                     },
@@ -728,7 +728,7 @@
                     players.push({
                         username: b.opponent3_username || "Gegner 3",
                         display_name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
-                        avatar_url: b.opponent3_avatar_url || '/static/avatar_default.png',
+                        avatar_url: b.opponent3_avatar_url || 'static/avatar_default.png',
                         score: b.opponent3_score || 0,
                         is_tracked: false,
                     });
@@ -754,7 +754,7 @@
                                 <div class="ffa-row-item ${p.is_tracked ? 'is-tracked' : ''}">
                                     <div class="ffa-player-meta">
                                         <span class="ffa-rank-tag" style="${idx === 0 ? 'color:#f59e0b;' : ''}">${rankBadges[idx] || `#${idx+1}`}</span>
-                                        <img src="${escapeHtml(p.avatar_url || '/static/avatar_default.png')}" class="ffa-avatar-small" onerror="this.src='/static/avatar_default.png'">
+                                        <img src="${escapeHtml(p.avatar_url || 'static/avatar_default.png')}" class="ffa-avatar-small" onerror="this.src='static/avatar_default.png'">
                                         <div style="min-width:0;">
                                             <div class="ffa-name">${escapeHtml(p.display_name || p.username || '')}</div>
                                             <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">@${escapeHtml(p.username || '')}</div>
@@ -799,7 +799,7 @@
                         <div class="battle-arena-1v1">
                             <div class="combatant-side">
                                 <div class="combatant-avatar-wrap">
-                                    <img src="${escapeHtml(sA.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sA.username ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                    <img src="${escapeHtml(sA.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sA.username ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sA.display_name || sA.username || '')}</div>
                                 <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
@@ -810,7 +810,7 @@
 
                             <div class="combatant-side">
                                 <div class="combatant-avatar-wrap">
-                                    <img src="${escapeHtml(sB.avatar_url || '/static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sB.username ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                    <img src="${escapeHtml(sB.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sB.username ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sB.display_name || sB.username || '')}</div>
                                 <div class="combatant-score" style="color: #ec4899;">${formatNumber(oScore)}</div>
@@ -838,12 +838,12 @@
             const resLabel = res === "WIN" ? "SIEG" : (res === "LOSE" ? "NIEDERLAGE" : "UNENTSCHIEDEN");
 
             const sName = b.streamer_display_name || b.streamer_username || "Streamer";
-            const sAvatar = b.streamer_avatar_url || "/static/avatar_default.png";
+            const sAvatar = b.streamer_avatar_url || "static/avatar_default.png";
             const sScore = b.streamer_score || 0;
             const relTime = getRelativeTime(b.started_at || b.created_at);
 
             const oName = b.opponent_display_name || b.opponent_username || "Gegner";
-            const oAvatar = b.opponent_avatar_url || "/static/avatar_default.png";
+            const oAvatar = b.opponent_avatar_url || "static/avatar_default.png";
             const oScore = b.opponent_score || 0;
 
             const totalScore = Math.max(1, sScore + oScore);
@@ -860,7 +860,7 @@
                     <div class="battle-arena-1v1">
                         <div class="combatant-side">
                             <div class="combatant-avatar-wrap">
-                                <img src="${escapeHtml(sAvatar)}" class="combatant-avatar ${res === 'WIN' ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                <img src="${escapeHtml(sAvatar)}" class="combatant-avatar ${res === 'WIN' ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(sName)}</div>
                             <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
@@ -870,7 +870,7 @@
 
                         <div class="combatant-side">
                             <div class="combatant-avatar-wrap">
-                                <img src="${escapeHtml(oAvatar)}" class="combatant-avatar ${res === 'LOSE' ? 'winner-glow' : ''}" onerror="this.src='/static/avatar_default.png'">
+                                <img src="${escapeHtml(oAvatar)}" class="combatant-avatar ${res === 'LOSE' ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(oName)}</div>
                             <div class="combatant-score" style="color: #ef4444;">${formatNumber(oScore)}</div>
@@ -906,7 +906,7 @@
 
         let html = "";
         streamers.forEach(s => {
-            const avatar = s.avatar_url || "/static/avatar_default.png";
+            const avatar = s.avatar_url || "static/avatar_default.png";
             const name = s.display_name || s.username;
             const viewers = s.is_live ? `${formatNumber(s.current_viewers)} Zuschauer` : "Offline";
 
@@ -914,7 +914,7 @@
                 <div class="streamer-card-mobile ${s.is_live ? 'is-live' : ''}">
                     <div class="streamer-info-left">
                         <div class="streamer-avatar-box">
-                            <img src="${escapeHtml(avatar)}" class="streamer-avatar-ma" onerror="this.src='/static/avatar_default.png'">
+                            <img src="${escapeHtml(avatar)}" class="streamer-avatar-ma" onerror="this.src='static/avatar_default.png'">
                             ${s.is_live ? '<span class="streamer-live-dot"></span>' : ''}
                         </div>
                         <div class="streamer-text-col">
@@ -1001,7 +1001,7 @@
     async function fetchAnalyticsData(isBackground = false) {
         try {
             const sid = selectedAnalyticsStreamer !== "all" ? `&streamer_id=${encodeURIComponent(selectedAnalyticsStreamer)}` : "";
-            const res = await fetch(`/api/miniapp/analytics?period=${encodeURIComponent(currentPeriod)}${sid}`, {
+            const res = await fetch(`api/miniapp/analytics?period=${encodeURIComponent(currentPeriod)}${sid}`, {
                 headers: { "Accept": "application/json" }
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1794,7 +1794,7 @@
     async function fetchRadarData(silent = false) {
         if (!elements.radarDonorsContainer) return;
 
-        let url = `/api/miniapp/radar?period=${encodeURIComponent(currentPeriod)}`;
+        let url = `api/miniapp/radar?period=${encodeURIComponent(currentPeriod)}`;
         if (radarTier && radarTier !== "all") {
             url += `&min_tier=${encodeURIComponent(radarTier)}`;
         }
@@ -1949,7 +1949,7 @@
     async function fetchWhaleTicker(silent = false) {
         if (!elements.whaleTickerTrack) return;
         try {
-            const res = await fetch(`/api/donor-radar/whale-alerts?min_coins=1000&limit=15`, { headers: getAuthHeaders() });
+            const res = await fetch(`api/donor-radar/whale-alerts?min_coins=1000&limit=15`, { headers: getAuthHeaders() });
             if (!res.ok) return;
             const json = await res.json();
             const alerts = json.alerts || [];
@@ -2033,7 +2033,7 @@
         }
 
         try {
-            const res = await fetch(`/api/donor-radar/whale-alerts?min_coins=${whaleAlertMinCoins}&limit=35`, { headers: getAuthHeaders() });
+            const res = await fetch(`api/donor-radar/whale-alerts?min_coins=${whaleAlertMinCoins}&limit=35`, { headers: getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             const alerts = json.alerts || [];
@@ -2057,12 +2057,12 @@
             alerts.forEach(a => {
                 const tier = (a.tier || "shark").toLowerCase();
                 const tierEmoji = tier === "whale" ? "🐋" : (tier === "shark" ? "🦈" : "🐬");
-                const giftImg = a.gift_icon_url || "/static/avatar_default.png";
+                const giftImg = a.gift_icon_url || "static/avatar_default.png";
                 const giftName = escapeHtml(a.gift_name || "Geschenk");
                 const repeat = parseInt(a.repeat_count || 1, 10);
                 const sender = escapeHtml(a.sender_username || "anonym");
                 const streamer = escapeHtml(a.streamer_display_name || a.streamer_username || "");
-                const streamerAvatar = a.streamer_avatar_url || "/static/avatar_default.png";
+                const streamerAvatar = a.streamer_avatar_url || "static/avatar_default.png";
                 const coins = formatNumber(a.total_coins || 0);
                 const eurNet = formatCurrency(a.eur_net || 0, "EUR");
                 const isVip = !!a.is_vip;
@@ -2070,7 +2070,7 @@
                 html += `
                     <div class="ma-alert-card tier-${tier}" data-donor="${sender}">
                         <div class="ma-alert-left">
-                            <img src="${escapeHtml(giftImg)}" class="ma-alert-gift-img" onerror="this.src='/static/avatar_default.png'" />
+                            <img src="${escapeHtml(giftImg)}" class="ma-alert-gift-img" onerror="this.src='static/avatar_default.png'" />
                             <div style="min-width: 0; flex: 1;">
                                 <div class="ma-alert-sender">
                                     <span>${tierEmoji}</span>
@@ -2078,7 +2078,7 @@
                                     ${isVip ? '<span style="color:#fbbf24;">⭐</span>' : ''}
                                 </div>
                                 <div class="ma-alert-target">
-                                    <img src="${escapeHtml(streamerAvatar)}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: cover;" onerror="this.src='/static/avatar_default.png'" />
+                                    <img src="${escapeHtml(streamerAvatar)}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: cover;" onerror="this.src='static/avatar_default.png'" />
                                     <span>an @${streamer}</span>
                                     <span>· ${repeat > 1 ? repeat + 'x ' : ''}${giftName}</span>
                                 </div>
@@ -2134,7 +2134,7 @@
         }
 
         try {
-            const res = await fetch(`/api/donor-radar/loyalty-and-overlap?days_recent=${loyaltyDaysRecent}&min_coins=50`, { headers: getAuthHeaders() });
+            const res = await fetch(`api/donor-radar/loyalty-and-overlap?days_recent=${loyaltyDaysRecent}&min_coins=50`, { headers: getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             const data = json.data || {};
@@ -2182,7 +2182,7 @@
                                 </div>
                                 <div class="ma-shifter-flow">
                                     <div class="ma-shifter-streamer">
-                                        <img src="${escapeHtml(fromS.avatar_url || '/static/avatar_default.png')}" class="ma-shifter-streamer-av" onerror="this.src='/static/avatar_default.png'" />
+                                        <img src="${escapeHtml(fromS.avatar_url || 'static/avatar_default.png')}" class="ma-shifter-streamer-av" onerror="this.src='static/avatar_default.png'" />
                                         <div class="ma-shifter-streamer-info">
                                             <div class="muted" style="font-size: 9px;">FRÜHER</div>
                                             <div>@${escapeHtml(fromS.username || '')}</div>
@@ -2196,7 +2196,7 @@
                                             <div style="color: #38bdf8;">@${escapeHtml(toS.username || '')}</div>
                                             <div class="mono" style="font-size: 10px; color: #fbbf24; font-weight: 800;">💎 ${formatNumber(toS.coins || 0)}</div>
                                         </div>
-                                        <img src="${escapeHtml(toS.avatar_url || '/static/avatar_default.png')}" class="ma-shifter-streamer-av" style="border-color: #38bdf8;" onerror="this.src='/static/avatar_default.png'" />
+                                        <img src="${escapeHtml(toS.avatar_url || 'static/avatar_default.png')}" class="ma-shifter-streamer-av" style="border-color: #38bdf8;" onerror="this.src='static/avatar_default.png'" />
                                     </div>
                                 </div>
                             </div>
@@ -2285,7 +2285,7 @@
         openModal(elements.modalDonorDossier);
 
         try {
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}`, { headers: getAuthHeaders() });
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(username)}`, { headers: getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             const payload = json.data || {};
@@ -2312,7 +2312,7 @@
             const tier = (profile.tier || "dolphin").toLowerCase();
             const isVip = finalIsVip;
             const displayNick = (profile.display_name && profile.display_name !== finalUsername) ? escapeHtml(profile.display_name) : "";
-            const avatar = profile.avatar_url || "/static/avatar_default.png";
+            const avatar = profile.avatar_url || "static/avatar_default.png";
             const coins = formatNumber(profile.total_coins || 0);
             const eurNet = formatCurrency(profile.total_eur_net || 0, "EUR");
             const usdNet = formatCurrency(profile.total_usd_net || 0, "USD");
@@ -2330,13 +2330,13 @@
                 const sCoins = Number(s.coins_given !== undefined ? s.coins_given : (s.coins || 0));
                 const pct = s.percentage !== undefined ? s.percentage : (totalCoinsDonor > 0 ? Math.round((sCoins / totalCoinsDonor) * 100) : 0);
                 const sUsername = s.streamer_username || s.username || "unbekannt";
-                const sAvatar = s.streamer_avatar_url || s.avatar_url || "/static/avatar_default.png";
+                const sAvatar = s.streamer_avatar_url || s.avatar_url || "static/avatar_default.png";
 
                 sHtml += `
                     <div class="ma-dossier-streamer-item">
                         <div class="ma-dossier-streamer-top">
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <img src="${escapeHtml(sAvatar)}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" onerror="this.src='/static/avatar_default.png'" />
+                                <img src="${escapeHtml(sAvatar)}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" onerror="this.src='static/avatar_default.png'" />
                                 <strong>@${escapeHtml(sUsername)}</strong>
                             </div>
                             <div class="mono" style="color: #fbbf24; font-weight: 700;">💎 ${formatNumber(sCoins)} (${pct}%)</div>
@@ -2442,7 +2442,7 @@
             elements.dossierBody.innerHTML = `
                 <!-- Profile Hero -->
                 <div class="ma-dossier-hero">
-                    <img src="${escapeHtml(avatar)}" class="ma-dossier-avatar" onerror="this.src='/static/avatar_default.png'" />
+                    <img src="${escapeHtml(avatar)}" class="ma-dossier-avatar" onerror="this.src='static/avatar_default.png'" />
                     <div style="flex: 1; min-width: 0;">
                         <div class="ma-dossier-title">
                             <span>@${escapeHtml(finalUsername)}</span>
@@ -2599,7 +2599,7 @@
         triggerHaptic("medium");
 
         try {
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/toggle-vip`, {
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(username)}/toggle-vip`, {
                 method: "POST",
                 headers: getAuthHeaders(),
             });
@@ -2643,7 +2643,7 @@
             return false;
         }
         try {
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/crm`, {
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(username)}/crm`, {
                 method: "POST",
                 headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                 body: JSON.stringify({
@@ -2703,7 +2703,7 @@
 
         let html = "";
         streamers.forEach(s => {
-            const avatar = s.avatar_url || "/static/avatar_default.png";
+            const avatar = s.avatar_url || "static/avatar_default.png";
             const name = s.display_name || s.username;
             const uname = s.username;
             const isTracking = !!s.is_tracking;
@@ -2713,7 +2713,7 @@
                 <div class="ma-admin-streamer-card">
                     <div class="ma-admin-streamer-top">
                         <div class="ma-admin-streamer-meta">
-                            <img src="${escapeHtml(avatar)}" class="ma-admin-streamer-avatar" onerror="this.src='/static/avatar_default.png'">
+                            <img src="${escapeHtml(avatar)}" class="ma-admin-streamer-avatar" onerror="this.src='static/avatar_default.png'">
                             <div>
                                 <div class="ma-admin-streamer-title">${escapeHtml(name)} ${isLive ? '🟢' : '⚪'}</div>
                                 <div class="ma-admin-streamer-sub">@${escapeHtml(uname)}</div>
@@ -2749,7 +2749,7 @@
                 if (action === "toggle-track") {
                     triggerHaptic("medium");
                     try {
-                        const res = await fetch(`/api/streamers/${encodeURIComponent(username)}/track`, {
+                        const res = await fetch(`api/streamers/${encodeURIComponent(username)}/track`, {
                             method: "POST",
                             headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                             body: JSON.stringify({ action: "toggle", auto_reconnect: true })
@@ -2767,7 +2767,7 @@
                     triggerHaptic("light");
                     btn.textContent = "⏳...";
                     try {
-                        const res = await fetch(`/api/streamers/${encodeURIComponent(username)}/refresh`, {
+                        const res = await fetch(`api/streamers/${encodeURIComponent(username)}/refresh`, {
                             method: "POST",
                             headers: getAuthHeaders()
                         });
@@ -2784,7 +2784,7 @@
                     triggerHaptic("warning");
                     if (confirm(`Streamer @${username} wirklich komplett aus dem TokTracker löschen?`)) {
                         try {
-                            const res = await fetch(`/api/streamers/${encodeURIComponent(streamerId || username)}`, {
+                            const res = await fetch(`api/streamers/${encodeURIComponent(streamerId || username)}`, {
                                 method: "DELETE",
                                 headers: getAuthHeaders()
                             });
@@ -2809,7 +2809,7 @@
             elements.btnMaRefreshHealth.textContent = "⏳ Lade...";
         }
         try {
-            const url = forceRefresh ? "/api/system/health?force_refresh=true" : "/api/system/status";
+            const url = forceRefresh ? "api/system/health?force_refresh=true" : "api/system/status";
             const res = await fetch(url, {
                 headers: getAuthHeaders()
             });
@@ -3027,7 +3027,7 @@
             triggerHaptic("medium");
             elements.btnSubmitAddStreamer.disabled = true;
             try {
-                const res = await fetch("/api/streamers", {
+                const res = await fetch("api/streamers", {
                     method: "POST",
                     headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                     body: JSON.stringify({
@@ -3071,7 +3071,7 @@
             triggerHaptic("medium");
             elements.btnSubmitAddGift.disabled = true;
             try {
-                const res = await fetch("/api/gifts", {
+                const res = await fetch("api/gifts", {
                     method: "POST",
                     headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                     body: JSON.stringify({
@@ -3101,7 +3101,7 @@
     // 3. Settings Modal
     async function loadSettings() {
         try {
-            const res = await fetch("/api/settings", { headers: getAuthHeaders() });
+            const res = await fetch("api/settings", { headers: getAuthHeaders() });
             if (!res.ok) return;
             const s = await res.json();
             if (elements.inputSettingsUsdDiamond) elements.inputSettingsUsdDiamond.value = s.usd_per_diamond || 0.005;
@@ -3123,7 +3123,7 @@
                     currency_primary: elements.selectSettingsCurrency.value,
                     telegram_access_mode: elements.selectSettingsTgMode.value
                 };
-                const res = await fetch("/api/settings", {
+                const res = await fetch("api/settings", {
                     method: "POST",
                     headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                     body: JSON.stringify(payload)
@@ -3145,7 +3145,7 @@
     async function loadWhitelist() {
         if (!elements.whitelistUsersContainer) return;
         try {
-            const res = await fetch("/api/telegram/users", { headers: getAuthHeaders() });
+            const res = await fetch("api/telegram/users", { headers: getAuthHeaders() });
             if (!res.ok) return;
             const users = await res.json();
 
@@ -3208,7 +3208,7 @@
     async function updateTelegramUserPermission(ident, isAllowed, role) {
         triggerHaptic("medium");
         try {
-            const res = await fetch("/api/telegram/users", {
+            const res = await fetch("api/telegram/users", {
                 method: "POST",
                 headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                 body: JSON.stringify({ identifier: String(ident), is_allowed: isAllowed, role: role })
@@ -3260,7 +3260,7 @@
             triggerHaptic("medium");
             elements.btnRequestOtp.disabled = true;
             try {
-                const res = await fetch("/api/miniapp/auth/request_otp", { method: "POST" });
+                const res = await fetch("api/miniapp/auth/request_otp", { method: "POST" });
                 if (res.ok) {
                     showToast("Code an hinterlegte Admins in Telegram gesendet!", "success");
                 } else {
@@ -3284,7 +3284,7 @@
             triggerHaptic("heavy");
             elements.btnSubmitOtp.disabled = true;
             try {
-                const res = await fetch("/api/miniapp/auth/verify_otp", {
+                const res = await fetch("api/miniapp/auth/verify_otp", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ code: code })
@@ -3314,7 +3314,7 @@
         elements.btnAdminLogout.addEventListener("click", async () => {
             triggerHaptic("medium");
             try {
-                await fetch("/api/miniapp/auth/logout", { method: "POST" });
+                await fetch("api/miniapp/auth/logout", { method: "POST" });
             } catch (e) {}
             sessionToken = "";
             localStorage.removeItem("toktracker_admin_token");

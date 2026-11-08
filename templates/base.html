@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="{% block viewport %}width=device-width, initial-scale=1.0{% endblock %}" />
+    <base href="{{ request.state.base_path }}/" />
     <title>{% block title %}toktracker{% endblock %}</title>
-    <link rel="icon" type="image/jpeg" href="/pictures/bot_avatar.jpg" />
+    <link rel="icon" type="image/jpeg" href="pictures/bot_avatar.jpg" />
     <script>
         (function () {
             try {
@@ -13,8 +14,8 @@
             } catch (e) {}
         })();
     </script>
-    {% block styles %}<link rel="stylesheet" href="/static/style.css?v=2.6.0" />{% endblock %}
-    <script src="/static/common.js?v=1.0.0"></script>
+    {% block styles %}<link rel="stylesheet" href="static/style.css?v=2.6.0" />{% endblock %}
+    <script src="static/common.js?v=1.0.0"></script>
     {% block head %}{% endblock %}
 </head>
 <body>

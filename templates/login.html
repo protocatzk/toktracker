@@ -10,7 +10,7 @@
         window.onTelegramAuth = async function (user) {
             setStatus("Verifiziere Administrator-Berechtigung über Telegram...", "info");
             try {
-                const res = await fetch("/api/auth/telegram/widget", {
+                const res = await fetch("api/auth/telegram/widget", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(user),
@@ -19,7 +19,7 @@
                 if (res.ok && data.ok) {
                     setStatus("✅ Verifizierung erfolgreich! Öffne Admin-Dashboard...", "success");
                     setTimeout(function () {
-                        window.location.href = data.redirect || "/public";
+                        window.location.href = appUrl(data.redirect || "/public");
                     }, 350);
                 } else {
                     setStatus(data.detail || "Authentifizierung fehlgeschlagen: Dein Account besitzt keine Admin-Berechtigung.", "error");
@@ -41,7 +41,7 @@
             box.textContent = message;
         }
     </script>
-    <link rel="stylesheet" href="/static/login.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/login.css?v=1.0.0" />
     
 {% endblock %}
 
@@ -49,8 +49,8 @@
 <!-- Kopfbereich: Brand, Gateway-Status & Navigation -->
 <header class="app-header">
     <div class="header-inner">
-        <a href="/" class="brand-block">
-            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+        <a href="./" class="brand-block">
+            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
                     <h1 class="brand-title">toktracker</h1>
@@ -63,7 +63,7 @@
             <span class="pill"><span class="live-dot"></span>GATEWAY: <strong>ACTIVE</strong></span>
             <span class="pill hide-sm">BOT: <strong>@{{ telegram_bot_username }}</strong></span>
             <span class="pill hide-sm">TELEGRAM: <strong>{{ telegram_state | upper }}</strong></span>
-            <a class="btn-link sm" href="/public">← Öffentliches User-Panel</a>
+            <a class="btn-link sm" href="public">← Öffentliches User-Panel</a>
             <button type="button" id="btnThemeToggle" class="mono sm" title="Theme wechseln">Theme: DARK</button>
         </div>
     </div>
@@ -78,8 +78,8 @@
             </span>
         </div>
         <div class="toolbar-controls">
-            <a class="btn-link sm mono" href="/miniapp" target="_blank" rel="noopener">📱 Mini-App ↗</a>
-            <a class="btn-link primary sm" href="/public">Public Panel →</a>
+            <a class="btn-link sm mono" href="miniapp" target="_blank" rel="noopener">📱 Mini-App ↗</a>
+            <a class="btn-link primary sm" href="public">Public Panel →</a>
         </div>
     </div>
 </nav>
@@ -115,7 +115,7 @@
                             data-size="large"
                             data-radius="0"
                             data-onauth="onTelegramAuth(user)"
-                            data-auth-url="/api/auth/telegram/widget-callback"
+                            data-auth-url="api/auth/telegram/widget-callback"
                             data-request-access="write"
                         ></script>
                     {% else %}
@@ -146,7 +146,7 @@
     <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div>toktracker &middot; LIVE TIKTOK EARNINGS &amp; BATTLE TRACKER</div>
         <div>
-            <a href="/public">Public Panel</a> &middot; <a href="/miniapp">Mini-App</a> &middot; <a href="/admin">Admin Console</a>
+            <a href="public">Public Panel</a> &middot; <a href="miniapp">Mini-App</a> &middot; <a href="admin">Admin Console</a>
         </div>
     </div>
 </footer>
@@ -174,7 +174,7 @@
 
                 setStatus("Prüfe Admin-Passwort...", "info");
                 try {
-                    var res = await fetch("/api/auth/password", {
+                    var res = await fetch("api/auth/password", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ password: pwd }),
@@ -183,7 +183,7 @@
                     if (res.ok && data.ok) {
                         setStatus("✅ Passwort akzeptiert! Öffne Admin-Dashboard...", "success");
                         setTimeout(function () {
-                            window.location.href = data.redirect || "/public";
+                            window.location.href = appUrl(data.redirect || "/public");
                         }, 350);
                     } else {
                         setStatus(data.detail || "Ungültiges Admin-Passwort.", "error");

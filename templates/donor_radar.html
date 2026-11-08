@@ -3,7 +3,7 @@
 {% block title %}toktracker – Spender-Radar &amp; Chatlog Übersicht{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="/static/donor_radar.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/donor_radar.css?v=1.0.0" />
     
 {% endblock %}
 
@@ -13,7 +13,7 @@
 <header class="app-header">
     <div class="header-inner">
         <a href="{% if is_admin %}/admin{% elif 'analytics.view' in permissions %}/stats{% else %}/public{% endif %}" class="brand-block">
-            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
                     <h1 class="brand-title">toktracker</h1>
@@ -27,12 +27,12 @@
             <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
             <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
             <span class="pill hide-sm">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
-            {% if is_admin %}<a class="btn-link sm" href="/admin">← Admin-Dashboard</a>{% endif %}
-            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="/stats">📈 Statistiken</a>{% endif %}
-            {% if 'chatintel.view' in permissions %}<a class="btn-link sm" href="/chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>{% endif %}
-            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>{% endif %}
-            <a class="btn-link primary sm" href="/public">Öffentliches Panel →</a>
-            <a class="btn-link sm" href="/logout">Abmelden</a>
+            {% if is_admin %}<a class="btn-link sm" href="admin">← Admin-Dashboard</a>{% endif %}
+            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="stats">📈 Statistiken</a>{% endif %}
+            {% if 'chatintel.view' in permissions %}<a class="btn-link sm" href="chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>{% endif %}
+            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="site-analytics">📊 Web-Analysen</a>{% endif %}
+            <a class="btn-link primary sm" href="public">Öffentliches Panel →</a>
+            <a class="btn-link sm" href="logout">Abmelden</a>
         </div>
     </div>
 </header>
@@ -415,16 +415,16 @@
             <span>Spender-Radar &amp; Chatlog Intelligence</span>
         </div>
         <div>
-            <a href="/admin">Admin-Dashboard</a>
+            <a href="admin">Admin-Dashboard</a>
             <span class="sep">·</span>
-            <a href="/chat-intelligence">Chat Intelligence &amp; Wortwolke</a>
+            <a href="chat-intelligence">Chat Intelligence &amp; Wortwolke</a>
             <span class="sep">·</span>
-            <a href="/site-analytics">Website &amp; Bot Analysen</a>
+            <a href="site-analytics">Website &amp; Bot Analysen</a>
             <span class="sep">·</span>
-            <a href="/public">Öffentliche Ansicht</a>
+            <a href="public">Öffentliche Ansicht</a>
         </div>
     </div>
 </footer>
 
-<script src="/static/donor_radar.js?v=2.5.4"></script>
+<script src="static/donor_radar.js?v=2.5.4"></script>
 {% endblock %}

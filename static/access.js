@@ -45,7 +45,7 @@
         var headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
         var res = await fetch(url, Object.assign({}, opts, { headers: headers }));
         if (res.status === 401) {
-            window.location.href = "/login?next=/access";
+            window.location.href = "login?next=/access";
             throw new Error("Nicht angemeldet");
         }
         var data = null;
@@ -233,14 +233,14 @@
     }
 
     async function load() {
-        var data = await fetchJSON("/api/v1/telegram/users");
+        var data = await fetchJSON("api/v1/telegram/users");
         state.users = data.users || [];
         state.accessMode = data.access_mode || "whitelist";
         render();
     }
 
     async function updateUser(identifier, isAllowed, role) {
-        await fetchJSON("/api/v1/telegram/users", {
+        await fetchJSON("api/v1/telegram/users", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -254,7 +254,7 @@
 
     async function deleteUser(recordId) {
         if (!window.confirm("Diesen Eintrag wirklich entfernen?")) return;
-        await fetchJSON("/api/v1/telegram/users/" + encodeURIComponent(recordId), { method: "DELETE" });
+        await fetchJSON("api/v1/telegram/users/" + encodeURIComponent(recordId), { method: "DELETE" });
         await load();
     }
 
@@ -274,7 +274,7 @@
                 var select = el("accessModeSelect");
                 if (!select) return;
                 try {
-                    await fetchJSON("/api/settings", {
+                    await fetchJSON("api/settings", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ telegram_access_mode: select.value }),
@@ -296,7 +296,7 @@
                 var name = el("accessNewName");
                 var role = el("accessNewRole");
                 try {
-                    await fetchJSON("/api/v1/telegram/users", {
+                    await fetchJSON("api/v1/telegram/users", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({

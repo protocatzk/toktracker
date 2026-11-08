@@ -37,6 +37,20 @@
         return new Intl.NumberFormat("de-DE").format(Math.round(value || 0));
     }
 
+    /**
+     * Macht einen serverseitig gelieferten absoluten Pfad (z.B. "/admin")
+     * relativ zum <base>-Tag. So funktioniert die App sowohl unter "/" als
+     * auch unter einem Unterpfad wie "/track".
+     */
+    function appUrl(path) {
+        if (!path) return path;
+        var value = String(path);
+        if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(value) || value.charAt(0) === "#") {
+            return value;
+        }
+        return value.replace(/^\/+/, "");
+    }
+
     /** Setzt das Theme und aktualisiert einen vorhandenen Theme-Button. */
     function applyTheme(theme) {
         var normalized = theme === "light" ? "light" : "dark";
@@ -55,4 +69,5 @@
     global.fmtUSD = fmtUSD;
     global.fmtNum = fmtNum;
     global.applyTheme = applyTheme;
+    global.appUrl = appUrl;
 })(window);

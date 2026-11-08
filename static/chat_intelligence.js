@@ -619,7 +619,7 @@
     // 3. API Loaders
     async function loadStreamers() {
         try {
-            const res = await fetch("/api/public/overview?period=all");
+            const res = await fetch("api/public/overview?period=all");
             if (!res.ok) return;
             const data = await res.json();
             const streamers = data.streamers || [];
@@ -640,7 +640,7 @@
 
     async function loadSessions() {
         try {
-            let url = "/api/chat-intelligence/sessions?limit=80";
+            let url = "api/chat-intelligence/sessions?limit=80";
             if (state.streamerId) {
                 url += `&streamer_id=${encodeURIComponent(state.streamerId)}`;
             }
@@ -680,7 +680,7 @@
         state.isFetchingAnalysis = true;
 
         try {
-            let url = `/api/chat-intelligence/analysis?period=${encodeURIComponent(state.period)}&min_word_len=${state.minWordLen}`;
+            let url = `api/chat-intelligence/analysis?period=${encodeURIComponent(state.period)}&min_word_len=${state.minWordLen}`;
             if (state.sessionId) {
                 url += `&session_id=${encodeURIComponent(state.sessionId)}`;
             } else if (state.streamerId) {
@@ -899,7 +899,7 @@
                 params.append("min_tier", state.tierFilter);
             }
 
-            const res = await fetch(`/api/chat-logs?${params.toString()}`);
+            const res = await fetch(`api/chat-logs?${params.toString()}`);
             if (!res.ok) return;
             const data = await res.json();
             const msgs = data.messages || [];
@@ -963,7 +963,7 @@
                 tierBadgeHtml = '<span class="tier-badge tier-badge-vip">🐬 VIP</span>';
             }
 
-            const avatar = m.avatar_url || "/pictures/bot_avatar.jpg";
+            const avatar = m.avatar_url || "pictures/bot_avatar.jpg";
             const dateFormatted = formatDateTime(m.created_at);
             const streamerTag = `<span class="chat-streamer-tag">@${escapeHtml(m.streamer_username)}</span>`;
             const highlightedComment = highlightText(m.comment, effectiveQuery);
@@ -975,7 +975,7 @@
                     <td class="col-streamer">${streamerTag}</td>
                     <td class="col-user">
                         <div class="user-cell-box">
-                            <img src="${escapeHtml(avatar)}" class="user-avatar-sm" onerror="this.src='/pictures/bot_avatar.jpg'" alt="" />
+                            <img src="${escapeHtml(avatar)}" class="user-avatar-sm" onerror="this.src='pictures/bot_avatar.jpg'" alt="" />
                             <div class="user-info-text">
                                 <span class="user-nick" title="${escapeHtml(m.nickname)}">${escapeHtml(m.nickname || m.username)}</span>
                                 <button type="button" class="user-handle-btn" data-username="${escapeHtml(m.username)}" title="Klicken zum Filtern nach @${escapeHtml(m.username)}">
@@ -1077,7 +1077,7 @@
                 whalePill = '<span class="ci-badge" style="background:#10b981; color:#000;">VIP</span>';
             }
 
-            const avatar = m.avatar_url || "/pictures/bot_avatar.jpg";
+            const avatar = m.avatar_url || "pictures/bot_avatar.jpg";
             const timeStr = formatTime(m.created_at);
             const userDisplay = m.nickname || `@${m.username}`;
             const streamerTag = !state.streamerId ? `<span class="chat-streamer-tag">@${escapeHtml(m.streamer_username)}</span>` : "";
@@ -1085,7 +1085,7 @@
 
             html += `
                 <div class="chat-row ${whaleClass}" data-id="${m.id}">
-                    <img src="${escapeHtml(avatar)}" class="chat-avatar" onerror="this.src='/pictures/bot_avatar.jpg'" alt="" />
+                    <img src="${escapeHtml(avatar)}" class="chat-avatar" onerror="this.src='pictures/bot_avatar.jpg'" alt="" />
                     <div class="chat-body">
                         <div class="chat-meta-line">
                             ${whalePill}
@@ -1152,7 +1152,7 @@
 
         try {
             const effectiveQuery = state.activeFilterWord || state.searchTerm;
-            let url = `/api/chat-logs?limit=50&before_id=${state.oldestMsgId}`;
+            let url = `api/chat-logs?limit=50&before_id=${state.oldestMsgId}`;
             if (state.sessionId) url += `&session_id=${encodeURIComponent(state.sessionId)}`;
             else if (state.streamerId) url += `&streamer_id=${encodeURIComponent(state.streamerId)}`;
             if (state.userFilter) url += `&username=${encodeURIComponent(state.userFilter)}`;
@@ -1192,7 +1192,7 @@
 
         try {
             const effectiveQuery = state.activeFilterWord || state.searchTerm;
-            let url = `/api/chat-logs?limit=30`;
+            let url = `api/chat-logs?limit=30`;
             if (state.newestMsgId) {
                 url += `&after_id=${state.newestMsgId}`;
             }
@@ -1299,7 +1299,7 @@
     // 6. Export Download Trigger
     function triggerExportDownload(format) {
         const effectiveQuery = state.activeFilterWord || state.searchTerm;
-        let url = `/api/chat-intelligence/export?format=${encodeURIComponent(format)}`;
+        let url = `api/chat-intelligence/export?format=${encodeURIComponent(format)}`;
         if (state.sessionId) {
             url += `&session_id=${encodeURIComponent(state.sessionId)}`;
         } else if (state.streamerId) {

@@ -53,6 +53,11 @@ class AppConfig:
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "5000"))
 
+    # Optionaler URL-Prefix, unter dem die App hinter einem Reverse-Proxy läuft
+    # (z.B. "/track" für https://example.com/track). Leer = Root-Deployment.
+    # Der Proxy muss denselben Wert als X-Forwarded-Prefix senden.
+    app_base_path: str = os.getenv("APP_BASE_PATH", "").strip()
+
     # Service Role ("all", "api", "ingest", "bot", "scheduler")
     service_role: str = os.getenv("SERVICE_ROLE", "all").strip().lower()
 

@@ -56,7 +56,7 @@ function setLeaderboardView(view) {
 // =====================================================================
 async function loadPublicOverview(isSilent = false) {
     try {
-        const res = await fetch(`/api/public/overview?period=${encodeURIComponent(currentPublicPeriod)}`);
+        const res = await fetch(`api/public/overview?period=${encodeURIComponent(currentPublicPeriod)}`);
         if (!res.ok) return;
         const data = await res.json();
 
@@ -184,7 +184,7 @@ function renderPublicLeaderboard() {
             gridEl.innerHTML = filtered.map((s, idx) => {
                 const rank = idx + 1;
                 const topRankClass = rank === 1 ? "top-1" : rank === 2 ? "top-2" : rank === 3 ? "top-3" : "";
-                const avatar = s.avatar_url || "/pictures/bot_avatar.jpg";
+                const avatar = s.avatar_url || "pictures/bot_avatar.jpg";
                 const isLive = Boolean(s.is_live);
                 const statusHtml = isLive
                     ? `<span class="status-tag live">● LIVE</span>`
@@ -199,7 +199,7 @@ function renderPublicLeaderboard() {
                     <div class="streamer-card-mobile ${isLive ? 'is-live' : ''}">
                         <div class="streamer-card-header">
                             <span class="rank-badge ${topRankClass}">#${rank}</span>
-                            <img src="${escapeHtml(avatar)}" alt="${escapeHtml(s.username)}" class="streamer-card-avatar" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                            <img src="${escapeHtml(avatar)}" alt="${escapeHtml(s.username)}" class="streamer-card-avatar" onerror="this.src='pictures/bot_avatar.jpg'" />
                             <div class="streamer-card-info">
                                 <div class="streamer-card-title">${escapeHtml(s.display_name || s.username)}</div>
                                 <div class="streamer-card-uname">@${escapeHtml(s.username)}</div>
@@ -351,7 +351,7 @@ function renderPublicGifts() {
 async function showPublicStreamerDetail(streamerId) {
     try {
         const res = await fetch(
-            `/api/public/streamers/${encodeURIComponent(streamerId)}?period=${encodeURIComponent(currentPublicPeriod)}`
+            `api/public/streamers/${encodeURIComponent(streamerId)}?period=${encodeURIComponent(currentPublicPeriod)}`
         );
         if (!res.ok) return;
         const data = await res.json();
@@ -428,14 +428,14 @@ async function loadPublicBattles(isSilent = false) {
         const modeVal = document.getElementById("pubSelectBattleMode")?.value || "ALL";
         const searchVal = document.getElementById("pubInputBattleSearch")?.value || "";
 
-        let url = `/api/public/battles?period=${encodeURIComponent(currentPublicPeriod)}&limit=50`;
+        let url = `api/public/battles?period=${encodeURIComponent(currentPublicPeriod)}&limit=50`;
         if (resultVal !== "ALL") url += `&result=${encodeURIComponent(resultVal)}`;
         if (modeVal !== "ALL") url += `&mode=${encodeURIComponent(modeVal)}`;
         if (searchVal.trim()) url += `&search=${encodeURIComponent(searchVal.trim())}`;
 
         const [battlesRes, statsRes] = await Promise.all([
             fetch(url),
-            fetch(`/api/public/battles/stats?period=${encodeURIComponent(currentPublicPeriod)}`)
+            fetch(`api/public/battles/stats?period=${encodeURIComponent(currentPublicPeriod)}`)
         ]);
 
         if (battlesRes.ok) {
@@ -540,7 +540,7 @@ function renderPublicLiveActiveBattles(liveBattles) {
                                     ${p.is_tracked ? '<span style="color:#10b981;">● Getrackt</span>' : ''}
                                 </div>
                                 <div style="width:38px; height:38px; margin:0 auto 4px; border-radius:50%; overflow:hidden;">
-                                    <img src="${escapeHtml(p.avatar_url || '/pictures/bot_avatar.jpg')}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                                    <img src="${escapeHtml(p.avatar_url || 'pictures/bot_avatar.jpg')}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='pictures/bot_avatar.jpg'" />
                                 </div>
                                 <div style="font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.display_name || p.username || '')}</div>
                                 <div class="mono" style="font-size:10px; color:var(--text-muted);">@${escapeHtml(p.username || '')}</div>
@@ -698,21 +698,21 @@ function renderPublicBattlesFeed(data) {
                 {
                     username: b.streamer_username,
                     name: b.streamer_display_name || b.streamer_username,
-                    avatar: b.streamer_avatar_url || '/pictures/bot_avatar.jpg',
+                    avatar: b.streamer_avatar_url || 'pictures/bot_avatar.jpg',
                     score: sScore,
                     isMine: true,
                 },
                 {
                     username: b.opponent_username || "Gegner 1",
                     name: b.opponent_display_name || b.opponent_username || "Gegner 1",
-                    avatar: b.opponent_avatar_url || '/pictures/bot_avatar.jpg',
+                    avatar: b.opponent_avatar_url || 'pictures/bot_avatar.jpg',
                     score: oScore,
                     isMine: false,
                 },
                 {
                     username: b.opponent2_username || "Gegner 2",
                     name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
-                    avatar: b.opponent2_avatar_url || '/pictures/bot_avatar.jpg',
+                    avatar: b.opponent2_avatar_url || 'pictures/bot_avatar.jpg',
                     score: b.opponent2_score || 0,
                     isMine: false,
                 },
@@ -721,7 +721,7 @@ function renderPublicBattlesFeed(data) {
                 players.push({
                     username: b.opponent3_username || "Gegner 3",
                     name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
-                    avatar: b.opponent3_avatar_url || '/pictures/bot_avatar.jpg',
+                    avatar: b.opponent3_avatar_url || 'pictures/bot_avatar.jpg',
                     score: b.opponent3_score || 0,
                     isMine: false,
                 });
@@ -744,7 +744,7 @@ function renderPublicBattlesFeed(data) {
                                     ${isWinnerSlot ? '<span>👑</span>' : '<span></span>'}
                                 </div>
                                 <div class="participant-avatar-wrap" style="width:44px; height:44px; margin:0 auto 6px; border-radius:50%; overflow:hidden;">
-                                    <img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.username)}" class="battle-avatar ${isWinnerSlot ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg';" />
+                                    <img src="${escapeHtml(p.avatar)}" alt="${escapeHtml(p.username)}" class="battle-avatar ${isWinnerSlot ? 'winner-ring' : ''}" onerror="this.src='pictures/bot_avatar.jpg';" />
                                 </div>
                                 <div style="font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
                                 <div class="mono" style="font-size:10px; color:var(--text-muted);">@${escapeHtml(p.username)}</div>
@@ -762,7 +762,7 @@ function renderPublicBattlesFeed(data) {
                 <div class="battle-arena-1v1">
                     <div class="battle-participant streamer">
                         <div class="participant-avatar-wrap">
-                            <img src="${escapeHtml(b.streamer_avatar_url || '/pictures/bot_avatar.jpg')}" alt="Streamer" class="battle-avatar ${isWin ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                            <img src="${escapeHtml(b.streamer_avatar_url || 'pictures/bot_avatar.jpg')}" alt="Streamer" class="battle-avatar ${isWin ? 'winner-ring' : ''}" onerror="this.src='pictures/bot_avatar.jpg'" />
                         </div>
                         <div class="participant-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
                         <div class="participant-handle mono">@${escapeHtml(b.streamer_username)}</div>
@@ -779,7 +779,7 @@ function renderPublicBattlesFeed(data) {
                     </div>
                     <div class="battle-participant opponent">
                         <div class="participant-avatar-wrap">
-                            <img src="${escapeHtml(b.opponent_avatar_url || '/pictures/bot_avatar.jpg')}" alt="Gegner" class="battle-avatar ${isLose ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                            <img src="${escapeHtml(b.opponent_avatar_url || 'pictures/bot_avatar.jpg')}" alt="Gegner" class="battle-avatar ${isLose ? 'winner-ring' : ''}" onerror="this.src='pictures/bot_avatar.jpg'" />
                         </div>
                         <div class="participant-name">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
                         <div class="participant-handle mono">@${escapeHtml(b.opponent_username || 'unbekannt')}</div>
@@ -793,7 +793,7 @@ function renderPublicBattlesFeed(data) {
                 <div class="battle-arena-1v1">
                     <div class="battle-participant streamer">
                         <div class="participant-avatar-wrap">
-                            <img src="${escapeHtml(b.streamer_avatar_url || '/pictures/bot_avatar.jpg')}" alt="Streamer" class="battle-avatar ${isWin ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                            <img src="${escapeHtml(b.streamer_avatar_url || 'pictures/bot_avatar.jpg')}" alt="Streamer" class="battle-avatar ${isWin ? 'winner-ring' : ''}" onerror="this.src='pictures/bot_avatar.jpg'" />
                         </div>
                         <div class="participant-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
                         <div class="participant-handle mono">@${escapeHtml(b.streamer_username)}</div>
@@ -811,7 +811,7 @@ function renderPublicBattlesFeed(data) {
 
                     <div class="battle-participant opponent">
                         <div class="participant-avatar-wrap">
-                            <img src="${escapeHtml(b.opponent_avatar_url || '/pictures/bot_avatar.jpg')}" alt="Gegner" class="battle-avatar ${isLose ? 'winner-ring' : ''}" onerror="this.src='/pictures/bot_avatar.jpg'" />
+                            <img src="${escapeHtml(b.opponent_avatar_url || 'pictures/bot_avatar.jpg')}" alt="Gegner" class="battle-avatar ${isLose ? 'winner-ring' : ''}" onerror="this.src='pictures/bot_avatar.jpg'" />
                         </div>
                         <div class="participant-name">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
                         <div class="participant-handle mono">@${escapeHtml(b.opponent_username || 'unbekannt')}</div>
@@ -864,7 +864,7 @@ function renderPublicBattlesFeed(data) {
 // =====================================================================
 async function loadPublicAnalytics() {
     try {
-        const res = await fetch(`/api/public/analytics?period=${encodeURIComponent(currentPublicPeriod)}`);
+        const res = await fetch(`api/public/analytics?period=${encodeURIComponent(currentPublicPeriod)}`);
         if (!res.ok) return;
         const data = await res.json();
 

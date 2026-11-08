@@ -168,6 +168,24 @@ wieder das öffentliche Live-Panel und unterliegt dem Gate. `/public` und
 Neue öffentliche Endpunkte müssen bewusst in `shared/access_gate.py`
 (`EXEMPT_PATHS`) eingetragen werden — sonst sind sie automatisch gesperrt.
 
+### Betrieb unter einem Unterpfad (`APP_BASE_PATH`)
+
+Die App kann zusätzlich unter einem URL-Prefix wie `https://positronium.dev/track`
+laufen. Dafür sind drei Dinge nötig:
+
+1. `APP_BASE_PATH=/track` in der App-Umgebung setzen.
+2. Der Reverse-Proxy sendet `X-Forwarded-Prefix: /track` und reicht den Pfad
+   unverändert durch.
+3. Ein vorgeschalteter Gateway-Service routet den Prefix auf die App
+   (`nginx/positronium-track.conf` + Compose-Service `positronium-track`).
+
+Die Middleware `base_path_middleware` in `app.py` entfernt den Präfix vor dem
+Routing, setzt `root_path` und ergänzt ihn wieder in `Location`-Headern.
+Templates verwenden `<base href="{{ request.state.base_path }}/">` und relative
+Asset-/API-Pfade; JavaScript nutzt für serverseitige Redirect-Pfade `appUrl()`.
+Tests in [`tests/test_base_path.py`](./tests/test_base_path.py) decken Root- und
+Prefix-Betrieb ab.
+
 ## 6. Richtlinien für KI-Agenten bei Änderungen
 
 Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:

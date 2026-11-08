@@ -102,6 +102,19 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `ENABLE_API_DOCS` | `/docs`, `/redoc`, `/openapi.json` freischalten (Default: `0`) |
 | `ACCESS_GATE` | `whitelist` (Default): nur per Telegram freigeschaltete Nutzer/API-Key kommen an die App, alle anderen landen auf `/login`. `off` = öffentlicher Betrieb |
 | `LANDING_PAGE_ENABLED` | `1` (Default): `/` zeigt die öffentliche Infoseite. `0`: `/` zeigt wieder das öffentliche Live-Panel (und unterliegt dem Gate) |
+| `APP_BASE_PATH` | Optionaler URL-Prefix, z.B. `/track` für `https://domain/track`. Leer = Root-Betrieb. Setzt einen passenden Proxy mit `X-Forwarded-Prefix` voraus |
+
+### Betrieb unter einem Unterpfad
+
+Für `https://positronium.dev/track` ist im Compose-Stack ein schlanker
+Gateway (`positronium-track`, Config: [`nginx/positronium-track.conf`](./nginx/positronium-track.conf))
+enthalten. Er bekommt von nginx-proxy den Pfad `/track` und setzt
+`X-Forwarded-Prefix: /track`. Die App entfernt den Präfix intern wieder, sodass
+alle Routen unverändert funktionieren. Voraussetzung:
+
+- `APP_BASE_PATH=/track` in der App-Umgebung
+- DNS von `positronium.dev` zeigt auf den Server
+- Ports 80/443 sind für Let's Encrypt erreichbar
 
 ---
 

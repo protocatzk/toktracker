@@ -19,7 +19,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 STATIC = os.path.join(ROOT, "static")
 TEMPLATES = os.path.join(ROOT, "templates")
 
-SHARED_HELPERS = ("escapeHtml", "fmtEUR", "fmtUSD", "fmtNum", "applyTheme")
+SHARED_HELPERS = ("escapeHtml", "fmtEUR", "fmtUSD", "fmtNum", "applyTheme", "appUrl")
 
 
 def _read(path: str) -> str:
@@ -48,7 +48,7 @@ class TestSharedFrontendHelpers(unittest.TestCase):
 
     def test_common_js_is_loaded_before_page_scripts(self):
         base = _read(os.path.join(TEMPLATES, "base.html"))
-        self.assertIn("/static/common.js", base)
+        self.assertIn("static/common.js", base)
         self.assertLess(base.index("common.js"), base.index("</head>"))
 
 
@@ -69,8 +69,8 @@ class TestTemplatesAndAssets(unittest.TestCase):
         missing = []
         for path in glob.glob(os.path.join(TEMPLATES, "*.html")):
             source = _read(path)
-            for asset in re.findall(r'(?:src|href)="(/static/[^"?]+)', source):
-                target = os.path.join(ROOT, asset.lstrip("/"))
+            for asset in re.findall(r'(?:src|href)="(?:\./)?(static/[^"?]+)', source):
+                target = os.path.join(ROOT, asset)
                 if not os.path.exists(target):
                     missing.append(f"{os.path.basename(path)} -> {asset}")
         self.assertEqual(missing, [], "Fehlende Assets: " + ", ".join(missing))

@@ -3,7 +3,7 @@
 {% block title %}TokTracker – TikTok Live Earnings & Analytics{% endblock %}
 
 {% block styles %}
-    <link rel="stylesheet" href="/static/landing.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/landing.css?v=1.0.0" />
 {% endblock %}
 
 {% block content %}
@@ -12,8 +12,8 @@
 
 <header class="site-header">
     <div class="wrap header-inner">
-        <a class="brand" href="/">
-            <img src="/pictures/bot_avatar.jpg" alt="" width="36" height="36" loading="eager" />
+        <a class="brand" href="./">
+            <img src="pictures/bot_avatar.jpg" alt="" width="36" height="36" loading="eager" />
             <span class="brand-copy">
                 <span class="brand-title">toktracker</span>
                 <span class="brand-subtitle">TIKTOK LIVE EARNINGS</span>
@@ -27,7 +27,7 @@
                 <a href="#status">Status</a>
             </nav>
             <div class="header-actions">
-                <a class="btn small primary" href="/login">Anmelden <span class="arrow" aria-hidden="true">→</span></a>
+                <a class="btn small primary" href="login">Anmelden <span class="arrow" aria-hidden="true">→</span></a>
             </div>
         </div>
     </div>
@@ -45,10 +45,10 @@
                 Reports direkt aufs Handy.
             </p>
             <div class="actions">
-                <a class="btn primary" href="/login">
+                <a class="btn primary" href="login">
                     Live-Panel öffnen <span class="arrow" aria-hidden="true">→</span>
                 </a>
-                <a class="btn" href="/miniapp">
+                <a class="btn" href="miniapp">
                     Mini-App <span class="arrow" aria-hidden="true">↗</span>
                 </a>
             </div>
@@ -61,7 +61,7 @@
 
         <aside class="profile-card" aria-label="TokTracker Status">
             <div class="profile-head">
-                <img src="/pictures/bot_avatar.jpg" alt="" width="64" height="64" loading="eager" />
+                <img src="pictures/bot_avatar.jpg" alt="" width="64" height="64" loading="eager" />
                 <div>
                     <div class="profile-name">TokTracker</div>
                     <span class="profile-role">Live Earnings & Analytics</span>
@@ -85,7 +85,7 @@
                     <dd>Self-hosted</dd>
                 </div>
             </dl>
-            <a class="profile-link" href="/login">
+            <a class="profile-link" href="login">
                 <span>Zugang über Telegram</span>
                 <span aria-hidden="true">↗</span>
             </a>
@@ -275,7 +275,7 @@
                 </p>
             </div>
             <div class="contact-actions">
-                <a class="btn primary" href="/login">Anmelden <span class="arrow" aria-hidden="true">→</span></a>
+                <a class="btn primary" href="login">Anmelden <span class="arrow" aria-hidden="true">→</span></a>
                 {% if telegram_bot_username %}
                 <a class="btn" href="https://t.me/{{ telegram_bot_username.lstrip('@') }}" target="_blank" rel="noopener">
                     Telegram-Bot <span class="arrow" aria-hidden="true">↗</span>
@@ -290,9 +290,9 @@
     <div class="wrap footer-inner">
         <p>© 2026 TokTracker</p>
         <nav class="footer-links" aria-label="Footer-Links">
-            <a href="/login">Anmelden</a>
-            <a href="/public">Live-Panel</a>
-            <a href="/miniapp">Mini-App</a>
+            <a href="login">Anmelden</a>
+            <a href="public">Live-Panel</a>
+            <a href="miniapp">Mini-App</a>
             <a class="footer-top" href="#top">Nach oben ↑</a>
         </nav>
     </div>

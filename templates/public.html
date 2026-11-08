@@ -5,7 +5,7 @@
 {% block viewport %}width=device-width, initial-scale=1.0, viewport-fit=cover{% endblock %}
 
 {% block head %}
-    <script src="/static/chart.umd.min.js"></script>
+    <script src="static/chart.umd.min.js"></script>
     
 {% endblock %}
 
@@ -13,8 +13,8 @@
 <!-- Kopfbereich: Brand, Live-Pill & Quick Links -->
 <header class="app-header">
     <div class="header-inner">
-        <a href="/" class="brand-block">
-            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+        <a href="./" class="brand-block">
+            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
                     <h1 class="brand-title">toktracker</h1>
@@ -27,11 +27,11 @@
             <span class="pill"><span class="live-dot"></span>LIVE: <strong id="pubLiveCount">0</strong></span>
             <span class="pill hide-sm">ÜBERWACHT: <strong id="pubTotalStreamers">0</strong></span>
             <span class="pill hide-sm">UPDATE: <strong id="pubLastUpdate">--:--:--</strong></span>
-            {% if is_admin %}<a class="btn-link sm" href="/admin">⚙️ Admin</a>{% endif %}
-            {% if can_view_stats %}<a class="btn-link sm" href="/stats">📈 Statistiken</a>{% endif %}
-            {% if can_view_radar %}<a class="btn-link sm" href="/donor-radar">🐋 Spender-Radar</a>{% endif %}
-            {% if can_view_chatintel %}<a class="btn-link sm" href="/chat-intelligence">💬 Chat-Intelligence</a>{% endif %}
-            <a class="btn-link sm mono" href="/miniapp" target="_blank" rel="noopener" title="Mobile Mini-App öffnen">
+            {% if is_admin %}<a class="btn-link sm" href="admin">⚙️ Admin</a>{% endif %}
+            {% if can_view_stats %}<a class="btn-link sm" href="stats">📈 Statistiken</a>{% endif %}
+            {% if can_view_radar %}<a class="btn-link sm" href="donor-radar">🐋 Spender-Radar</a>{% endif %}
+            {% if can_view_chatintel %}<a class="btn-link sm" href="chat-intelligence">💬 Chat-Intelligence</a>{% endif %}
+            <a class="btn-link sm mono" href="miniapp" target="_blank" rel="noopener" title="Mobile Mini-App öffnen">
                 📱 Mini-App ↗
             </a>
             {% if telegram_bot_username %}
@@ -469,14 +469,14 @@
     <!-- ========================================================= -->
     <section class="tab-panel" id="pub-tab-bot">
         <div class="brand-banner-card">
-            <img src="/pictures/welcome_banner.jpg" alt="toktracker Live Earnings Analytics" class="brand-banner-img" />
+            <img src="pictures/welcome_banner.jpg" alt="toktracker Live Earnings Analytics" class="brand-banner-img" />
             <div>
                 <h2>toktracker Telegram-Bot &amp; Mini-App</h2>
                 <div class="section-hint" style="margin-bottom:12px;">
                     Verfolge alle Live-Battles, Punktestände und Creator-Einnahmen direkt auf deinem Smartphone via <strong>Telegram Mini-App</strong> oder automatisiert per 24h-Report.
                 </div>
                 <div class="inline-form" style="display:flex; gap:10px; flex-wrap:wrap;">
-                    <a class="btn-link primary" href="/miniapp" target="_blank" rel="noopener">
+                    <a class="btn-link primary" href="miniapp" target="_blank" rel="noopener">
                         📱 toktracker Mini-App öffnen ↗
                     </a>
                     {% if telegram_bot_username %}
@@ -560,10 +560,10 @@
     <div class="footer-inner">
         <div>toktracker &middot; LIVE TIKTOK EARNINGS &amp; BATTLE TRACKER</div>
         <div>
-            <a href="/public">Public Panel</a> &middot; <a href="/miniapp">Mini-App</a> &middot; <a href="/login">Admin Login</a>
+            <a href="public">Public Panel</a> &middot; <a href="miniapp">Mini-App</a> &middot; <a href="login">Admin Login</a>
         </div>
     </div>
 </footer>
 
-<script src="/static/public.js?v=2.6.0"></script>
+<script src="static/public.js?v=2.6.0"></script>
 {% endblock %}

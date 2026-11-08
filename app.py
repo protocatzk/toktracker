@@ -570,6 +570,63 @@ async def access_gate_middleware(request: Request, call_next):
     return response
 
 
+def _normalize_base_path(value: Optional[str]) -> str:
+    """Normalisiert einen URL-Prefix auf '/foo' bzw. '' für Root."""
+    clean = (value or "").strip()
+    if not clean or clean == "/":
+        return ""
+    return "/" + clean.strip("/")
+
+
+@app.middleware("http")
+async def base_path_middleware(request: Request, call_next):
+    """
+    Unterstützt Deployment unter einem Unterpfad (z.B. https://host/track).
+
+    Der vorgeschaltete Proxy setzt dafür ``X-Forwarded-Prefix``. Aus
+    Sicherheitsgründen wird nur der in ``APP_BASE_PATH`` konfigurierte Wert
+    akzeptiert; fremde Präfixe werden ignoriert. Der Präfix wird vor der
+    Zugriffssperre/Analytics aus dem Pfad entfernt, sodass alle bestehenden
+    Routen unverändert funktionieren. Antwort-Redirects werden anschließend
+    wieder mit dem Präfix versehen.
+
+    ``scope["root_path"]`` bleibt bewusst leer: Starlette-Mounts (StaticFiles)
+    berechnen ihren Unterpfad daraus und würden bei einem gesetzten root_path
+    doppelte Pfadsegmente erhalten.
+    """
+    configured = _normalize_base_path(config.app_base_path)
+    forwarded = _normalize_base_path(request.headers.get("x-forwarded-prefix", ""))
+    prefix = configured if configured and forwarded == configured else ""
+
+    request.state.base_path = prefix
+
+    if prefix:
+        path = request.scope.get("path", "")
+        if path == prefix:
+            new_path = "/"
+        elif path.startswith(prefix + "/"):
+            new_path = path[len(prefix):]
+        else:
+            new_path = path
+        if new_path != path:
+            request.scope["path"] = new_path
+            request.scope["raw_path"] = new_path.encode("utf-8")
+
+    response = await call_next(request)
+
+    if prefix:
+        location = response.headers.get("location")
+        if (
+            location
+            and location.startswith("/")
+            and not location.startswith("//")
+            and not location.startswith(prefix + "/")
+            and location != prefix
+        ):
+            response.headers["location"] = prefix + location
+    return response
+
+
 def _extract_session_token(
     toktracker_admin_session: Optional[str],
     x_admin_session: Optional[str],

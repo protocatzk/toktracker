@@ -78,9 +78,9 @@ function switchTab(tabId) {
 
 async function loadOverview() {
     try {
-        const res = await fetch(`/api/overview?period=${encodeURIComponent(currentPeriod)}`);
+        const res = await fetch(`api/overview?period=${encodeURIComponent(currentPeriod)}`);
         if (res.status === 401) {
-            window.location.href = "/login";
+            window.location.href = "login";
             return;
         }
         const data = await res.json();
@@ -295,7 +295,7 @@ function renderStreamerTable() {
                             <button type="button" class="sm" onclick="toggleWorker(${s.id})">${trackBtnText}</button>
                             <button type="button" class="sm" onclick="showStreamerDetail(${s.id})">Details</button>
                             <button type="button" class="sm" onclick="refreshStreamer(${s.id})" title="TikTok Profil aktualisieren">Sync</button>
-                            <a class="btn-link sm mono hide-sm" href="/api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
+                            <a class="btn-link sm mono hide-sm" href="api/v1/streamers/${encodeURIComponent(s.username)}/report?hours=24" target="_blank">JSON</a>
                             <button type="button" class="sm danger" onclick="deleteStreamer(${s.id}, '${s.username}')">X</button>
                         </div>
                     </td>
@@ -414,7 +414,7 @@ function renderTelegramUsers(users, accessMode) {
 }
 
 async function updateTgUser(identifier, isAllowed, role) {
-    await fetch("/api/v1/telegram/users", {
+    await fetch("api/v1/telegram/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -428,7 +428,7 @@ async function updateTgUser(identifier, isAllowed, role) {
 
 async function deleteTgUser(recordId) {
     if (!confirm("Diesen Telegram-Eintrag wirklich entfernen?")) return;
-    await fetch(`/api/v1/telegram/users/${recordId}`, { method: "DELETE" });
+    await fetch(`api/v1/telegram/users/${recordId}`, { method: "DELETE" });
     loadOverview();
 }
 
@@ -468,7 +468,7 @@ function populateSimulatorSelect(streamers) {
 }
 
 async function showStreamerDetail(streamerId) {
-    const res = await fetch(`/api/streamers/${streamerId}?period=${encodeURIComponent(currentPeriod)}`);
+    const res = await fetch(`api/streamers/${streamerId}?period=${encodeURIComponent(currentPeriod)}`);
     if (!res.ok) return;
     const data = await res.json();
     const s = data.streamer;
@@ -528,7 +528,7 @@ async function showStreamerDetail(streamerId) {
 
 async function toggleWorker(streamerId) {
     const autoReconnect = document.getElementById("checkAutoReconnect").checked;
-    await fetch(`/api/streamers/${streamerId}/track`, {
+    await fetch(`api/streamers/${streamerId}/track`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "toggle", auto_reconnect: autoReconnect }),
@@ -537,13 +537,13 @@ async function toggleWorker(streamerId) {
 }
 
 async function refreshStreamer(streamerId) {
-    await fetch(`/api/streamers/${streamerId}/refresh`, { method: "POST" });
+    await fetch(`api/streamers/${streamerId}/refresh`, { method: "POST" });
     loadOverview();
 }
 
 async function deleteStreamer(streamerId, username) {
     if (!confirm(`Streamer @${username} wirklich löschen?`)) return;
-    await fetch(`/api/streamers/${streamerId}`, { method: "DELETE" });
+    await fetch(`api/streamers/${streamerId}`, { method: "DELETE" });
     loadOverview();
 }
 
@@ -1285,9 +1285,9 @@ function renderAnalyticsTables(data) {
 async function loadAnalytics(isBackground = false) {
     try {
         const sidParam = analyticsStreamerId && analyticsStreamerId !== "all" ? `&streamer_id=${encodeURIComponent(analyticsStreamerId)}` : "";
-        const res = await fetch(`/api/analytics?period=${encodeURIComponent(analyticsPeriod)}${sidParam}`);
+        const res = await fetch(`api/analytics?period=${encodeURIComponent(analyticsPeriod)}${sidParam}`);
         if (res.status === 401) {
-            window.location.href = "/login";
+            window.location.href = "login";
             return;
         }
         if (!res.ok) return;
@@ -1391,7 +1391,7 @@ async function loadBattles(isSilent = false) {
         params.append("limit", String(BATTLE_PAGE_SIZE));
         params.append("offset", String(battleCurrentPage * BATTLE_PAGE_SIZE));
 
-        const res = await fetch(`/api/battles?${params.toString()}`);
+        const res = await fetch(`api/battles?${params.toString()}`);
         if (!res.ok) return;
         const data = await res.json();
 
@@ -1470,7 +1470,7 @@ function renderLiveActiveBattles(liveBattles) {
                                     ${p.is_tracked ? '<span style="color:#10b981;">● Getrackt</span>' : ''}
                                 </div>
                                 <div style="width:38px; height:38px; margin:0 auto 4px; border-radius:50%; overflow:hidden;">
-                                    <img src="${escapeHtml(p.avatar_url || '/static/avatar_default.png')}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='/static/avatar_default.png'" />
+                                    <img src="${escapeHtml(p.avatar_url || 'static/avatar_default.png')}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='static/avatar_default.png'" />
                                 </div>
                                 <div style="font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.display_name || p.username || '')}</div>
                                 <div class="mono" style="font-size:10px; color:var(--text-muted);">@${escapeHtml(p.username || '')}</div>
@@ -1662,8 +1662,8 @@ function renderBattlesFeed(data) {
         const delta = Math.abs(sScore - oScore).toLocaleString("de-DE");
         const deltaText = isWin ? `+${delta} Pkt` : (isLose ? `-${delta} Pkt` : `Gleichstand`);
 
-        const sAvatar = b.streamer_avatar_url || "/static/avatar_default.png";
-        const oAvatar = b.opponent_avatar_url || "/static/avatar_default.png";
+        const sAvatar = b.streamer_avatar_url || "static/avatar_default.png";
+        const oAvatar = b.opponent_avatar_url || "static/avatar_default.png";
 
         const durMins = Math.floor((b.duration_seconds || 300) / 60);
         const durSecs = (b.duration_seconds || 300) % 60;
@@ -1703,7 +1703,7 @@ function renderBattlesFeed(data) {
                 {
                     username: b.opponent2_username || "Gegner 2",
                     name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
-                    avatar: b.opponent2_avatar_url || "/static/avatar_default.png",
+                    avatar: b.opponent2_avatar_url || "static/avatar_default.png",
                     score: b.opponent2_score || 0,
                     isMine: false,
                 },
@@ -1712,7 +1712,7 @@ function renderBattlesFeed(data) {
                 players.push({
                     username: b.opponent3_username || "Gegner 3",
                     name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
-                    avatar: b.opponent3_avatar_url || "/static/avatar_default.png",
+                    avatar: b.opponent3_avatar_url || "static/avatar_default.png",
                     score: b.opponent3_score || 0,
                     isMine: false,
                 });
@@ -1742,7 +1742,7 @@ function renderBattlesFeed(data) {
                                     ${isWinnerSlot ? '<span style="font-size:13px;">👑</span>' : '<span></span>'}
                                 </div>
                                 <div class="ffa-avatar-wrap">
-                                    <img class="ffa-avatar" src="${p.avatar}" alt="${escapeHtml(p.username)}" onerror="this.src='/static/avatar_default.png';">
+                                    <img class="ffa-avatar" src="${p.avatar}" alt="${escapeHtml(p.username)}" onerror="this.src='static/avatar_default.png';">
                                 </div>
                                 <div class="ffa-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
                                 <div class="ffa-uname">@${escapeHtml(p.username)}</div>
@@ -1766,7 +1766,7 @@ function renderBattlesFeed(data) {
                         </div>
                         <div class="team-roster-wrap">
                             <div class="fighter-chip">
-                                <img class="chip-avatar ${isWin ? 'winner-ring' : ''}" src="${sAvatar}" onerror="this.src='/static/avatar_default.png';">
+                                <img class="chip-avatar ${isWin ? 'winner-ring' : ''}" src="${sAvatar}" onerror="this.src='static/avatar_default.png';">
                                 <div style="overflow:hidden;">
                                     <div class="chip-name">@${escapeHtml(b.streamer_username)}</div>
                                     <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
@@ -1774,7 +1774,7 @@ function renderBattlesFeed(data) {
                             </div>
                             ${b.teammate_username ? `
                             <div class="fighter-chip is-partner">
-                                <img class="chip-avatar" src="${b.teammate_avatar_url || '/static/avatar_default.png'}" onerror="this.src='/static/avatar_default.png';">
+                                <img class="chip-avatar" src="${b.teammate_avatar_url || 'static/avatar_default.png'}" onerror="this.src='static/avatar_default.png';">
                                 <div style="overflow:hidden;">
                                     <div class="chip-name">@${escapeHtml(b.teammate_username)} <span class="pct-pill" style="font-size:9px; padding:1px 4px;">Partner</span></div>
                                     <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.teammate_display_name || b.teammate_username)}</div>
@@ -1803,7 +1803,7 @@ function renderBattlesFeed(data) {
                         </div>
                         <div class="team-roster-wrap">
                             <div class="fighter-chip" style="flex-direction:row-reverse; text-align:right;">
-                                <img class="chip-avatar ${isLose ? 'winner-ring' : ''}" src="${oAvatar}" onerror="this.src='/static/avatar_default.png';">
+                                <img class="chip-avatar ${isLose ? 'winner-ring' : ''}" src="${oAvatar}" onerror="this.src='static/avatar_default.png';">
                                 <div style="overflow:hidden;">
                                     <div class="chip-name">@${escapeHtml(b.opponent_username || 'Gegner 1')}</div>
                                     <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner 1')}</div>
@@ -1811,7 +1811,7 @@ function renderBattlesFeed(data) {
                             </div>
                             ${b.opponent2_username ? `
                             <div class="fighter-chip is-partner" style="flex-direction:row-reverse; text-align:right;">
-                                <img class="chip-avatar" src="${b.opponent2_avatar_url || '/static/avatar_default.png'}" onerror="this.src='/static/avatar_default.png';">
+                                <img class="chip-avatar" src="${b.opponent2_avatar_url || 'static/avatar_default.png'}" onerror="this.src='static/avatar_default.png';">
                                 <div style="overflow:hidden;">
                                     <div class="chip-name">@${escapeHtml(b.opponent2_username)} <span class="pct-pill" style="font-size:9px; padding:1px 4px;">Partner</span></div>
                                     <div class="muted" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(b.opponent2_display_name || b.opponent2_username)}</div>
@@ -1833,7 +1833,7 @@ function renderBattlesFeed(data) {
                 <div class="battle-matchup-row">
                     <!-- Streamer A Seite -->
                     <div class="battle-participant streamer-side">
-                        <img class="battle-avatar ${isWinnerA ? 'winner-ring' : ''}" src="${sA.avatar_url || sAvatar}" alt="Streamer A" onerror="this.src='/static/avatar_default.png';">
+                        <img class="battle-avatar ${isWinnerA ? 'winner-ring' : ''}" src="${sA.avatar_url || sAvatar}" alt="Streamer A" onerror="this.src='static/avatar_default.png';">
                         <div class="participant-details">
                             <span class="participant-name">${escapeHtml(sA.display_name || sA.username || '')}</span>
                             <span class="participant-uname">@${escapeHtml(sA.username || '')} <span class="internal-streamer-pill">Getrackt</span></span>
@@ -1860,7 +1860,7 @@ function renderBattlesFeed(data) {
                             <span class="participant-score ${isWinnerB ? 'score-win' : ''}">${(sB.score || oScore).toLocaleString("de-DE")}</span>
                             <span class="internal-earnings-tag">+${fmtNum(sB.coins_earned || 0)} 💎 (${fmtEUR(sB.eur_net || 0)})</span>
                         </div>
-                        <img class="battle-avatar ${isWinnerB ? 'winner-ring' : ''}" src="${sB.avatar_url || oAvatar}" alt="Streamer B" onerror="this.src='/static/avatar_default.png';">
+                        <img class="battle-avatar ${isWinnerB ? 'winner-ring' : ''}" src="${sB.avatar_url || oAvatar}" alt="Streamer B" onerror="this.src='static/avatar_default.png';">
                     </div>
                 </div>
             `;
@@ -1869,7 +1869,7 @@ function renderBattlesFeed(data) {
                 <div class="battle-matchup-row">
                     <!-- Streamer Seite -->
                     <div class="battle-participant streamer-side">
-                        <img class="battle-avatar ${isWin ? 'winner-ring' : (isLose ? 'loser-ring' : '')}" src="${sAvatar}" alt="Streamer" onerror="this.src='/static/avatar_default.png';">
+                        <img class="battle-avatar ${isWin ? 'winner-ring' : (isLose ? 'loser-ring' : '')}" src="${sAvatar}" alt="Streamer" onerror="this.src='static/avatar_default.png';">
                         <div class="participant-details">
                             <span class="participant-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</span>
                             <span class="participant-uname">@${escapeHtml(b.streamer_username)}</span>
@@ -1894,7 +1894,7 @@ function renderBattlesFeed(data) {
                             <span class="participant-uname">@${escapeHtml(b.opponent_username || 'unbekannt')}</span>
                             <span class="participant-score ${isLose ? 'score-win' : (isWin ? 'score-lose' : '')}">${oScore.toLocaleString("de-DE")}</span>
                         </div>
-                        <img class="battle-avatar ${isLose ? 'winner-ring' : (isWin ? 'loser-ring' : '')}" src="${oAvatar}" alt="Opponent" onerror="this.src='/static/avatar_default.png';">
+                        <img class="battle-avatar ${isLose ? 'winner-ring' : (isWin ? 'loser-ring' : '')}" src="${oAvatar}" alt="Opponent" onerror="this.src='static/avatar_default.png';">
                     </div>
                 </div>
             `;
@@ -1968,7 +1968,7 @@ async function loadBattleStats() {
         if (battleStreamerId) params.append("streamer_id", battleStreamerId);
         if (battlePeriod) params.append("period", battlePeriod);
 
-        const res = await fetch(`/api/battles/stats?${params.toString()}`);
+        const res = await fetch(`api/battles/stats?${params.toString()}`);
         if (!res.ok) return;
         const stats = await res.json();
 
@@ -2009,7 +2009,7 @@ function renderBattleRivals(rivals) {
     if (meta) meta.textContent = `${rivals.length} Rivalen ausgewertet`;
 
     tbody.innerHTML = rivals.map(r => {
-        const av = r.opponent_avatar_url || "/static/avatar_default.png";
+        const av = r.opponent_avatar_url || "static/avatar_default.png";
         const winrate = (r.winrate_pct || 0).toFixed(1);
         const winrateColor = r.winrate_pct >= 50 ? '#10b981' : '#ef4444';
 
@@ -2017,7 +2017,7 @@ function renderBattleRivals(rivals) {
             <tr>
                 <td>
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <img src="${av}" alt="Avatar" style="width:28px; height:28px; border-radius:50%; object-fit:cover;" onerror="this.src='/static/avatar_default.png';">
+                        <img src="${av}" alt="Avatar" style="width:28px; height:28px; border-radius:50%; object-fit:cover;" onerror="this.src='static/avatar_default.png';">
                         <div>
                             <strong>${escapeHtml(r.opponent_display_name || r.opponent_username)}</strong>
                             <div class="muted" style="font-size:11px;">@${escapeHtml(r.opponent_username)}</div>
@@ -2038,7 +2038,7 @@ function renderBattleRivals(rivals) {
 
 async function openBattleGraphicModal(battleId) {
     try {
-        const res = await fetch(`/api/battles/${battleId}`);
+        const res = await fetch(`api/battles/${battleId}`);
         if (!res.ok) {
             alert("Battle-Details konnten nicht geladen werden.");
             return;
@@ -2069,8 +2069,8 @@ async function openBattleGraphicModal(battleId) {
         const sPct = totScore > 0 ? Math.round((sScore / totScore) * 100) : 50;
         const oPct = 100 - sPct;
 
-        const sAvatar = b.streamer_avatar_url || "/static/avatar_default.png";
-        const oAvatar = b.opponent_avatar_url || "/static/avatar_default.png";
+        const sAvatar = b.streamer_avatar_url || "static/avatar_default.png";
+        const oAvatar = b.opponent_avatar_url || "static/avatar_default.png";
 
         const durMins = Math.floor((b.duration_seconds || 300) / 60);
         const durSecs = (b.duration_seconds || 300) % 60;
@@ -2111,7 +2111,7 @@ async function openBattleGraphicModal(battleId) {
                 {
                     username: b.opponent2_username || "Gegner 2",
                     name: b.opponent2_display_name || b.opponent2_username || "Gegner 2",
-                    avatar: b.opponent2_avatar_url || "/static/avatar_default.png",
+                    avatar: b.opponent2_avatar_url || "static/avatar_default.png",
                     score: b.opponent2_score || 0,
                     isMine: false,
                 },
@@ -2120,7 +2120,7 @@ async function openBattleGraphicModal(battleId) {
                 players.push({
                     username: b.opponent3_username || "Gegner 3",
                     name: b.opponent3_display_name || b.opponent3_username || "Gegner 3",
-                    avatar: b.opponent3_avatar_url || "/static/avatar_default.png",
+                    avatar: b.opponent3_avatar_url || "static/avatar_default.png",
                     score: b.opponent3_score || 0,
                     isMine: false,
                 });
@@ -2149,7 +2149,7 @@ async function openBattleGraphicModal(battleId) {
                             </div>
                             <div class="stylized-avatar-wrap">
                                 ${isWinnerSlot ? '<div class="stylized-crown">👑</div>' : ''}
-                                <img class="stylized-avatar ${isWinnerSlot ? 'winner-glow' : ''}" style="width:64px; height:64px;" src="${p.avatar}" alt="${escapeHtml(p.username)}" onerror="this.src='/static/avatar_default.png';">
+                                <img class="stylized-avatar ${isWinnerSlot ? 'winner-glow' : ''}" style="width:64px; height:64px;" src="${p.avatar}" alt="${escapeHtml(p.username)}" onerror="this.src='static/avatar_default.png';">
                             </div>
                             <div class="stylized-name" style="font-size:13px; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.name)}</div>
                             <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(p.username)}</div>
@@ -2172,7 +2172,7 @@ async function openBattleGraphicModal(battleId) {
                         <div class="stylized-chip-player">
                             <div class="stylized-avatar-wrap">
                                 ${isWin ? '<div class="stylized-crown">👑</div>' : ''}
-                                <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${sAvatar}" alt="Streamer" onerror="this.src='/static/avatar_default.png';">
+                                <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${sAvatar}" alt="Streamer" onerror="this.src='static/avatar_default.png';">
                             </div>
                             <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
                             <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.streamer_username)}</div>
@@ -2180,7 +2180,7 @@ async function openBattleGraphicModal(battleId) {
                         <div class="stylized-chip-player">
                             <div class="stylized-avatar-wrap">
                                 ${isWin ? '<div class="stylized-crown">👑</div>' : ''}
-                                <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${b.teammate_avatar_url || '/static/avatar_default.png'}" alt="Partner" onerror="this.src='/static/avatar_default.png';">
+                                <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${b.teammate_avatar_url || 'static/avatar_default.png'}" alt="Partner" onerror="this.src='static/avatar_default.png';">
                             </div>
                             <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.teammate_display_name || b.teammate_username || 'Partner')}</div>
                             <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.teammate_username || 'partner')}</div>
@@ -2211,7 +2211,7 @@ async function openBattleGraphicModal(battleId) {
                         <div class="stylized-chip-player">
                             <div class="stylized-avatar-wrap">
                                 ${isLose ? '<div class="stylized-crown">👑</div>' : ''}
-                                <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${oAvatar}" alt="Gegner" onerror="this.src='/static/avatar_default.png';">
+                                <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${oAvatar}" alt="Gegner" onerror="this.src='static/avatar_default.png';">
                             </div>
                             <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
                             <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.opponent_username || 'gegner')}</div>
@@ -2219,7 +2219,7 @@ async function openBattleGraphicModal(battleId) {
                         <div class="stylized-chip-player">
                             <div class="stylized-avatar-wrap">
                                 ${isLose ? '<div class="stylized-crown">👑</div>' : ''}
-                                <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${b.opponent2_avatar_url || '/static/avatar_default.png'}" alt="Gegner 2" onerror="this.src='/static/avatar_default.png';">
+                                <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" style="width:60px; height:60px;" src="${b.opponent2_avatar_url || 'static/avatar_default.png'}" alt="Gegner 2" onerror="this.src='static/avatar_default.png';">
                             </div>
                             <div class="stylized-name" style="font-size:13px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.opponent2_display_name || b.opponent2_username || 'Gegner 2')}</div>
                             <div class="stylized-uname" style="font-size:11px;">@${escapeHtml(b.opponent2_username || 'gegner2')}</div>
@@ -2236,7 +2236,7 @@ async function openBattleGraphicModal(battleId) {
                 <div class="stylized-fighter">
                     <div class="stylized-avatar-wrap">
                         ${isWin ? '<div class="stylized-crown">👑</div>' : ''}
-                        <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" src="${sAvatar}" alt="Streamer" onerror="this.src='/static/avatar_default.png';">
+                        <img class="stylized-avatar ${isWin ? 'winner-glow' : ''}" src="${sAvatar}" alt="Streamer" onerror="this.src='static/avatar_default.png';">
                     </div>
                     <div class="stylized-name">${escapeHtml(b.streamer_display_name || b.streamer_username)}</div>
                     <div class="stylized-uname">@${escapeHtml(b.streamer_username)}</div>
@@ -2262,7 +2262,7 @@ async function openBattleGraphicModal(battleId) {
                 <div class="stylized-fighter">
                     <div class="stylized-avatar-wrap">
                         ${isLose ? '<div class="stylized-crown">👑</div>' : ''}
-                        <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" src="${oAvatar}" alt="Gegner" onerror="this.src='/static/avatar_default.png';">
+                        <img class="stylized-avatar ${isLose ? 'winner-glow' : ''}" src="${oAvatar}" alt="Gegner" onerror="this.src='static/avatar_default.png';">
                     </div>
                     <div class="stylized-name">${escapeHtml(b.opponent_display_name || b.opponent_username || 'Gegner')}</div>
                     <div class="stylized-uname">@${escapeHtml(b.opponent_username || 'unbekannt')}</div>
@@ -2865,7 +2865,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("selectLogSource").addEventListener("change", renderServiceLogs);
 
     document.getElementById("btnSendTelegramReport").addEventListener("click", async () => {
-        const res = await fetch("/api/v1/telegram/send-report?hours=24", { method: "POST" });
+        const res = await fetch("api/v1/telegram/send-report?hours=24", { method: "POST" });
         const data = await res.json();
         if (res.ok) {
             alert(`24h-Bericht erfolgreich an Telegram (Chat ${data.chat_id}) gesendet!`);
@@ -2877,7 +2877,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("selectTelegramMode").addEventListener("change", async (e) => {
         const newMode = e.target.value;
-        await fetch("/api/settings", {
+        await fetch("api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ telegram_access_mode: newMode }),
@@ -2891,7 +2891,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const nameInput = document.getElementById("inputTgName");
         const roleSelect = document.getElementById("selectTgRole");
 
-        const res = await fetch("/api/v1/telegram/users", {
+        const res = await fetch("api/v1/telegram/users", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2919,7 +2919,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const displayInput = document.getElementById("inputDisplayName");
         const autoTrack = document.getElementById("checkAutoTrack").checked;
         const autoReconnect = document.getElementById("checkAutoReconnect").checked;
-        const res = await fetch("/api/streamers", {
+        const res = await fetch("api/streamers", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2945,7 +2945,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const repeatCount = parseInt(document.getElementById("simRepeatCount").value || "1", 10);
         const sender = document.getElementById("simSender").value || "live_viewer";
 
-        await fetch("/api/gifts", {
+        await fetch("api/gifts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2961,18 +2961,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("btnSeedDemo").addEventListener("click", async () => {
-        await fetch("/api/demo/seed", { method: "POST" });
+        await fetch("api/demo/seed", { method: "POST" });
         loadOverview();
     });
 
     document.getElementById("btnClearDemo").addEventListener("click", async () => {
-        await fetch("/api/demo/clear", { method: "POST" });
+        await fetch("api/demo/clear", { method: "POST" });
         loadOverview();
     });
 
     document.getElementById("formSettings").addEventListener("submit", async (e) => {
         e.preventDefault();
-        await fetch("/api/settings", {
+        await fetch("api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3012,7 +3012,7 @@ document.addEventListener("DOMContentLoaded", () => {
             public_show_donors: document.getElementById("setPublicShowDonors")?.checked ? 1 : 0,
         };
 
-        const res = await fetch("/api/settings", {
+        const res = await fetch("api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -3112,7 +3112,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (resultBox) resultBox.style.display = "none";
         
         try {
-            const res = await fetch(`/api/admin/sqlite/inspect?file_path=${encodeURIComponent(filePath)}`);
+            const res = await fetch(`api/admin/sqlite/inspect?file_path=${encodeURIComponent(filePath)}`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
@@ -3188,7 +3188,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         try {
-            const res = await fetch("/api/admin/sqlite/import", {
+            const res = await fetch("api/admin/sqlite/import", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -3249,7 +3249,7 @@ async function fetchSystemHealth(forceRefresh = false) {
         btn.textContent = "⏳ Lade...";
     }
     try {
-        const url = `/api/system/health${forceRefresh ? "?force_refresh=true" : ""}`;
+        const url = `api/system/health${forceRefresh ? "?force_refresh=true" : ""}`;
         const res = await fetch(url);
         if (!res.ok) return;
         const health = await res.json();

@@ -5,15 +5,15 @@
 {% block viewport %}width=device-width, initial-scale=1.0, viewport-fit=cover{% endblock %}
 
 {% block head %}
-    <script src="/static/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="/static/stats.css?v=1.0.0" />
+    <script src="static/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="static/stats.css?v=1.0.0" />
 {% endblock %}
 
 {% block content %}
 <header class="app-header">
     <div class="header-inner">
-        <a href="/stats" class="brand-block">
-            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+        <a href="stats" class="brand-block">
+            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
                     <h1 class="brand-title">toktracker</h1>
@@ -25,12 +25,12 @@
         <div class="status-strip">
             <span class="pill">Rolle: <strong>{{ role_label }}</strong></span>
             <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
-            {% if is_admin %}<a class="btn-link sm" href="/admin">← Admin-Dashboard</a>{% endif %}
-            {% if can_manage_users %}<a class="btn-link sm" href="/access">🔐 Zugriff &amp; Rollen</a>{% endif %}
-            {% if can_view_radar %}<a class="btn-link sm" href="/donor-radar">🐋 Spender-Radar</a>{% endif %}
-            {% if can_view_chatintel %}<a class="btn-link sm" href="/chat-intelligence">💬 Chat-Intelligence</a>{% endif %}
-            <a class="btn-link primary sm" href="/public">Öffentliches Panel →</a>
-            <a class="btn-link sm" href="/logout">Abmelden</a>
+            {% if is_admin %}<a class="btn-link sm" href="admin">← Admin-Dashboard</a>{% endif %}
+            {% if can_manage_users %}<a class="btn-link sm" href="access">🔐 Zugriff &amp; Rollen</a>{% endif %}
+            {% if can_view_radar %}<a class="btn-link sm" href="donor-radar">🐋 Spender-Radar</a>{% endif %}
+            {% if can_view_chatintel %}<a class="btn-link sm" href="chat-intelligence">💬 Chat-Intelligence</a>{% endif %}
+            <a class="btn-link primary sm" href="public">Öffentliches Panel →</a>
+            <a class="btn-link sm" href="logout">Abmelden</a>
         </div>
     </div>
 </header>
@@ -51,8 +51,8 @@
         </div>
         <div class="toolbar-controls">
             {% if can_export %}
-            <a class="btn-link sm" href="/api/export/gifts.csv">Gifts CSV</a>
-            <a class="btn-link sm" href="/api/export/battles.csv">Battles CSV</a>
+            <a class="btn-link sm" href="api/export/gifts.csv">Gifts CSV</a>
+            <a class="btn-link sm" href="api/export/battles.csv">Battles CSV</a>
             {% endif %}
             <button type="button" id="btnThemeToggle" class="mono sm" title="Theme wechseln">Theme: DARK</button>
         </div>
@@ -206,5 +206,5 @@
     </div>
 </main>
 
-<script src="/static/stats.js?v=1.0.0"></script>
+<script src="static/stats.js?v=1.0.0"></script>
 {% endblock %}

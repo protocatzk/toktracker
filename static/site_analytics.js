@@ -78,12 +78,12 @@
         if (spinner) spinner.style.transform = "rotate(180deg)";
 
         try {
-            const resp = await fetch(`/api/site-analytics?period=${currentPeriod}`, {
+            const resp = await fetch(`api/site-analytics?period=${currentPeriod}`, {
                 headers: { "Accept": "application/json" },
             });
             if (!resp.ok) {
                 if (resp.status === 401 || resp.status === 403) {
-                    window.location.href = "/login";
+                    window.location.href = "login";
                     return;
                 }
                 throw new Error(`HTTP ${resp.status}`);
@@ -464,7 +464,7 @@
             return `
                 <tr>
                     <td style="display: flex; align-items: center; gap: 8px;">
-                        <img src="${escapeHtml(w.avatar_url || '/static/avatar_default.png')}" style="width: 26px; height: 26px; border-radius: 50%; object-fit: cover;" onerror="this.src='/static/avatar_default.png'">
+                        <img src="${escapeHtml(w.avatar_url || 'static/avatar_default.png')}" style="width: 26px; height: 26px; border-radius: 50%; object-fit: cover;" onerror="this.src='static/avatar_default.png'">
                         <div>
                             <div style="font-weight: 700;">${escapeHtml(w.display_name || w.username || "")}</div>
                             <div style="font-size: 10.5px; color: var(--text-muted);">@${escapeHtml(w.username || "")}</div>
@@ -889,7 +889,7 @@
             chkExternal.addEventListener("change", async () => {
                 onlyExternalApi = chkExternal.checked;
                 try {
-                    const resp = await fetch(`/api/site-analytics/api-calls?period=${currentPeriod}&only_external=${onlyExternalApi}`, {
+                    const resp = await fetch(`api/site-analytics/api-calls?period=${currentPeriod}&only_external=${onlyExternalApi}`, {
                         headers: { "Accept": "application/json" },
                     });
                     if (resp.ok) {

@@ -3,9 +3,9 @@
 {% block title %}toktracker – Website &amp; Bot Analysen{% endblock %}
 
 {% block head %}
-    <script src="/static/chart.umd.min.js"></script>
+    <script src="static/chart.umd.min.js"></script>
 
-    <link rel="stylesheet" href="/static/site_analytics.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/site_analytics.css?v=1.0.0" />
     
 {% endblock %}
 
@@ -14,7 +14,7 @@
 <header class="app-header">
     <div class="header-inner">
         <a href="{% if is_admin %}/admin{% else %}/stats{% endif %}" class="brand-block">
-            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
+            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
                     <h1 class="brand-title">toktracker</h1>
@@ -28,11 +28,11 @@
             <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
             <span class="pill hide-sm">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
             <span class="pill hide-sm">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
-            {% if is_admin %}<a class="btn-link sm" href="/admin">← Admin-Dashboard</a>{% endif %}
-            <a class="btn-link sm" href="/stats">📈 Statistiken</a>
-            {% if 'radar.view' in permissions %}<a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>{% endif %}
-            <a class="btn-link primary sm" href="/public">Öffentliches Panel →</a>
-            <a class="btn-link sm" href="/logout">Abmelden</a>
+            {% if is_admin %}<a class="btn-link sm" href="admin">← Admin-Dashboard</a>{% endif %}
+            <a class="btn-link sm" href="stats">📈 Statistiken</a>
+            {% if 'radar.view' in permissions %}<a class="btn-link sm" href="donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>{% endif %}
+            <a class="btn-link primary sm" href="public">Öffentliches Panel →</a>
+            <a class="btn-link sm" href="logout">Abmelden</a>
 
         </div>
     </div>
@@ -523,10 +523,10 @@
 <footer class="app-footer">
     <div>toktracker · WEBSITE &amp; BOT ANALYTICS</div>
     <div>
-        <a href="/admin">← Zurück zum Admin-Dashboard</a> · <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="/public">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="/docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="/logout">Abmelden</a>
+        <a href="admin">← Zurück zum Admin-Dashboard</a> · <a href="donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="public">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="logout">Abmelden</a>
     </div>
 
 </footer>
 
-<script src="/static/site_analytics.js?v=1.1.0"></script>
+<script src="static/site_analytics.js?v=1.1.0"></script>
 {% endblock %}

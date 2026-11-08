@@ -41,7 +41,7 @@
     async function fetchJSON(url) {
         var res = await fetch(url, { headers: { Accept: "application/json" } });
         if (res.status === 401) {
-            window.location.href = "/login?next=/stats";
+            window.location.href = "login?next=/stats";
             throw new Error("unauthorized");
         }
         if (!res.ok) {
@@ -138,7 +138,7 @@
             return (
                 "<tr>" +
                 '<td><div class="stats-streamer-cell">' +
-                '<img src="' + esc(s.avatar_url || "/static/avatar_default.png") + '" alt="" class="stats-streamer-avatar" onerror="this.src=\'/static/avatar_default.png\'" />' +
+                '<img src="' + esc(s.avatar_url || "static/avatar_default.png") + '" alt="" class="stats-streamer-avatar" onerror="this.src=\'static/avatar_default.png\'" />' +
                 "<div><strong>" + esc(name) + "</strong><span>@" + esc(uname) + "</span></div>" +
                 "</div></td>" +
                 "<td class=\"hide-sm\">" + status + "</td>" +
@@ -210,12 +210,12 @@
     async function loadAll() {
         var period = state.period;
         var results = await Promise.allSettled([
-            fetchJSON("/api/overview?period=" + encodeURIComponent(period)),
-            fetchJSON("/api/analytics?period=" + encodeURIComponent(period)),
-            fetchJSON("/api/battles/stats?period=" + encodeURIComponent(period)),
-            fetchJSON("/api/site-analytics?period=" + encodeURIComponent(period)),
-            fetchJSON("/api/system/status"),
-            fetchJSON("/api/health"),
+            fetchJSON("api/overview?period=" + encodeURIComponent(period)),
+            fetchJSON("api/analytics?period=" + encodeURIComponent(period)),
+            fetchJSON("api/battles/stats?period=" + encodeURIComponent(period)),
+            fetchJSON("api/site-analytics?period=" + encodeURIComponent(period)),
+            fetchJSON("api/system/status"),
+            fetchJSON("api/health"),
         ]);
 
         if (results[0].status === "fulfilled") renderOverview(results[0].value);

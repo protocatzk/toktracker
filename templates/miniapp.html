@@ -4,11 +4,11 @@
 
 {% block viewport %}width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover{% endblock %}
 
-{% block styles %}<link rel="stylesheet" href="/static/miniapp.css?v=2.5.1" />{% endblock %}
+{% block styles %}<link rel="stylesheet" href="static/miniapp.css?v=2.5.1" />{% endblock %}
 
 {% block head %}
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="/static/chart.umd.min.js"></script>
+    <script src="static/chart.umd.min.js"></script>
     
     
 {% endblock %}
@@ -19,7 +19,7 @@
     <!-- Mini-App Header -->
     <header class="ma-header">
         <div class="ma-brand">
-            <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="ma-brand-logo" onerror="this.src='/static/avatar_default.png'" />
+            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="ma-brand-logo" onerror="this.src='static/avatar_default.png'" />
             <div>
                 <div class="ma-brand-title">
                     toktracker <span class="ma-badge">Mini-App</span>
@@ -892,5 +892,5 @@
 <!-- Toast Container -->
 <div class="ma-toast-container" id="maToastContainer"></div>
 
-<script src="/static/miniapp.js?v=2.5.1"></script>
+<script src="static/miniapp.js?v=2.5.1"></script>
 {% endblock %}

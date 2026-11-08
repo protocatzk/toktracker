@@ -401,7 +401,7 @@
             if (crossOnly) params.append("cross_streamer_only", "true");
             if (vipOnly) params.append("vip_only", "true");
 
-            const res = await fetch(`/api/donor-radar?${params.toString()}`);
+            const res = await fetch(`api/donor-radar?${params.toString()}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             if (!json.ok) throw new Error(json.error || "Fehler beim Laden");
@@ -537,7 +537,7 @@
             if (whaleOnlyChat) params.append("only_whales", "true");
             if (lastChatId) params.append("after_id", lastChatId);
 
-            const res = await fetch(`/api/chat-logs?${params.toString()}`);
+            const res = await fetch(`api/chat-logs?${params.toString()}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             if (!json.ok) throw new Error(json.error || "Fehler");
@@ -651,7 +651,7 @@
         if (modalCrossBadge) modalCrossBadge.innerHTML = "";
 
         try {
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}`);
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(username)}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             if (!json.ok || !json.data) throw new Error(json.error || "Nicht gefunden");
@@ -976,7 +976,7 @@
         try {
             const btn = evt ? evt.currentTarget : null;
             if (btn) btn.style.transform = "scale(1.4)";
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/toggle-vip`, {
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(username)}/toggle-vip`, {
                 method: "POST"
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -995,7 +995,7 @@
         if (!currentDossierData || !currentDossierData.profile) return;
         const uname = currentDossierData.profile.username;
         try {
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(uname)}/toggle-vip`, {
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(uname)}/toggle-vip`, {
                 method: "POST"
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1057,7 +1057,7 @@
         const notes = textarea ? textarea.value.trim() : (currentDossierData.crm ? currentDossierData.crm.notes : "");
 
         try {
-            const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(uname)}/crm`, {
+            const res = await fetch(`api/donor-radar/donors/${encodeURIComponent(uname)}/crm`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -1108,7 +1108,7 @@
         isPollingWhaleAlerts = true;
 
         try {
-            const res = await fetch(`/api/donor-radar/whale-alerts?min_coins=${whaleMinCoins}&limit=25`);
+            const res = await fetch(`api/donor-radar/whale-alerts?min_coins=${whaleMinCoins}&limit=25`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             if (!json.ok) throw new Error(json.error || "Fehler");
@@ -1254,7 +1254,7 @@
 
         try {
             const days = selLoyaltyDays ? selLoyaltyDays.value : loyaltyDaysRecent;
-            const res = await fetch(`/api/donor-radar/loyalty-and-overlap?days_recent=${days}&min_coins=50`);
+            const res = await fetch(`api/donor-radar/loyalty-and-overlap?days_recent=${days}&min_coins=50`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = await res.json();
             if (!json.ok || !json.data) throw new Error(json.error || "Fehler beim Laden");

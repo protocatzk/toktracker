@@ -3,7 +3,7 @@
 {% block title %}toktracker – Chat Intelligence, Wortwolke & Stream-Log Viewer{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="/static/chat_intelligence.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/chat_intelligence.css?v=1.0.0" />
     
 {% endblock %}
 
@@ -12,7 +12,7 @@
         <!-- 1. Header & Navigation -->
         <header class="ci-header-box">
             <div class="ci-brand">
-                <img src="/pictures/bot_avatar.jpg" alt="TokTracker" class="ci-brand-logo" />
+                <img src="pictures/bot_avatar.jpg" alt="TokTracker" class="ci-brand-logo" />
                 <div>
                     <div class="ci-brand-title">
                         <span>TokTracker</span>
@@ -30,11 +30,11 @@
                     Freigabe: <strong style="color: #38bdf8;">{{ "👑 ADMIN" if is_admin else ("🛡️ MODERATOR" if 'analytics.view' in permissions else "🔒 WHITELIST") }}</strong> ({{ admin_sub }})
                 </span>
                 <nav class="ci-nav-links">
-                    {% if is_admin %}<a href="/admin">← Admin-Dashboard</a>{% endif %}
-                    {% if 'analytics.view' in permissions %}<a href="/stats">📈 Statistiken</a>{% endif %}
-                    <a href="/donor-radar">🐋 Spender-Radar</a>
-                    {% if 'analytics.view' in permissions %}<a href="/site-analytics">📊 Web-Analysen</a>{% endif %}
-                    <a href="/logout" style="color:#ef4444;">Abmelden</a>
+                    {% if is_admin %}<a href="admin">← Admin-Dashboard</a>{% endif %}
+                    {% if 'analytics.view' in permissions %}<a href="stats">📈 Statistiken</a>{% endif %}
+                    <a href="donor-radar">🐋 Spender-Radar</a>
+                    {% if 'analytics.view' in permissions %}<a href="site-analytics">📊 Web-Analysen</a>{% endif %}
+                    <a href="logout" style="color:#ef4444;">Abmelden</a>
                 </nav>
             </div>
         </header>
@@ -306,13 +306,13 @@
 
         <!-- 6. Footer Navigation -->
         <footer class="ci-footer-nav">
-            {% if is_admin %}<a href="/admin">Admin-Dashboard</a> ·{% endif %}
-            {% if 'analytics.view' in permissions %}<a href="/stats">📈 Statistiken</a> ·{% endif %}
-            <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> ·
-            <a href="/chat-intelligence">💬 Chat Intelligence &amp; Wortwolke</a> ·
-            <a href="/public">Öffentliches User-Portal</a> ·
-            {% if 'analytics.view' in permissions %}<a href="/site-analytics">Web- &amp; Bot-Analysen</a> ·{% endif %}
-            <a href="/logout">Abmelden</a>
+            {% if is_admin %}<a href="admin">Admin-Dashboard</a> ·{% endif %}
+            {% if 'analytics.view' in permissions %}<a href="stats">📈 Statistiken</a> ·{% endif %}
+            <a href="donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> ·
+            <a href="chat-intelligence">💬 Chat Intelligence &amp; Wortwolke</a> ·
+            <a href="public">Öffentliches User-Portal</a> ·
+            {% if 'analytics.view' in permissions %}<a href="site-analytics">Web- &amp; Bot-Analysen</a> ·{% endif %}
+            <a href="logout">Abmelden</a>
         </footer>
     </div>
 
@@ -424,5 +424,5 @@
         <span id="ciToastText">Kopiert!</span>
     </div>
 
-    <script src="/static/chat_intelligence.js?v=1.0.0"></script>
+    <script src="static/chat_intelligence.js?v=1.0.0"></script>
 {% endblock %}
