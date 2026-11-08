@@ -31,7 +31,8 @@
             <a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>
             <a class="btn-link sm" href="/chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>
             <a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>
-            <a class="btn-link primary sm" href="/">Öffentliches User-Panel →</a>
+            <a class="btn-link sm" href="/stats">📈 Statistiken</a>
+            <a class="btn-link primary sm" href="/public">Öffentliches User-Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
 
         </div>
@@ -721,9 +722,9 @@
                 <div>
                     <h2>Berechtigte Personen &amp; Offene Zugriffsanfragen</h2>
                     <div class="section-hint">
-                        Personen mit der Rolle <strong>Admin</strong> können sich auch über den Telegram-Bot im Web-Admin-Panel (<code>/admin</code>) anmelden.<br/>
+                        <strong>Gast / Zuschauer</strong> sieht nur öffentliche Seiten. <strong>Nutzer / Mitglied</strong> erhält zusätzlich Spender-Radar &amp; Chat-Intelligence. <strong>Moderatoren</strong> sehen das read-only Statistik-Dashboard (<code>/stats</code>), dürfen aber nichts löschen, buchen oder verwalten. Nur <strong>Administratoren</strong> haben Vollzugriff und Web-Admin-Login (<code>/admin</code>).<br/>
                         <span style="display:inline-block; margin-top:4px; color:#c084fc; font-weight:600;">🔒 Whitelist-Vorteil:</span>
-                        Freigeschaltete Nutzer (Rolle <em>Nutzer</em> oder <em>Admin</em>) erhalten exklusiven Zugriff auf geschützte Web-Module wie <strong>💬 Chat-Intelligence &amp; Wortwolken</strong> (<code>/chat-intelligence</code>) und <strong>🐋 Spender-Radar</strong> (<code>/radar</code>). Nicht freigeschaltete Besucher werden gesperrt.
+                        Freigeschaltete Nutzer (Rolle <em>Nutzer</em> oder höher) erhalten exklusiven Zugriff auf geschützte Web-Module wie <strong>💬 Chat-Intelligence &amp; Wortwolken</strong> (<code>/chat-intelligence</code>) und <strong>🐋 Spender-Radar</strong> (<code>/donor-radar</code>). Nicht freigeschaltete Besucher werden gesperrt.
                     </div>
                 </div>
             </div>
@@ -732,8 +733,10 @@
                 <input type="text" id="inputTgIdentifier" placeholder="Telegram-ID oder @username" style="width:240px;" required />
                 <input type="text" id="inputTgName" placeholder="Name oder Notiz" style="width:190px;" />
                 <select id="selectTgRole">
-                    <option value="user">Rolle: Nutzer (Abfragen)</option>
-                    <option value="admin">Rolle: Admin (Vollzugriff &amp; Web-Login)</option>
+                    <option value="viewer">Rolle: Gast / Zuschauer (nur öffentliche Inhalte)</option>
+                    <option value="user" selected>Rolle: Nutzer / Mitglied (Whitelist: Radar &amp; Chat)</option>
+                    <option value="moderator">Rolle: Moderator (Statistiken lesen, keine Schreibrechte)</option>
+                    <option value="admin">Rolle: Administrator (Vollzugriff &amp; Web-Login)</option>
                 </select>
                 <button type="submit" class="primary">Freischalten</button>
             </form>
@@ -1133,7 +1136,7 @@
 <footer class="app-footer">
     <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
     <div>
-        <a href="/donor-radar">🐋 Spender-Radar</a> · <a href="/chat-intelligence">💬 Chat-Intelligence &amp; Wortwolke</a> · <a href="/site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="/">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="/docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="/logout">Abmelden</a>
+        <a href="/donor-radar">🐋 Spender-Radar</a> · <a href="/chat-intelligence">💬 Chat-Intelligence &amp; Wortwolke</a> · <a href="/site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="/public">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="/docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="/logout">Abmelden</a>
     </div>
 
 </footer>

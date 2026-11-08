@@ -7,6 +7,7 @@
     "use strict";
 
     // State
+    const canEditCrm = (document.getElementById("radarPermissions")?.getAttribute("data-can-edit-crm") === "1");
     let currentPeriod = "all";
     let selectedStreamerId = "";
     let donorSearch = "";
@@ -463,7 +464,9 @@
             const isVip = Boolean(d.is_vip);
             const starTitle = isVip ? "Von VIP-Watchlist entfernen" : "Auf VIP-Watchlist setzen";
             const starChar = isVip ? "★" : "☆";
-            const starBtn = `<button type="button" class="vip-star-btn ${isVip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleVipQuick('${uname}', event)" title="${starTitle}">${starChar}</button>`;
+            const starBtn = canEditCrm
+                ? `<button type="button" class="vip-star-btn ${isVip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleVipQuick('${uname}', event)" title="${starTitle}">${starChar}</button>`
+                : "";
 
             const tagsList = Array.isArray(d.tags) ? d.tags : [];
             const tagsHtml = tagsList.length > 0
@@ -757,9 +760,10 @@
                     <div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <h3 style="margin:0; font-size:18px; color:var(--text-strong);">${escapeHtml(p.display_name)}</h3>
+                            ${canEditCrm ? `
                             <button type="button" class="vip-star-btn ${crm.is_vip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleModalVip()" title="VIP-Status umschalten" style="font-size:18px;">
                                 ${crm.is_vip ? '★' : '☆'}
-                            </button>
+                            </button>` : ""}
                         </div>
                         <div class="mono muted" style="font-size:12px;">@${escapeHtml(p.username)}</div>
                         <div style="margin-top:4px; font-size:11.5px; color:var(--text-muted);">
@@ -784,7 +788,8 @@
                 </div>
             </div>
 
-            <!-- CRM & VIP Watchlist Section -->
+            <!-- CRM & VIP Watchlist Section (nur mit crm.edit) -->
+            ${canEditCrm ? `
             <div class="crm-card">
                 <div class="crm-card-header">
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -838,7 +843,7 @@
                         </button>
                     </div>
                 </div>
-            </div>
+            </div>` : ""}
 
             <!-- Section: Loyalität & Frontenwechsler Analyse -->
             ${renderModalLoyaltyCard(data.loyalty)}
@@ -967,6 +972,7 @@
     // Quick toggle VIP from Table
     async function toggleVipQuick(username, evt) {
         if (evt) evt.stopPropagation();
+        if (!canEditCrm) return;
         try {
             const btn = evt ? evt.currentTarget : null;
             if (btn) btn.style.transform = "scale(1.4)";
@@ -985,6 +991,7 @@
 
     // Toggle VIP inside Dossier Modal
     async function toggleModalVip() {
+        if (!canEditCrm) return;
         if (!currentDossierData || !currentDossierData.profile) return;
         const uname = currentDossierData.profile.username;
         try {
@@ -1011,6 +1018,7 @@
 
     // Add Tag
     function addModalTag(tag) {
+        if (!canEditCrm) return;
         const cleanTag = String(tag || "").trim().replace(/,/g, "");
         if (!cleanTag) return;
         if (!currentDossierTags.includes(cleanTag)) {
@@ -1042,6 +1050,7 @@
 
     // Save Notes & Tags
     async function saveModalCrm(showNotification = true) {
+        if (!canEditCrm) return;
         if (!currentDossierData || !currentDossierData.profile) return;
         const uname = currentDossierData.profile.username;
         const textarea = document.getElementById("modalNotesTextarea");
@@ -1272,7 +1281,9 @@
                         const uname = escapeHtml(fw.username);
                         const nick = escapeHtml(fw.display_name || fw.username);
                         const crm = fw.crm || { is_vip: false, tags: [] };
-                        const vipStar = `<button type="button" class="vip-star-btn ${crm.is_vip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleVipQuick('${uname}', event)" title="VIP-Status umschalten">${crm.is_vip ? '★' : '☆'}</button>`;
+                        const vipStar = canEditCrm
+                            ? `<button type="button" class="vip-star-btn ${crm.is_vip ? 'is-vip' : ''}" onclick="window.tokRadar.toggleVipQuick('${uname}', event)" title="VIP-Status umschalten">${crm.is_vip ? '★' : '☆'}</button>`
+                            : "";
                         const tierBadge = renderTierBadge(fw.tier);
                         const tagsHtml = renderDonorItemTags(crm.tags);
                         const shift = fw.frontenwechsel || {};

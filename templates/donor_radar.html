@@ -8,10 +8,11 @@
 {% endblock %}
 
 {% block content %}
+<div id="radarPermissions" data-can-edit-crm="{{ '1' if can_edit_crm else '0' }}" hidden></div>
 <!-- Header -->
 <header class="app-header">
     <div class="header-inner">
-        <a href="/admin" class="brand-block">
+        <a href="{% if is_admin %}/admin{% elif 'analytics.view' in permissions %}/stats{% else %}/public{% endif %}" class="brand-block">
             <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
@@ -22,13 +23,15 @@
             </div>
         </a>
         <div class="status-strip">
-            <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+            <span class="pill">Rolle: <strong>{{ role }}</strong></span>
+            <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
             <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
-            <span class="pill">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
-            <a class="btn-link sm" href="/admin">← Admin-Dashboard</a>
-            <a class="btn-link sm" href="/chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>
-            <a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>
-            <a class="btn-link primary sm" href="/">Öffentliches Panel →</a>
+            <span class="pill hide-sm">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
+            {% if is_admin %}<a class="btn-link sm" href="/admin">← Admin-Dashboard</a>{% endif %}
+            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="/stats">📈 Statistiken</a>{% endif %}
+            {% if 'chatintel.view' in permissions %}<a class="btn-link sm" href="/chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>{% endif %}
+            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="/site-analytics">📊 Web-Analysen</a>{% endif %}
+            <a class="btn-link primary sm" href="/public">Öffentliches Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
         </div>
     </div>
@@ -418,7 +421,7 @@
             <span class="sep">·</span>
             <a href="/site-analytics">Website &amp; Bot Analysen</a>
             <span class="sep">·</span>
-            <a href="/">Öffentliche Ansicht</a>
+            <a href="/public">Öffentliche Ansicht</a>
         </div>
     </div>
 </footer>

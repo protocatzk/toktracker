@@ -12,6 +12,7 @@ from shared.bus import get_bus
 from shared.config import config
 from shared.contracts import PREFIX_AUTH_CHALLENGE
 from shared.database import list_telegram_users
+from shared.permissions import ROLE_ADMIN, ROLE_VIEWER, is_valid_role, normalize_role
 
 logger = logging.getLogger("toktracker.auth")
 
@@ -233,12 +234,14 @@ class AdminAuthManager:
     def create_session_token(
         self,
         admin_label: str = "telegram_admin",
-        role: str = "admin",
+        role: str = ROLE_ADMIN,
         is_allowed: bool = True,
     ) -> str:
+        # Unbekannte Rollen werden fail-closed als Viewer behandelt.
+        clean_role = normalize_role(role) if is_valid_role(role) else ROLE_VIEWER
         payload = {
             "sub": admin_label,
-            "role": role,
+            "role": clean_role,
             "is_allowed": is_allowed,
             "iat": int(time.time()),
             "exp": int(time.time()) + self.session_ttl_seconds(),
@@ -270,7 +273,7 @@ class AdminAuthManager:
             payload = json.loads(raw_bytes.decode("utf-8"))
             if int(payload.get("exp", 0)) < int(time.time()):
                 return None
-            payload.setdefault("role", "admin")
+            payload.setdefault("role", ROLE_VIEWER)
             payload.setdefault("is_allowed", True)
             return payload
         except Exception:
@@ -333,7 +336,7 @@ class AdminAuthManager:
                 u_tid = u.get("telegram_id")
                 u_uname = str(u.get("username") or "").strip().lstrip("@").lower()
                 is_allowed = int(u.get("is_allowed", 0)) == 1
-                is_admin = u.get("role") == "admin"
+                is_admin = normalize_role(u.get("role")) == ROLE_ADMIN
 
                 if is_allowed and is_admin:
                     if telegram_id is not None and u_tid:

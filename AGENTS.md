@@ -66,8 +66,8 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | [`tiktok_service.py`](./tiktok_service.py) | **TikTok-Monitoring-Engine**. Definiert `StreamerWorker` mit WebSocket-Eventhandlern (`ConnectEvent`, `GiftEvent`, etc.), Streak-Aggregation und uvloop-Unterstützung. |
 | [`telegram_service.py`](./telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
 | [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `docker-socket-proxy` (nur lesende Docker-API) sowie `nginx-proxy` und `acme-companion` (SSL). |
-| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `index.html` (Admin-Dashboard), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
-| [`static/`](./static) | **Frontend-Assets**: `dashboard.js` (Dashboard-Logik, Polling, Charts), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
+| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `landing.html` (öffentliche Infoseite unter `/`), `index.html` (Admin-Dashboard), `stats.html` (read-only Moderator-Statistiken), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
+| [`static/`](./static) | **Frontend-Assets**: `landing.css` (öffentliche Infoseite), `dashboard.js` (Dashboard-Logik, Polling, Charts), `stats.js` (read-only Statistik-Seite), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
 
 ---
 
@@ -87,7 +87,7 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 4. **`settings`**:
    - Key-Value Store für Währungskurse (`usd_per_diamond`, `gross_usd_per_coin`, `usd_to_eur_rate`, `currency_primary`), Polling-Intervalle, API-Keys und Zugriffsmodi.
 5. **`telegram_users`**:
-   - Rollen- & Berechtigungstabelle (`user_id`, `username`, `role` [user/admin], `is_allowed` [1=erlaubt, 0=wartend, -1=gesperrt]).
+   - Rollen- & Berechtigungstabelle (`user_id`, `username`, `role` [viewer/user/moderator/admin], `is_allowed` [1=erlaubt, 0=wartend, -1=gesperrt]).
 6. **`admin_challenges`**:
    - Temporäre Login-Anfragen für das Web-Dashboard mit Status (`pending`, `approved`, `rejected`, `expired`).
 
@@ -118,12 +118,30 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 ## 5b. Zugriffssperre (ACCESS_GATE)
 
 Standard ist `ACCESS_GATE=whitelist`: Die Zugriffssperre in `app.py`
-(`access_gate_middleware`, Logik in `shared/access_gate.py`) lässt nur
-freigeschaltete Telegram-Nutzer (Session mit `role=admin` oder `is_allowed`) bzw.
-Inhaber des API-Keys durch. Öffentlich bleiben nur Login-Seite/Login-Endpunkte,
-`/static`, `/pictures`, `/api/health`, `/robots.txt` und die Mini-App-Seite.
-Abgewiesene Aufrufe erzeugen keine Analytics-Einträge (Gate liegt außerhalb der
-Analytics-Middleware) und tragen `X-Robots-Tag: noindex`.
+(`access_gate_middleware`, Logik in `shared/access_gate.py`) lässt jede gültige,
+nicht gesperrte Session bzw. Inhaber des API-Keys durch. Öffentlich bleiben nur
+Login-Seite/Login-Endpunkte, `/static`, `/pictures`, `/api/health`, `/robots.txt`
+und die Mini-App-Seite. Abgewiesene Aufrufe erzeugen keine Analytics-Einträge
+(Gate liegt außerhalb der Analytics-Middleware) und tragen `X-Robots-Tag: noindex`.
+
+Die **feingranulare Rechte-Matrix** liegt in [`shared/permissions.py`](./shared/permissions.py):
+
+| Rolle | Rechte (Kurzform) |
+| :--- | :--- |
+| `viewer` | Nur öffentliche Seiten/APIs (`public.view`) |
+| `user` | Zusätzlich Spender-Radar, Chatlogs & Chat-Intelligence (`radar.view`, `chatintel.view`) |
+| `moderator` | Zusätzlich interne Statistiken, Exporte & Systemstatus (`analytics.view`, `export.download`, `system.view`) – **keine Schreibrechte** |
+| `admin` | Alle Rechte inkl. CRM, Streamer-Verwaltung, Geschenk-Buchung, Einstellungen, Nutzerverwaltung und System-Management |
+
+API-Keys werden intern als `admin` behandelt. Endpunkte sichern sich über
+`require_permission(<capability>)` ab; `verify_admin_or_api_key` bleibt der
+Admin-only-Fallback. Neue geschützte Endpunkte müssen ein passendes Recht
+verwenden, statt pauschal `verify_admin_or_api_key` zu nehmen.
+
+Die öffentliche Infoseite unter `/` wird über `LANDING_PAGE_ENABLED=1`
+(Default) aktiviert und ist bewusst für alle erreichbar. Bei `0` liefert `/`
+wieder das öffentliche Live-Panel und unterliegt dem Gate. `/public` und
+`/panel` bleiben in beiden Fällen eigenständige Live-Panel-Routen.
 
 Neue öffentliche Endpunkte müssen bewusst in `shared/access_gate.py`
 (`EXEMPT_PATHS`) eingetragen werden — sonst sind sie automatisch gesperrt.

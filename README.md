@@ -17,7 +17,7 @@
 | :--- | :--- |
 | **Live-Tracking** | Geschenke (Coins/Diamonds) in Echtzeit, Combo-/Streak-Aggregation, Zuschauerzahlen, Stream-Sessions, Battle-Erkennung (1v1, 2v2, 1v1v1, 1v1v1v1) |
 | **Finanzen** | Brutto-Kaufwert (Zuschauer) und Netto-Auszahlung (Creator) in USD und EUR, konfigurierbare Kurse, Periodenfilter (today/24h/7d/30d/all) |
-| **Web-Oberfläche** | Öffentliches Read-Only-Panel (`/`), Admin-Dashboard (`/admin`), Analytics (`/site-analytics`), Spender-Radar (`/donor-radar`), Chat-Intelligence (`/chat-intelligence`), Telegram Mini-App (`/app`) |
+| **Web-Oberfläche** | Öffentliche Infoseite (`/`), Öffentliches Read-Only-Panel (`/public`), Admin-Dashboard (`/admin`), Moderator-Statistiken (`/stats`), Analytics (`/site-analytics`), Spender-Radar (`/donor-radar`), Chat-Intelligence (`/chat-intelligence`), Telegram Mini-App (`/app`) |
 | **Telegram-Bot** | 24h-Reports, Streamer-Statistiken, Live-Status, Whitelist-Verwaltung, Login per Telegram-Widget/OTP |
 | **Sicherheit** | HMAC-signierte Sessions, Telegram-Signaturprüfung, Whitelist/Rollen, Rate-Limiting auf Auth-Endpunkten, Datenschutz-Maskierung auf öffentlichen Flächen |
 | **Betrieb** | Microservices mit Redis-Bus, horizontales Ingest-Sharding über Leases, Leader-Locks, Healthchecks, Docker-Compose mit Nginx + Let's Encrypt |
@@ -91,6 +91,7 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `SESSION_COOKIE_SECURE` | `auto` (nur HTTPS), `1` oder `0` |
 | `ENABLE_API_DOCS` | `/docs`, `/redoc`, `/openapi.json` freischalten (Default: `0`) |
 | `ACCESS_GATE` | `whitelist` (Default): nur per Telegram freigeschaltete Nutzer/API-Key kommen an die App, alle anderen landen auf `/login`. `off` = öffentlicher Betrieb |
+| `LANDING_PAGE_ENABLED` | `1` (Default): `/` zeigt die öffentliche Infoseite. `0`: `/` zeigt wieder das öffentliche Live-Panel (und unterliegt dem Gate) |
 
 ---
 
@@ -109,7 +110,10 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
   entzogene Freigaben schnell wirken.
 - Admin-Zugriff nur über Telegram-Login (Widget/OTP) oder API-Key; Sessions sind HMAC-signiert und `HttpOnly`/`Secure` (hinter HTTPS).
 - Auth-Endpunkte sind rate-limitiert; Login-Challenges werden nach 5 Fehlversuchen gesperrt.
-- Rollen: `admin` (voller Zugriff) vs. `user` (Whitelist: Radar und Chat-Intelligence).
+- Rollen: `viewer` (nur öffentliche Inhalte), `user` (Whitelist: Radar und
+  Chat-Intelligence), `moderator` (Statistiken, Exporte und Systemstatus lesen,
+  keine Schreibrechte) und `admin` (voller Zugriff). Die Rechte-Matrix liegt
+  zentral in `shared/permissions.py`; API-Keys gelten als `admin`.
 - Spender-Namen sind auf öffentlichen Flächen standardmäßig **maskiert** (`public_show_donors=0`, im Admin-Panel umschaltbar).
 - Interne Rohdaten (`raw_data_json`) werden nie über öffentliche Endpunkte ausgeliefert.
 - Besucher-IPs werden ausschließlich als salted Hash gespeichert.

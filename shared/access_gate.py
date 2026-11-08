@@ -20,6 +20,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from shared.config import config
+from shared.permissions import is_blocked, is_valid_role
+
 # Exakt erlaubte Pfade (ohne Login kommt man sonst nicht weiter).
 EXEMPT_PATHS = frozenset({
     # Seiten
@@ -53,16 +56,32 @@ EXEMPT_PREFIXES = ("/static/", "/pictures/")
 
 def is_exempt_path(path: str) -> bool:
     """True, wenn der Pfad ohne Anmeldung erreichbar bleiben muss."""
+    # Die öffentliche Infoseite ist absichtlich fuer alle erreichbar.
+    if path == "/" and config.landing_page_enabled:
+        return True
     if path in EXEMPT_PATHS:
         return True
     return any(path.startswith(prefix) for prefix in EXEMPT_PREFIXES)
 
 
 def session_grants_access(payload: Optional[Dict[str, Any]]) -> bool:
-    """Admins und freigeschaltete Whitelist-Nutzer dürfen durch."""
+    """
+    Jede gueltige, nicht gesperrte Session darf durch das Gate.
+
+    Die Rolle entscheidet anschliessend, welche Bereiche erreichbar sind.
+    Unbekannte Rollen werden fail-closed abgewiesen.
+    """
     if not payload:
         return False
-    return payload.get("role") == "admin" or payload.get("is_allowed") is True
+
+    role = payload.get("role")
+    if role is not None and not is_valid_role(role):
+        return False
+
+    if is_blocked(payload.get("is_allowed", True)):
+        return False
+
+    return bool(payload.get("is_allowed", True))
 
 
 def wants_json(path: str, accept_header: str = "") -> bool:

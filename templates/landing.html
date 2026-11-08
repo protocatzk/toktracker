@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block title %}TokTracker – TikTok Live Earnings & Analytics{% endblock %}
+
+{% block styles %}
+    <link rel="stylesheet" href="/static/landing.css?v=1.0.0" />
+{% endblock %}
+
+{% block content %}
+<a class="skip-link" href="#main">Zum Inhalt springen</a>
+<div id="top"></div>
+
+<header class="site-header">
+    <div class="wrap header-inner">
+        <a class="brand" href="/">
+            <img src="/pictures/bot_avatar.jpg" alt="" width="36" height="36" loading="eager" />
+            <span class="brand-copy">
+                <span class="brand-title">toktracker</span>
+                <span class="brand-subtitle">TIKTOK LIVE EARNINGS</span>
+            </span>
+        </a>
+        <div class="header-right">
+            <nav class="nav" aria-label="Hauptnavigation">
+                <a href="#features">Features</a>
+                <a href="#how">Ablauf</a>
+                <a href="#roles">Rollen</a>
+                <a href="#status">Status</a>
+            </nav>
+            <div class="header-actions">
+                <a class="btn small primary" href="/login">Anmelden <span class="arrow" aria-hidden="true">→</span></a>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main id="main">
+    <section class="hero wrap">
+        <div>
+            <p class="eyebrow">// LIVE EARNINGS TRACKER</p>
+            <h1>TikTok-Livestreams. Einnahmen. Klarheit.</h1>
+            <p class="lead">
+                TokTracker verfolgt Geschenke, Zuschauer und Streams in Echtzeit.
+                Alle Einnahmen landen in einer Datenbank, das Dashboard zeigt
+                Auswertungen in USD und EUR – und der Telegram-Bot liefert
+                Reports direkt aufs Handy.
+            </p>
+            <div class="actions">
+                <a class="btn primary" href="/login">
+                    Live-Panel öffnen <span class="arrow" aria-hidden="true">→</span>
+                </a>
+                <a class="btn" href="/miniapp">
+                    Mini-App <span class="arrow" aria-hidden="true">↗</span>
+                </a>
+            </div>
+            <ul class="pills">
+                <li>Self-hosted</li>
+                <li>Python · FastAPI</li>
+                <li>SQLite · MariaDB</li>
+            </ul>
+        </div>
+
+        <aside class="profile-card" aria-label="TokTracker Status">
+            <div class="profile-head">
+                <img src="/pictures/bot_avatar.jpg" alt="" width="64" height="64" loading="eager" />
+                <div>
+                    <div class="profile-name">TokTracker</div>
+                    <span class="profile-role">Live Earnings & Analytics</span>
+                </div>
+            </div>
+            <dl class="specs">
+                <div>
+                    <dt>STATUS</dt>
+                    <dd class="status-value">{{ "ONLINE" if telegram_state == "running" else telegram_state|upper }}</dd>
+                </div>
+                <div>
+                    <dt>FOKUS</dt>
+                    <dd>Live-Tracking</dd>
+                </div>
+                <div>
+                    <dt>BOT</dt>
+                    <dd>{{ telegram_bot_username or "konfigurierbar" }}</dd>
+                </div>
+                <div>
+                    <dt>BETRIEB</dt>
+                    <dd>Self-hosted</dd>
+                </div>
+            </dl>
+            <a class="profile-link" href="/login">
+                <span>Zugang über Telegram</span>
+                <span aria-hidden="true">↗</span>
+            </a>
+        </aside>
+    </section>
+
+    <section class="section wrap" id="features">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">01 / FEATURES</p>
+                <h2>Was TokTracker kann</h2>
+            </div>
+            <p class="section-hint">Von der Live-Erfassung bis zum fertigen Report – ohne manuelles Mitrechnen.</p>
+        </div>
+
+        <div class="project-group">
+            <div class="group-head">
+                <p class="group-label">Kernfunktionen</p>
+            </div>
+            <div class="project-grid">
+                <article class="project-card flagship">
+                    <div class="card-top">
+                        <span class="card-index">01</span>
+                        <span class="card-lang"><span class="lang-dot" style="--dot: #38bdf8"></span> Realtime</span>
+                    </div>
+                    <h3 class="card-title">Echtzeit-Tracking</h3>
+                    <p class="card-desc">
+                        TokTracker verbindet sich mit TikTok-Livestreams und erfasst
+                        Geschenke, Coins, Diamonds, Zuschauerzahlen und Stream-Status.
+                        Combo- und Streak-Geschenke werden sauber aggregiert.
+                    </p>
+                    <ul class="card-tags">
+                        <li>Python</li><li>FastAPI</li><li>TikTokLive</li><li>Redis</li><li>MariaDB</li>
+                    </ul>
+                </article>
+
+                <article class="project-card">
+                    <div class="card-top">
+                        <span class="card-index">02</span>
+                        <span class="card-lang"><span class="lang-dot" style="--dot: #a855f7"></span> Analytics</span>
+                    </div>
+                    <h3 class="card-title">Dashboard &amp; Analytics</h3>
+                    <p class="card-desc">
+                        Einnahmen in USD und EUR, Streamer-Rankings, Gift-Verteilung,
+                        Battles und Zeitverläufe – auf einen Blick im Web-Dashboard.
+                    </p>
+                    <ul class="card-tags"><li>Charts</li><li>Battles</li><li>CSV-Export</li></ul>
+                </article>
+
+                <article class="project-card">
+                    <div class="card-top">
+                        <span class="card-index">03</span>
+                        <span class="card-lang"><span class="lang-dot" style="--dot: #f59e0b"></span> Whitelist</span>
+                    </div>
+                    <h3 class="card-title">Spender-Radar &amp; Chat-Intelligence</h3>
+                    <p class="card-desc">
+                        Whales, Sharks und Stammspender erkennen, Dossiers pflegen und
+                        Chat-Trends auswerten. Diese Module sind freigeschalteten
+                        Whitelist-Nutzern vorbehalten.
+                    </p>
+                    <ul class="card-tags"><li>Whale-Alerts</li><li>CRM</li><li>Chat-Trends</li></ul>
+                </article>
+
+                <article class="project-card">
+                    <div class="card-top">
+                        <span class="card-index">04</span>
+                        <span class="card-lang"><span class="lang-dot" style="--dot: #3fb950"></span> Automation</span>
+                    </div>
+                    <h3 class="card-title">Telegram-Bot &amp; Mini-App</h3>
+                    <p class="card-desc">
+                        24h-Reports, Streamer-Statistiken, Live-Status und ein mobiles
+                        Mini-App-Dashboard – direkt aus Telegram heraus.
+                    </p>
+                    <ul class="card-tags"><li>Telegram</li><li>Reports</li><li>Mini-App</li></ul>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section wrap" id="how">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">02 / ABLAUF</p>
+                <h2>So funktioniert's</h2>
+            </div>
+        </div>
+        <ol class="step-grid">
+            <li class="step-card">
+                <span class="step-index">01</span>
+                <h3>Streamer verbinden</h3>
+                <p>Streamer hinzufügen, Worker starten – TokTracker überwacht den Kanal automatisch und verbindet sich bei Live-Gang neu.</p>
+            </li>
+            <li class="step-card">
+                <span class="step-index">02</span>
+                <h3>Live-Events erfassen</h3>
+                <p>Geschenke, Zuschauer und Battles werden in Echtzeit erfasst, normalisiert und in SQLite oder MariaDB gespeichert.</p>
+            </li>
+            <li class="step-card">
+                <span class="step-index">03</span>
+                <h3>Auswerten &amp; reporten</h3>
+                <p>Dashboard, Radar und Telegram-Reports zeigen Einnahmen, Top-Spender und Trends – automatisch oder auf Abruf.</p>
+            </li>
+        </ol>
+    </section>
+
+    <section class="section wrap" id="roles">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">03 / ZUGRIFF</p>
+                <h2>Rollen &amp; Sichtbarkeit</h2>
+            </div>
+            <p class="section-hint">Der Zugang erfolgt über die Telegram-Whitelist. Jede Rolle sieht genau die Bereiche, die sie braucht.</p>
+        </div>
+        <ul class="mini-list">
+            <li>
+                <div class="mini-project role-row">
+                    <span class="mini-index">01</span>
+                    <span class="mini-body">
+                        <span class="mini-title">Gast / Zuschauer</span>
+                        <span class="mini-desc">Öffentliche Startseite und öffentliche Live-Ansicht.</span>
+                    </span>
+                    <span class="role-badge">viewer</span>
+                </div>
+            </li>
+            <li>
+                <div class="mini-project role-row">
+                    <span class="mini-index">02</span>
+                    <span class="mini-body">
+                        <span class="mini-title">Nutzer / Mitglied</span>
+                        <span class="mini-desc">Zusätzlich Spender-Radar, Chatlogs und Chat-Intelligence.</span>
+                    </span>
+                    <span class="role-badge">user</span>
+                </div>
+            </li>
+            <li>
+                <div class="mini-project role-row">
+                    <span class="mini-index">03</span>
+                    <span class="mini-body">
+                        <span class="mini-title">Moderator</span>
+                        <span class="mini-desc">Statistiken, Exporte und Systemstatus lesen – ohne Schreibrechte.</span>
+                    </span>
+                    <span class="role-badge">moderator</span>
+                </div>
+            </li>
+            <li>
+                <div class="mini-project role-row">
+                    <span class="mini-index">04</span>
+                    <span class="mini-body">
+                        <span class="mini-title">Administrator</span>
+                        <span class="mini-desc">Vollzugriff inklusive Einstellungen, Nutzerverwaltung und Streamer-Betrieb.</span>
+                    </span>
+                    <span class="role-badge">admin</span>
+                </div>
+            </li>
+        </ul>
+    </section>
+
+    <section class="section wrap" id="status">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">04 / STATUS</p>
+                <h2>Systemstatus</h2>
+            </div>
+        </div>
+        <div class="status-grid">
+            <div class="status-card">
+                <span class="status-label">Telegram-Bot</span>
+                <strong class="status-val">{{ "ONLINE" if telegram_state == "running" else telegram_state|upper }}</strong>
+            </div>
+            <div class="status-card">
+                <span class="status-label">TikTokLive</span>
+                <strong class="status-val">{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong>
+            </div>
+            <div class="status-card">
+                <span class="status-label">Zugriff</span>
+                <strong class="status-val">{{ access_gate|upper }}</strong>
+            </div>
+        </div>
+
+        <div class="contact-box">
+            <div class="contact-copy">
+                <p class="eyebrow">BEREIT FÜR DEN NÄCHSTEN STREAM</p>
+                <h2>Zugang erhalten</h2>
+                <p>
+                    Melde dich über Telegram an. Wenn du noch keine Freigabe hast,
+                    kann ein Administrator dich für die gewünschte Rolle freischalten.
+                </p>
+            </div>
+            <div class="contact-actions">
+                <a class="btn primary" href="/login">Anmelden <span class="arrow" aria-hidden="true">→</span></a>
+                {% if telegram_bot_username %}
+                <a class="btn" href="https://t.me/{{ telegram_bot_username.lstrip('@') }}" target="_blank" rel="noopener">
+                    Telegram-Bot <span class="arrow" aria-hidden="true">↗</span>
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+</main>
+
+<footer class="site-footer">
+    <div class="wrap footer-inner">
+        <p>© 2026 TokTracker</p>
+        <nav class="footer-links" aria-label="Footer-Links">
+            <a href="/login">Anmelden</a>
+            <a href="/public">Live-Panel</a>
+            <a href="/miniapp">Mini-App</a>
+            <a class="footer-top" href="#top">Nach oben ↑</a>
+        </nav>
+    </div>
+</footer>
+{% endblock %}
