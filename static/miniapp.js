@@ -30,6 +30,8 @@
     let isFetching = false;
     let isAdmin = false;
     let isWhitelisted = false;
+    let permissions = [];
+    let authRole = "anonymous";
     let authUser = null;
     let sessionToken = localStorage.getItem("toktracker_admin_token") || "";
     let cachedStreamers = [];
@@ -68,6 +70,8 @@
         btnRefresh: document.getElementById("maBtnRefresh"),
         periodPills: document.querySelectorAll(".period-pill"),
         navTabs: document.querySelectorAll(".nav-tab-btn"),
+        navRadar: document.getElementById("maNavRadar"),
+        navAdmin: document.getElementById("maNavAdmin"),
         tabViews: document.querySelectorAll(".ma-tab-view"),
         headerAdminBadge: document.getElementById("maHeaderAdminBadge"),
 
@@ -306,6 +310,24 @@
         return headers;
     }
 
+    function hasPerm(permission) {
+        return Array.isArray(permissions) && permissions.indexOf(permission) !== -1;
+    }
+
+    function applyAuthState(data) {
+        permissions = Array.isArray(data && data.permissions) ? data.permissions.slice() : [];
+        authRole = (data && data.role) || "anonymous";
+        isAdmin = hasPerm("users.manage") || hasPerm("settings.manage");
+        isWhitelisted = hasPerm("radar.view");
+    }
+
+    function clearAuthState() {
+        permissions = [];
+        authRole = "anonymous";
+        isAdmin = false;
+        isWhitelisted = false;
+    }
+
     // =====================================================================
     // 2. AUTHENTICATION & SESSION MANAGEMENT
     // =====================================================================
@@ -320,16 +342,17 @@
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    isAdmin = !!data.is_admin;
-                    isWhitelisted = !!data.is_whitelisted || isAdmin;
-                    authUser = data.user;
-                    if (data.token) {
-                        sessionToken = data.token;
-                        localStorage.setItem("toktracker_admin_token", sessionToken);
+                    if (data.authenticated || data.token) {
+                        applyAuthState(data);
+                        authUser = data.user;
+                        if (data.token) {
+                            sessionToken = data.token;
+                            localStorage.setItem("toktracker_admin_token", sessionToken);
+                        }
+                        updateAdminUI();
+                        updateRadarAuthUI();
+                        return;
                     }
-                    updateAdminUI();
-                    updateRadarAuthUI();
-                    return;
                 }
             } catch (err) {
                 console.warn("Telegram WebApp Auth Fehler:", err);
@@ -343,24 +366,38 @@
             });
             if (res.ok) {
                 const data = await res.json();
-                isAdmin = !!data.is_admin;
-                isWhitelisted = !!data.is_whitelisted || isAdmin;
-                authUser = { username: data.admin_label || "Admin" };
+                applyAuthState(data);
+                authUser = { username: data.admin_label || "Nutzer" };
             } else {
-                isAdmin = false;
-                isWhitelisted = false;
+                clearAuthState();
             }
         } catch (e) {
-            isAdmin = false;
-            isWhitelisted = false;
+            clearAuthState();
         }
         updateAdminUI();
         updateRadarAuthUI();
     }
 
     function updateAdminUI() {
+        const canSeeModeration = isAdmin || hasPerm("analytics.view");
         if (elements.headerAdminBadge) {
-            elements.headerAdminBadge.style.display = isAdmin ? "inline-block" : "none";
+            elements.headerAdminBadge.style.display = canSeeModeration ? "inline-block" : "none";
+            elements.headerAdminBadge.textContent = isAdmin ? "👑 ADMIN" : (canSeeModeration ? "🛡️ MODERATOR" : "");
+        }
+        if (elements.navRadar) {
+            elements.navRadar.style.display = hasPerm("radar.view") ? "" : "none";
+        }
+        if (elements.navAdmin) {
+            elements.navAdmin.style.display = isAdmin ? "" : "none";
+        }
+
+        if (activeTab === "tab-radar" && !hasPerm("radar.view")) {
+            const fallback = document.querySelector('.nav-tab-btn[data-tab="tab-streamers"]');
+            if (fallback) fallback.click();
+        }
+        if (activeTab === "tab-admin" && !isAdmin) {
+            const fallback = document.querySelector('.nav-tab-btn[data-tab="tab-streamers"]');
+            if (fallback) fallback.click();
         }
 
         if (isAdmin) {
@@ -388,7 +425,7 @@
 
     function updateRadarAuthUI() {
         if (!elements.radarAuthGate || !elements.radarContent) return;
-        if (isWhitelisted || isAdmin) {
+        if (hasPerm("radar.view")) {
             elements.radarAuthGate.style.display = "none";
             elements.radarContent.style.display = "block";
         } else {
@@ -1775,7 +1812,7 @@
             const res = await fetch(url, { headers: getAuthHeaders() });
             if (!res.ok) {
                 if (res.status === 401 || res.status === 403) {
-                    isWhitelisted = false;
+                    permissions = permissions.filter((perm) => perm !== "radar.view");
                     updateRadarAuthUI();
                     return;
                 }
@@ -1783,11 +1820,10 @@
             }
             const data = await res.json();
             if (!data.authorized) {
-                isWhitelisted = false;
+                permissions = permissions.filter((perm) => perm !== "radar.view");
                 updateRadarAuthUI();
                 return;
             }
-            isWhitelisted = true;
             updateRadarAuthUI();
             cachedRadarData = data;
             renderRadarData(data);
@@ -1805,6 +1841,7 @@
     }
 
     function renderRadarData(data) {
+        const canEditCrm = hasPerm("crm.edit");
         const kpis = data.kpis || {};
         const donors = data.donors || [];
 
@@ -1853,9 +1890,10 @@
                             <div class="ma-donor-names">
                                 <div class="ma-donor-uname">
                                     <span>${displayUname}</span>
+                                    ${canEditCrm ? `
                                     <button type="button" class="ma-vip-star-btn ${isVip ? 'is-vip' : ''}" data-action="toggle-vip" data-username="${displayUname}" title="VIP-Status umschalten">
                                         ⭐
-                                    </button>
+                                    </button>` : ""}
                                 </div>
                                 ${displayNick ? `<div class="ma-donor-nick">${displayNick}</div>` : ""}
                             </div>
@@ -1896,13 +1934,15 @@
             });
         });
 
-        elements.radarDonorsContainer.querySelectorAll("[data-action='toggle-vip']").forEach(starBtn => {
-            starBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const uname = starBtn.getAttribute("data-username");
-                if (uname) toggleDonorVip(uname, starBtn, e);
+        if (canEditCrm) {
+            elements.radarDonorsContainer.querySelectorAll("[data-action='toggle-vip']").forEach(starBtn => {
+                starBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const uname = starBtn.getAttribute("data-username");
+                    if (uname) toggleDonorVip(uname, starBtn, e);
+                });
             });
-        });
+        }
     }
 
     // 2. Fetch Live Whale Ticker
@@ -2233,6 +2273,7 @@
     // 5. Donor Dossier Modal & CRM Inspection
     async function openDonorDossier(username) {
         if (!elements.modalDonorDossier || !elements.dossierBody) return;
+        const canEditCrm = hasPerm("crm.edit");
         elements.dossierUsername.textContent = `@${username}`;
         elements.dossierTierBadge.innerHTML = "";
         elements.dossierBody.innerHTML = `
@@ -2405,9 +2446,10 @@
                     <div style="flex: 1; min-width: 0;">
                         <div class="ma-dossier-title">
                             <span>@${escapeHtml(finalUsername)}</span>
+                            ${canEditCrm ? `
                             <button type="button" class="ma-vip-star-btn ${isVip ? 'is-vip' : ''}" id="maModalVipBtn" style="font-size: 18px;" title="VIP Status umschalten">
                                 ⭐
-                            </button>
+                            </button>` : ""}
                         </div>
                         ${displayNick ? `<div class="ma-dossier-nick">${displayNick}</div>` : ""}
                         <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
@@ -2441,7 +2483,8 @@
                     </div>
                 </div>
 
-                <!-- CRM & Notizen Section -->
+                <!-- CRM & Notizen Section (nur mit crm.edit) -->
+                ${canEditCrm ? `
                 <div class="ma-dossier-crm-box">
                     <div class="ma-crm-header">
                         <span class="ma-crm-title">⭐ Spender-CRM &amp; Tags</span>
@@ -2459,7 +2502,7 @@
                             💾 Notiz speichern
                         </button>
                     </div>
-                </div>
+                </div>` : ""}
 
                 <!-- Streamer Verteilung -->
                 <div style="margin-bottom: 14px;">
@@ -2488,14 +2531,14 @@
 
             // VIP Star Toggle inside modal
             const modalVipBtn = document.getElementById("maModalVipBtn");
-            if (modalVipBtn) {
+            if (canEditCrm && modalVipBtn) {
                 modalVipBtn.addEventListener("click", () => {
                     toggleDonorVip(finalUsername, modalVipBtn);
                 });
             }
 
             // Quick Tag click handlers
-            const tagsWrap = document.getElementById("maDossierTagsWrap");
+            const tagsWrap = canEditCrm ? document.getElementById("maDossierTagsWrap") : null;
             if (tagsWrap) {
                 tagsWrap.querySelectorAll(".ma-crm-tag-chip").forEach(chip => {
                     chip.addEventListener("click", async () => {
@@ -2519,7 +2562,7 @@
             }
 
             // Save Notes Button
-            const btnSaveNotes = document.getElementById("maBtnSaveDossierNotes");
+            const btnSaveNotes = canEditCrm ? document.getElementById("maBtnSaveDossierNotes") : null;
             if (btnSaveNotes) {
                 btnSaveNotes.addEventListener("click", async () => {
                     triggerHaptic("medium");
@@ -2549,6 +2592,10 @@
     // 6. VIP Toggle Action
     async function toggleDonorVip(username, starEl, event) {
         if (event) event.stopPropagation();
+        if (!hasPerm("crm.edit")) {
+            showToast("Nur Administratoren dürfen den VIP-Status ändern.", "error");
+            return;
+        }
         triggerHaptic("medium");
 
         try {
@@ -2591,6 +2638,10 @@
 
     // 7. Save CRM Data Action
     async function saveDonorCRM(username, isVip, tags, notes, silent = false) {
+        if (!hasPerm("crm.edit")) {
+            if (!silent) showToast("Nur Administratoren dürfen CRM-Daten ändern.", "error");
+            return false;
+        }
         try {
             const res = await fetch(`/api/donor-radar/donors/${encodeURIComponent(username)}/crm`, {
                 method: "POST",
@@ -3098,12 +3149,21 @@
             if (!res.ok) return;
             const users = await res.json();
 
+            const roleLabels = {
+                viewer: "👁️ Gast",
+                user: "🟢 Nutzer",
+                moderator: "🛡️ Moderator",
+                admin: "👑 Admin",
+            };
             let html = "";
             users.forEach(u => {
                 const uname = u.username ? `@${u.username}` : (u.telegram_id || "Unbekannt");
                 const isAllowed = parseInt(u.is_allowed, 10) === 1;
-                const isAdminRole = u.role === "admin";
-                const badge = isAllowed ? (isAdminRole ? "👑 Admin" : "🟢 User") : "🔴 Gesperrt";
+                const currentRole = roleLabels[u.role] ? u.role : "viewer";
+                const roleOptions = Object.keys(roleLabels)
+                    .map(role => `<option value="${role}" ${role === currentRole ? "selected" : ""}>${roleLabels[role]}</option>`)
+                    .join("");
+                const badge = isAllowed ? roleLabels[currentRole] : "🔴 Gesperrt";
 
                 html += `
                     <div class="ma-whitelist-item">
@@ -3112,10 +3172,10 @@
                             <div style="font-size: 9px; color: var(--text-muted);">${badge} · ID: ${u.telegram_id || '-'}</div>
                         </div>
                         <div class="ma-whitelist-actions">
-                            <button type="button" class="ma-btn ma-btn-secondary" style="font-size: 9px; padding: 2px 6px;" data-toggle-role="${u.id}" data-role="${isAdminRole ? 'user' : 'admin'}" data-ident="${u.telegram_id || u.username}">
-                                ${isAdminRole ? 'User machen' : 'Admin machen'}
-                            </button>
-                            <button type="button" class="ma-btn ${isAllowed ? 'ma-btn-danger' : 'ma-btn-primary'}" style="font-size: 9px; padding: 2px 6px;" data-toggle-allow="${u.id}" data-allowed="${isAllowed ? 0 : 1}" data-ident="${u.telegram_id || u.username}">
+                            <select class="ma-whitelist-role" data-role-select="${u.id}" data-ident="${u.telegram_id || u.username}" data-allowed="${isAllowed ? 1 : 0}" style="font-size: 9px; padding: 2px 6px;">
+                                ${roleOptions}
+                            </select>
+                            <button type="button" class="ma-btn ${isAllowed ? 'ma-btn-danger' : 'ma-btn-primary'}" style="font-size: 9px; padding: 2px 6px;" data-toggle-allow="${u.id}" data-allowed="${isAllowed ? 0 : 1}" data-role="${currentRole}" data-ident="${u.telegram_id || u.username}">
                                 ${isAllowed ? 'Sperren' : 'Erlauben'}
                             </button>
                         </div>
@@ -3124,11 +3184,11 @@
             });
             elements.whitelistUsersContainer.innerHTML = html;
 
-            elements.whitelistUsersContainer.querySelectorAll("[data-toggle-role]").forEach(b => {
-                b.addEventListener("click", async () => {
-                    const ident = b.getAttribute("data-ident");
-                    const newRole = b.getAttribute("data-role");
-                    await updateTelegramUserPermission(ident, 1, newRole);
+            elements.whitelistUsersContainer.querySelectorAll("[data-role-select]").forEach(select => {
+                select.addEventListener("change", async () => {
+                    const ident = select.getAttribute("data-ident");
+                    const isAllowed = parseInt(select.getAttribute("data-allowed"), 10) === 1 ? 1 : 0;
+                    await updateTelegramUserPermission(ident, isAllowed, select.value);
                 });
             });
 
@@ -3136,7 +3196,8 @@
                 b.addEventListener("click", async () => {
                     const ident = b.getAttribute("data-ident");
                     const newAllow = parseInt(b.getAttribute("data-allowed"), 10);
-                    await updateTelegramUserPermission(ident, newAllow, "user");
+                    const role = b.getAttribute("data-role") || "viewer";
+                    await updateTelegramUserPermission(ident, newAllow, role);
                 });
             });
         } catch (e) {
@@ -3147,7 +3208,7 @@
     async function updateTelegramUserPermission(ident, isAllowed, role) {
         triggerHaptic("medium");
         try {
-            const res = await fetch("/api/telegram/users/permissions", {
+            const res = await fetch("/api/telegram/users", {
                 method: "POST",
                 headers: Object.assign({ "Content-Type": "application/json" }, getAuthHeaders()),
                 body: JSON.stringify({ identifier: String(ident), is_allowed: isAllowed, role: role })
@@ -3232,8 +3293,7 @@
                     const data = await res.json();
                     sessionToken = data.token;
                     localStorage.setItem("toktracker_admin_token", sessionToken);
-                    isAdmin = true;
-                    isWhitelisted = true;
+                    applyAuthState(data);
                     authUser = { username: data.admin_label };
                     showToast("Erfolgreich als Admin angemeldet!");
                     elements.otpCodeInput.value = "";
@@ -3258,8 +3318,7 @@
             } catch (e) {}
             sessionToken = "";
             localStorage.removeItem("toktracker_admin_token");
-            isAdmin = false;
-            isWhitelisted = false;
+            clearAuthState();
             showToast("Erfolgreich abgemeldet");
             updateAdminUI();
             updateRadarAuthUI();
@@ -3293,6 +3352,8 @@
         btn.addEventListener("click", () => {
             const targetTab = btn.getAttribute("data-tab");
             if (targetTab === activeTab) return;
+            if (targetTab === "tab-radar" && !hasPerm("radar.view")) return;
+            if (targetTab === "tab-admin" && !isAdmin) return;
             triggerHaptic("medium");
             activeTab = targetTab;
 

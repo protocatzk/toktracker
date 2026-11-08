@@ -17,6 +17,16 @@ except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
 from shared.config import config
 from shared.db._base import get_db
 from shared.db.settings import get_telegram_access_mode
+from shared.permissions import (
+    DEFAULT_ROLE,
+    ROLE_ADMIN,
+    ROLE_MODERATOR,
+    ROLE_USER,
+    ROLE_VIEWER,
+    highest_role,
+    is_valid_role,
+    normalize_role,
+)
 
 
 def list_telegram_users() -> List[Dict[str, Any]]:
@@ -24,7 +34,14 @@ def list_telegram_users() -> List[Dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT * FROM telegram_users
-            ORDER BY is_allowed DESC, CASE WHEN role = 'admin' THEN 0 ELSE 1 END ASC, id DESC
+            ORDER BY is_allowed DESC,
+                     CASE role
+                         WHEN 'admin' THEN 0
+                         WHEN 'moderator' THEN 1
+                         WHEN 'user' THEN 2
+                         ELSE 3
+                     END ASC,
+                     id DESC
             """
         ).fetchall()
         return [dict(r) for r in rows]
@@ -43,9 +60,12 @@ def upsert_telegram_user_permission(
     if not raw:
         raise ValueError("Bitte eine Telegram User-ID oder einen [@]username angeben.")
 
-    clean_role = role.strip().lower() if role else "user"
-    if clean_role not in ("admin", "user"):
-        clean_role = "user"
+    raw_role = role.strip().lower() if role else ROLE_USER
+    if not is_valid_role(raw_role):
+        raise ValueError(
+            "Ungültige Rolle. Erlaubt sind: viewer, user, moderator, admin."
+        )
+    clean_role = normalize_role(raw_role)
 
     allowed_val = int(is_allowed)
     if allowed_val not in (-1, 0, 1):
@@ -168,11 +188,7 @@ def check_telegram_user_access(
             merged_allowed = max(int(row_by_id["is_allowed"]), int(row_by_uname["is_allowed"]))
             if (int(row_by_id["is_allowed"]) < 0 or int(row_by_uname["is_allowed"]) < 0) and merged_allowed < 1:
                 merged_allowed = -1
-            merged_role = (
-                "admin"
-                if (row_by_id["role"] == "admin" or row_by_uname["role"] == "admin")
-                else "user"
-            )
+            merged_role = highest_role(row_by_id["role"], row_by_uname["role"])
             conn.execute("DELETE FROM telegram_users WHERE id = ?", (row_by_uname["id"],))
             conn.execute(
                 "UPDATE telegram_users SET is_allowed = ?, role = ? WHERE id = ?",
@@ -185,7 +201,7 @@ def check_telegram_user_access(
             row = row_by_id or row_by_uname
 
         if row:
-            new_role = "admin" if in_env_admin else row["role"]
+            new_role = ROLE_ADMIN if in_env_admin else normalize_role(row["role"])
             new_allowed = 1 if in_env_admin else int(row["is_allowed"])
             conn.execute(
                 """
@@ -210,7 +226,12 @@ def check_telegram_user_access(
             )
             row_id = row["id"]
         else:
-            initial_role = "admin" if in_env_admin else "user"
+            if in_env_admin:
+                initial_role = ROLE_ADMIN
+            elif mode == "public":
+                initial_role = ROLE_VIEWER
+            else:
+                initial_role = ROLE_USER
             initial_allowed = 1 if in_env_admin else 0
             note = "Aus .env autorisiert" if in_env_admin else f"Anfrage ({source_note})"
             cur = conn.execute(
@@ -247,21 +268,35 @@ def check_telegram_user_access(
                 group_whitelisted = True
 
     is_allowed_flag = int(user_row.get("is_allowed", 0))
-    role_val = user_row.get("role", "user")
+    role_val = normalize_role(user_row.get("role", DEFAULT_ROLE))
 
     if is_allowed_flag < 0:
         allowed = False
         is_admin = False
+        effective_role = ROLE_VIEWER
     elif mode == "public":
         allowed = True
-        is_admin = bool(is_allowed_flag == 1 and role_val == "admin")
+        is_admin = bool(is_allowed_flag == 1 and role_val == ROLE_ADMIN)
+        effective_role = role_val if is_allowed_flag == 1 else ROLE_VIEWER
     else:
         allowed = bool(is_allowed_flag == 1 or group_whitelisted)
-        is_admin = bool(is_allowed_flag == 1 and role_val == "admin")
+        is_admin = bool(is_allowed_flag == 1 and role_val == ROLE_ADMIN)
+        if is_allowed_flag == 1:
+            effective_role = role_val
+        elif group_whitelisted:
+            effective_role = ROLE_USER
+        else:
+            effective_role = ROLE_VIEWER
+
+    is_whitelisted = bool(
+        allowed and effective_role in (ROLE_USER, ROLE_MODERATOR, ROLE_ADMIN)
+    )
 
     return {
         "allowed": allowed,
         "is_admin": is_admin,
+        "is_whitelisted": is_whitelisted,
+        "role": effective_role,
         "mode": mode,
         "is_group": is_group,
         "user": user_row,

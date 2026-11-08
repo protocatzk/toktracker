@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
     import _bootstrap  # noqa: F401
 
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -19,7 +20,7 @@ from shared import access_gate
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.config import config
 
-GATED_PAGES = ("/", "/public", "/panel", "/admin", "/donor-radar", "/chat-intelligence", "/site-analytics")
+GATED_PAGES = ("/", "/public", "/panel", "/admin", "/stats", "/donor-radar", "/chat-intelligence", "/site-analytics")
 GATED_APIS = ("/api/overview", "/api/public/overview", "/api/analytics", "/api/battles", "/api/miniapp/data")
 PUBLIC_PATHS = ("/login", "/api/health", "/robots.txt", "/miniapp", "/static/style.css", "/pictures/bot_avatar.jpg")
 
@@ -29,13 +30,18 @@ class GateTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self._previous = config.access_gate
+        self._previous_landing = config.landing_page_enabled
         config.access_gate = self.gate_value
+        # Die Gate-Tests pruefen die geschuetzten Bereiche. Die oeffentliche
+        # Landingpage wird separat in TestGateLandingPage getestet.
+        config.landing_page_enabled = False
         self.transport = httpx.ASGITransport(app=app)
         self.client = httpx.AsyncClient(transport=self.transport, base_url="http://testserver")
 
     async def asyncTearDown(self):
         await self.client.aclose()
         config.access_gate = self._previous
+        config.landing_page_enabled = self._previous_landing
 
     def headers_for(self, payload: dict) -> dict:
         token = admin_auth_manager.create_session_token(
@@ -154,6 +160,46 @@ class TestGateDisabled(GateTestCase):
         self.assertIn("Allow: /", res.text)
 
 
+class TestGateLandingPage(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._previous_gate = config.access_gate
+        self._previous_landing = config.landing_page_enabled
+        config.access_gate = "whitelist"
+        config.landing_page_enabled = True
+        self.transport = httpx.ASGITransport(app=app)
+        self.client = httpx.AsyncClient(transport=self.transport, base_url="http://testserver")
+
+    async def asyncTearDown(self):
+        await self.client.aclose()
+        config.access_gate = self._previous_gate
+        config.landing_page_enabled = self._previous_landing
+
+    async def test_landing_page_is_public(self):
+        res = await self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("TokTracker", res.text)
+        self.assertIn("LIVE EARNINGS", res.text)
+
+    async def test_public_panel_stays_gated(self):
+        res = await self.client.get("/public")
+        self.assertEqual(res.status_code, 302)
+        self.assertIn("/login", res.headers["location"])
+
+    async def test_disabled_landing_falls_back_to_public_panel(self):
+        config.landing_page_enabled = False
+        res = await self.client.get("/")
+        self.assertEqual(res.status_code, 302)
+        self.assertIn("/login", res.headers["location"])
+
+    async def test_landing_page_is_indexable(self):
+        res = await self.client.get("/")
+        self.assertIsNone(res.headers.get("x-robots-tag"))
+
+        robots = await self.client.get("/robots.txt")
+        self.assertIn("Allow: /$", robots.text)
+        self.assertIn("Disallow: /", robots.text)
+
+
 class TestGateHelpers(unittest.TestCase):
     def test_exempt_paths(self):
         for path in ("/login", "/api/auth/telegram/verify", "/api/miniapp/auth/status", "/api/health"):
@@ -161,8 +207,15 @@ class TestGateHelpers(unittest.TestCase):
         self.assertTrue(access_gate.is_exempt_path("/static/common.js"))
 
     def test_data_paths_are_gated(self):
-        for path in ("/", "/public", "/api/public/overview", "/api/overview", "/api/miniapp/data", "/admin"):
-            self.assertFalse(access_gate.is_exempt_path(path), path)
+        with patch.object(config, "landing_page_enabled", False):
+            for path in ("/", "/public", "/api/public/overview", "/api/overview", "/api/miniapp/data", "/admin"):
+                self.assertFalse(access_gate.is_exempt_path(path), path)
+
+    def test_landing_page_is_exempt_when_enabled(self):
+        with patch.object(config, "landing_page_enabled", True):
+            self.assertTrue(access_gate.is_exempt_path("/"))
+        with patch.object(config, "landing_page_enabled", False):
+            self.assertFalse(access_gate.is_exempt_path("/"))
 
     def test_session_grants_access(self):
         self.assertFalse(access_gate.session_grants_access(None))

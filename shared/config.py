@@ -85,6 +85,10 @@ class AppConfig:
     # kommen an die App; "off" = öffentlicher Betrieb wie zuvor.
     access_gate: str = os.getenv("ACCESS_GATE", "whitelist").strip().lower()
 
+    # Öffentliche Infoseite unter "/". Wenn deaktiviert, zeigt "/" wieder das
+    # öffentliche Live-Panel (und unterliegt dann der Zugriffssperre).
+    landing_page_enabled: bool = _env_bool("LANDING_PAGE_ENABLED", True)
+
     # Sicherheits-Härtung (WP 1): Cookie-Flags, Proxy-Vertrauen, API-Doku, API-Key per Query
     session_cookie_secure: str = os.getenv("SESSION_COOKIE_SECURE", "auto").strip().lower()
     trust_proxy_headers: bool = _env_bool("TRUST_PROXY_HEADERS", True)
@@ -240,6 +244,7 @@ class AppConfig:
             "has_sign_api_key": self.has_sign_api_key,
             "sign_api_key_masked": _mask_secret(self.tiktok_sign_api_key),
             "access_gate": self.access_gate,
+            "landing_page_enabled": self.landing_page_enabled,
             "has_api_key_protection": self.has_api_key,
             "api_key_query_allowed": self.allow_api_key_query,
             "api_docs_enabled": self.enable_api_docs,

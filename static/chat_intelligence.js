@@ -619,7 +619,7 @@
     // 3. API Loaders
     async function loadStreamers() {
         try {
-            const res = await fetch("/api/overview?period=all");
+            const res = await fetch("/api/public/overview?period=all");
             if (!res.ok) return;
             const data = await res.json();
             const streamers = data.streamers || [];

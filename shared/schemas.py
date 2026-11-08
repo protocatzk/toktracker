@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from shared.permissions import is_valid_role, normalize_role
 
 
 class StreamerCreateRequest(BaseModel):
@@ -54,13 +56,28 @@ class TelegramUserPermissionRequest(BaseModel):
         ...,
         description="Telegram User-ID oder @username",
     )
-    role: str = Field("user", description="Rolle: 'user' (Lesezugriff) oder 'admin' (Vollzugriff)")
+    role: str = Field(
+        "user",
+        description=(
+            "Rolle: 'viewer' (nur öffentliche Inhalte), 'user' (Whitelist-Leserechte), "
+            "'moderator' (Statistiken lesen, keine Schreibrechte) oder 'admin' (Vollzugriff)"
+        ),
+    )
     is_allowed: int = Field(
         1,
         description="1 = Freigeschaltet, 0 = Wartend/Entzogen, -1 = Gesperrt (auch im Public-Modus blockiert)",
     )
     first_name: Optional[str] = Field(None, description="Optionaler Name / Beschreibung")
     note: Optional[str] = Field(None, description="Optionale Notiz")
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, value: str) -> str:
+        if not is_valid_role(value):
+            raise ValueError(
+                "Ungültige Rolle. Erlaubt sind: viewer, user, moderator, admin."
+            )
+        return normalize_role(value)
 
 
 class GiftStatItem(BaseModel):

@@ -83,6 +83,31 @@ from shared.bus import get_bus
 from shared.contracts import CHANNEL_SETTINGS_CHANGED
 from shared.database import invalidate_settings_cache
 from shared.monitor_client import monitor_client as monitor_manager
+from shared.permissions import (
+    ALL_PERMISSIONS,
+    PERM_ANALYTICS_VIEW,
+    PERM_CHATINTEL_VIEW,
+    PERM_CRM_EDIT,
+    PERM_EXPORT_DOWNLOAD,
+    PERM_GIFTS_BOOK,
+    PERM_PUBLIC_VIEW,
+    PERM_RADAR_VIEW,
+    PERM_REPORTS_SEND,
+    PERM_SETTINGS_MANAGE,
+    PERM_STREAMERS_MANAGE,
+    PERM_SYSTEM_MANAGE,
+    PERM_SYSTEM_VIEW,
+    PERM_USERS_MANAGE,
+    ROLE_ADMIN,
+    ROLE_MODERATOR,
+    ROLE_USER,
+    ROLE_VIEWER,
+    has_permission,
+    is_blocked,
+    normalize_role,
+    role_label,
+    session_permissions,
+)
 from shared.privacy import apply_public_privacy, mask_donor_rows
 from shared.ratelimit import check_rate_limit, reset_rate_limit
 from system_service import get_system_health
@@ -532,8 +557,92 @@ async def access_gate_middleware(request: Request, call_next):
 
     response = await call_next(request)
     # Solange die Sperre aktiv ist, soll nichts indexiert werden (Personendaten!).
-    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    # Ausnahme: die öffentliche Infoseite unter "/" enthält keine Personendaten
+    # und darf als Aushängeschild indexiert werden.
+    if not (config.landing_page_enabled and request.url.path == "/"):
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     return response
+
+
+def _extract_session_token(
+    toktracker_admin_session: Optional[str],
+    x_admin_session: Optional[str],
+    authorization: Optional[str],
+) -> Optional[str]:
+    token = toktracker_admin_session or x_admin_session
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    return token
+
+
+def _session_payload_from_request(request: Request) -> Optional[Dict[str, Any]]:
+    """Liest die Session aus Cookie/Header einer normalen Browser-Anfrage."""
+    token = _extract_session_token(
+        request.cookies.get(AdminAuthManager.COOKIE_NAME),
+        request.headers.get("x-admin-session"),
+        request.headers.get("authorization"),
+    )
+    return admin_auth_manager.verify_session_token(token)
+
+
+def _api_key_payload() -> Dict[str, Any]:
+    return {
+        "sub": "api_key",
+        "role": ROLE_ADMIN,
+        "is_allowed": True,
+        "permissions": sorted(ALL_PERMISSIONS),
+    }
+
+
+def _resolve_access_payload(
+    toktracker_admin_session: Optional[str],
+    x_admin_session: Optional[str],
+    authorization: Optional[str],
+    x_api_key: Optional[str],
+    api_key: Optional[str],
+    permission: Optional[str] = None,
+) -> Dict[str, Any]:
+    token = _extract_session_token(toktracker_admin_session, x_admin_session, authorization)
+    session_payload = admin_auth_manager.verify_session_token(token)
+    if session_payload:
+        if permission and not has_permission(session_payload, permission):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Zugriff verweigert: Das Recht '{permission}' fehlt für diese Rolle.",
+            )
+        return session_payload
+
+    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
+    provided = _provided_api_key(x_api_key, api_key)
+    if _api_key_matches(provided, configured_key):
+        return _api_key_payload()
+
+    raise HTTPException(
+        status_code=401,
+        detail="Nicht autorisiert. Bitte unter /login per Telegram authentifizieren oder gültigen X-API-Key übergeben.",
+    )
+
+
+def require_permission(permission: str):
+    """FastAPI-Dependency-Factory: verlangt eine bestimmte Capability."""
+
+    def dependency(
+        toktracker_admin_session: Optional[str] = Cookie(default=None),
+        x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
+        authorization: Optional[str] = Header(default=None, alias="Authorization"),
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+        api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
+    ) -> Dict[str, Any]:
+        return _resolve_access_payload(
+            toktracker_admin_session,
+            x_admin_session,
+            authorization,
+            x_api_key,
+            api_key,
+            permission=permission,
+        )
+
+    return dependency
 
 
 def verify_admin_or_api_key(
@@ -544,111 +653,37 @@ def verify_admin_or_api_key(
     api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
 ) -> Dict[str, Any]:
     """
-    Schützt alle Admin- und Verwaltungs-Endpunkte:
-    1. Prüft zuerst auf ein gültiges, signiertes Admin-Session-Cookie oder Header (Telegram-Login).
-    2. Prüft alternativ auf einen konfigurierten X-API-Key (für externe Skripte/Automationen).
+    Schützt alle reinen Admin-Endpunkte (Einstellungen, Nutzerverwaltung,
+    Demo-/SQLite-Funktionen, destruktive Streamer-Aktionen).
     """
-    token = toktracker_admin_session or x_admin_session
-    if not token and authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-
-    session_payload = admin_auth_manager.verify_session_token(token)
-    if session_payload:
-        # Whitelist-Nutzer der Mini-App erhalten Tokens mit role="user" und dürfen
-        # ausschließlich die dafür vorgesehenen Bereiche (Radar/Chat) nutzen.
-        if session_payload.get("role") == "admin":
-            return session_payload
+    payload = _resolve_access_payload(
+        toktracker_admin_session,
+        x_admin_session,
+        authorization,
+        x_api_key,
+        api_key,
+    )
+    if normalize_role(payload.get("role")) != ROLE_ADMIN or is_blocked(payload.get("is_allowed", True)):
         raise HTTPException(
             status_code=403,
             detail="Zugriff verweigert: Dieser Bereich ist Administratoren vorbehalten.",
         )
-
-    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = _provided_api_key(x_api_key, api_key)
-    if _api_key_matches(provided, configured_key):
-        return {"sub": "api_key", "role": "admin", "is_allowed": True}
-
-    raise HTTPException(
-        status_code=401,
-        detail="Nicht autorisiert. Bitte unter /login per Telegram authentifizieren oder gültigen X-API-Key übergeben.",
-    )
+    return payload
 
 
-def verify_radar_access(
-    toktracker_admin_session: Optional[str] = Cookie(default=None),
-    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
-) -> Dict[str, Any]:
-    """
-    Erlaubt Zugriff auf das Spender-Radar für:
-    1. Authentifizierte Admins & freigeschaltete Telegram-Mini-App-Nutzer
-    2. API-Key-Inhaber
-    3. Öffentlichen Zugriff, falls telegram_access_mode == 'public'
-    """
-    token = toktracker_admin_session or x_admin_session
-    if not token and authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-
-    if token:
-        session_payload = admin_auth_manager.verify_session_token(token)
-        if session_payload:
-            return session_payload
-
-    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = _provided_api_key(x_api_key, api_key)
-    if _api_key_matches(provided, configured_key):
-        return {"sub": "api_key"}
-
-    if get_telegram_access_mode() == "public":
-        return {"role": "public", "is_allowed": True}
-
-    raise HTTPException(
-        status_code=401,
-        detail="Nicht autorisiert für Spender-Radar. Bitte im Telegram-Bot freischalten lassen.",
-    )
+# Lesen und Schreiben beim Spender-Radar bewusst trennen.
+verify_radar_access = require_permission(PERM_RADAR_VIEW)
+verify_radar_write_access = require_permission(PERM_CRM_EDIT)
+verify_chat_intelligence_access = require_permission(PERM_CHATINTEL_VIEW)
 
 
-def verify_chat_intelligence_access(
-    toktracker_admin_session: Optional[str] = Cookie(default=None),
-    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
-) -> Dict[str, Any]:
-    """
-    Schützt Chat-Intelligence, Wortwolken & Stream-Chatlogs:
-    Zugriff ist EXKLUSIV für:
-    1. Authentifizierte Admins & freigeschaltete Whitelist-Nutzer (mit gültigem Session-Token)
-    2. Gültige API-Key-Inhaber
-    Öffentlicher Gast-Zugriff ist hier NIEMALS gestattet, auch nicht im Public-Bot-Modus!
-    """
-    token = toktracker_admin_session or x_admin_session
-    if not token and authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-
-    if token:
-        session_payload = admin_auth_manager.verify_session_token(token)
-        if session_payload:
-            role = session_payload.get("role", "")
-            is_allowed = bool(session_payload.get("is_allowed", False))
-            if role == "admin" or is_allowed is True:
-                return session_payload
-            raise HTTPException(
-                status_code=403,
-                detail="Zugriff verweigert: Chat-Intelligence ist nur für freigeschaltete Whitelist-Nutzer zugänglich. Bitte wende dich an einen Administrator.",
-            )
-
-    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = _provided_api_key(x_api_key, api_key)
-    if _api_key_matches(provided, configured_key):
-        return {"sub": "api_key", "role": "admin", "is_allowed": True}
-
-    raise HTTPException(
-        status_code=401,
-        detail="Nicht autorisiert: Chat-Intelligence erfordert eine Whitelist-Freigabe oder einen Admin-Login.",
-    )
+def _redirect_for_role(role: Optional[str]) -> str:
+    clean_role = normalize_role(role)
+    if clean_role == ROLE_ADMIN:
+        return "/admin"
+    if clean_role == ROLE_MODERATOR:
+        return "/stats"
+    return "/public"
 
 
 def _set_admin_session_cookie(
@@ -656,8 +691,14 @@ def _set_admin_session_cookie(
     admin_label: str,
     request: Optional[Request] = None,
     token: Optional[str] = None,
+    role: str = ROLE_ADMIN,
+    is_allowed: bool = True,
 ) -> None:
-    session_token = token or admin_auth_manager.create_session_token(admin_label=admin_label)
+    session_token = token or admin_auth_manager.create_session_token(
+        admin_label=admin_label,
+        role=role,
+        is_allowed=is_allowed,
+    )
     response.set_cookie(
         key=AdminAuthManager.COOKIE_NAME,
         value=session_token,
@@ -688,11 +729,35 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 # =====================================================================
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def start_page(request: Request):
+    """
+    Öffentliche Infoseite unter "/".
+
+    Ist die Landingpage deaktiviert, wird wie zuvor das öffentliche Live-Panel
+    ausgeliefert (und unterliegt dann wieder der Zugriffssperre).
+    """
+    if not config.landing_page_enabled:
+        return await public_panel(request)
+
+    tg_diag = telegram_bot_service.get_diagnostics()
+    bot_uname = (tg_diag.get("bot_username") or "").lstrip("@")
+    return templates.TemplateResponse(
+        request=request,
+        name="landing.html",
+        context={
+            "telegram_bot_username": bot_uname,
+            "telegram_state": tg_diag.get("state") or "offline",
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "access_gate": config.access_gate,
+        },
+    )
+
+
 @app.get("/public", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/panel", response_class=HTMLResponse, include_in_schema=False)
 async def public_panel(request: Request):
     """
-    Startseite (/): Öffentliches User-Panel für Zuschauer (Read-Only).
+    Öffentliches User-Panel (/public, /panel) für Zuschauer (Read-Only).
     """
     init_db()
     tg_diag = telegram_bot_service.get_diagnostics()
@@ -711,6 +776,7 @@ async def public_panel(request: Request):
         "btn_url": banner_btn_url,
     }
 
+    session_payload = _session_payload_from_request(request)
     return templates.TemplateResponse(
         request=request,
         name="public.html",
@@ -718,6 +784,11 @@ async def public_panel(request: Request):
             "telegram_bot_username": bot_uname,
             "telegram_state": tg_diag.get("state") or "offline",
             "public_banner": public_banner,
+            "role": normalize_role(session_payload.get("role")) if session_payload else None,
+            "can_view_stats": has_permission(session_payload, PERM_ANALYTICS_VIEW),
+            "can_view_radar": has_permission(session_payload, PERM_RADAR_VIEW),
+            "can_view_chatintel": has_permission(session_payload, PERM_CHATINTEL_VIEW),
+            "is_admin": normalize_role(session_payload.get("role")) == ROLE_ADMIN if session_payload else False,
         },
     )
 
@@ -746,6 +817,12 @@ async def miniapp_page(request: Request):
 async def robots_txt():
     """Während der Sperre: alles verbieten. Sonst: Indexierung erlauben."""
     if config.has_access_gate:
+        if config.landing_page_enabled:
+            # Nur die exakte Startseite freigeben, den Rest der App sperren.
+            return Response(
+                "User-agent: *\nAllow: /$\nDisallow: /\n",
+                media_type="text/plain",
+            )
         return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
     return Response("User-agent: *\nAllow: /\n", media_type="text/plain")
 
@@ -758,8 +835,12 @@ async def admin_login_page(
     """
     Login-Seite (/login) für die Telegram-basierte Admin-Authentifizierung.
     """
-    if admin_auth_manager.verify_session_token(toktracker_admin_session):
-        return RedirectResponse(url="/admin", status_code=302)
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if session_payload:
+        return RedirectResponse(
+            url=_redirect_for_role(session_payload.get("role")),
+            status_code=302,
+        )
 
     tg_diag = telegram_bot_service.get_diagnostics()
     bot_username = (tg_diag.get("bot_username") or "toktrackeragent").lstrip("@")
@@ -821,8 +902,8 @@ async def admin_console(
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url="/login", status_code=302)
-    if session_payload.get("role") != "admin":
-        return RedirectResponse(url="/login?error=Kein+Admin-Zugriff", status_code=302)
+    if normalize_role(session_payload.get("role")) != ROLE_ADMIN or is_blocked(session_payload.get("is_allowed", True)):
+        return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
     init_db()
     monitor_manager.autostart_from_db()
@@ -835,6 +916,10 @@ async def admin_console(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "role": normalize_role(session_payload.get("role")),
+            "role_label": role_label(session_payload.get("role")),
+            "permissions": sorted(session_permissions(session_payload)),
+            "is_admin": True,
             "docs_enabled": config.enable_api_docs,
         },
     )
@@ -850,9 +935,9 @@ async def site_analytics_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login", status_code=302)
-    if session_payload.get("role") != "admin":
-        return RedirectResponse(url="/login?error=Kein+Admin-Zugriff", status_code=302)
+        return RedirectResponse(url="/login?next=/site-analytics", status_code=302)
+    if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
+        return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
     init_db()
     return templates.TemplateResponse(
@@ -864,6 +949,47 @@ async def site_analytics_page(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "role": normalize_role(session_payload.get("role")),
+            "permissions": sorted(session_permissions(session_payload)),
+            "is_admin": normalize_role(session_payload.get("role")) == ROLE_ADMIN,
+            "docs_enabled": config.enable_api_docs,
+        },
+    )
+
+
+@app.get("/stats", response_class=HTMLResponse, include_in_schema=False)
+async def stats_page(
+    request: Request,
+    toktracker_admin_session: Optional[str] = Cookie(default=None),
+):
+    """
+    Read-only Statistik-Dashboard fuer Moderatoren und Administratoren.
+    Enthaelt bewusst keine Verwaltungs-, Loesch- oder Buchungsfunktionen.
+    """
+    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    if not session_payload:
+        return RedirectResponse(url="/login?next=/stats", status_code=302)
+    if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
+        return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
+
+    init_db()
+    return templates.TemplateResponse(
+        request=request,
+        name="stats.html",
+        context={
+            "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
+            "gift_catalog": TIKTOK_GIFT_CATALOG,
+            "env_summary": config.public_summary(),
+            "telegram_diag": telegram_bot_service.get_diagnostics(),
+            "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "role": normalize_role(session_payload.get("role")),
+            "role_label": role_label(session_payload.get("role")),
+            "permissions": sorted(session_permissions(session_payload)),
+            "is_admin": normalize_role(session_payload.get("role")) == ROLE_ADMIN,
+            "can_export": has_permission(session_payload, PERM_EXPORT_DOWNLOAD),
+            "can_view_radar": has_permission(session_payload, PERM_RADAR_VIEW),
+            "can_view_chatintel": has_permission(session_payload, PERM_CHATINTEL_VIEW),
+            "can_view_system": has_permission(session_payload, PERM_SYSTEM_VIEW),
             "docs_enabled": config.enable_api_docs,
         },
     )
@@ -879,7 +1005,9 @@ async def donor_radar_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/login?next=/donor-radar", status_code=302)
+    if not has_permission(session_payload, PERM_RADAR_VIEW):
+        return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
     init_db()
     return templates.TemplateResponse(
@@ -891,6 +1019,10 @@ async def donor_radar_page(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "TELEGRAM"),
+            "role": normalize_role(session_payload.get("role")),
+            "permissions": sorted(session_permissions(session_payload)),
+            "is_admin": normalize_role(session_payload.get("role")) == ROLE_ADMIN,
+            "can_edit_crm": has_permission(session_payload, PERM_CRM_EDIT),
             "docs_enabled": config.enable_api_docs,
         },
     )
@@ -909,16 +1041,15 @@ async def chat_intelligence_page(
     if not session_payload:
         return RedirectResponse(url="/login?next=/chat-intelligence", status_code=302)
 
-    is_admin = session_payload.get("role") == "admin"
-    is_whitelisted = bool(session_payload.get("is_allowed", False))
-
-    if not (is_admin or is_whitelisted):
+    is_admin = normalize_role(session_payload.get("role")) == ROLE_ADMIN
+    if not has_permission(session_payload, PERM_CHATINTEL_VIEW):
         return templates.TemplateResponse(
             request=request,
             name="chat_intelligence_locked.html",
             status_code=403,
             context={
                 "sub": session_payload.get("sub", "TELEGRAM"),
+                "role": normalize_role(session_payload.get("role")),
                 "env_summary": config.public_summary(),
                 "telegram_diag": telegram_bot_service.get_diagnostics(),
             },
@@ -933,6 +1064,8 @@ async def chat_intelligence_page(
             "env_summary": config.public_summary(),
             "telegram_diag": telegram_bot_service.get_diagnostics(),
             "admin_sub": session_payload.get("sub", "WHITELIST"),
+            "role": normalize_role(session_payload.get("role")),
+            "permissions": sorted(session_permissions(session_payload)),
             "is_admin": is_admin,
             "is_whitelisted": True,
         },
@@ -1051,29 +1184,37 @@ async def api_auth_telegram_widget(request: Request, payload: TelegramWidgetAuth
             detail=f"Telegram-Signatur ungültig: {err_msg or 'Verifikation fehlgeschlagen'}",
         )
 
-    # Berechtigung als Administrator prüfen
+    # Jede freigeschaltete Rolle darf sich per Telegram-Widget anmelden.
     access_info = check_telegram_user_access(
         telegram_id=payload.id,
         username=payload.username,
         first_name=payload.first_name,
     )
 
-    if not access_info.get("is_admin"):
+    if not access_info.get("allowed"):
         uname = f"@{payload.username}" if payload.username else f"ID {payload.id}"
         raise HTTPException(
             status_code=403,
-            detail=f"Erfolgreich via Telegram verifiziert ({uname}), aber dein Account besitzt keine Administrator-Berechtigung für TokTracker.",
+            detail=f"Erfolgreich via Telegram verifiziert ({uname}), aber dein Account besitzt keine Freigabe für TokTracker.",
         )
 
+    role = normalize_role(access_info.get("role"))
     admin_label = f"@{payload.username}" if payload.username else str(payload.id)
     resp = JSONResponse(
         content={
             "ok": True,
             "admin": admin_label,
-            "redirect": "/admin",
+            "role": role,
+            "redirect": _redirect_for_role(role),
         }
     )
-    _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
+    _set_admin_session_cookie(
+        resp,
+        admin_label=admin_label,
+        request=request,
+        role=role,
+        is_allowed=True,
+    )
     return resp
 
 
@@ -1100,14 +1241,21 @@ async def api_auth_telegram_widget_callback(request: Request):
         first_name=auth_data.get("first_name"),
     )
 
-    if not access_info.get("is_admin"):
+    if not access_info.get("allowed"):
         uname = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
-        msg = f"Account {uname} besitzt keine Admin-Berechtigung."
+        msg = f"Account {uname} besitzt keine Freigabe fuer TokTracker."
         return RedirectResponse(url=f"/login?error={urllib.parse.quote(msg)}", status_code=302)
 
+    role = normalize_role(access_info.get("role"))
     admin_label = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
-    resp = RedirectResponse(url="/admin", status_code=302)
-    _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
+    resp = RedirectResponse(url=_redirect_for_role(role), status_code=302)
+    _set_admin_session_cookie(
+        resp,
+        admin_label=admin_label,
+        request=request,
+        role=role,
+        is_allowed=True,
+    )
     return resp
 
 
@@ -1699,25 +1847,35 @@ async def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, respon
             chat_id=int(tg_id),
         )
     else:
-        access_check = {"allowed": False, "is_admin": False}
+        access_check = {"allowed": False, "is_admin": False, "role": ROLE_VIEWER}
 
-    is_whitelisted = bool(access_check.get("allowed", False))
+    allowed = bool(access_check.get("allowed", False))
     is_admin = bool(access_check.get("is_admin", False))
+    is_whitelisted = bool(access_check.get("is_whitelisted", False))
+    role = normalize_role(access_check.get("role"))
     if not is_admin and admin_auth_manager.is_admin_user(telegram_id=tg_id, username=username):
         is_admin = True
         is_whitelisted = True
+        role = ROLE_ADMIN
 
     token = None
     user_label = f"tg_{tg_id}" if tg_id else f"tg_{username or 'user'}"
-    if is_admin or is_whitelisted:
+    if allowed:
         token = admin_auth_manager.create_session_token(
             admin_label=user_label,
-            role="admin" if is_admin else "user",
-            is_allowed=is_whitelisted,
+            role=role,
+            is_allowed=True,
         )
-        # Auch Whitelist-Nutzer (role=user) erhalten ein Cookie, damit serverseitig
-        # geschützte Seiten (z.B. /chat-intelligence) per Browser-Navigation funktionieren.
-        _set_admin_session_cookie(response, admin_label=user_label, request=request, token=token)
+        # Auch Viewer und Whitelist-Nutzer erhalten ein Cookie, damit serverseitig
+        # geschützte Seiten per Browser-Navigation funktionieren.
+        _set_admin_session_cookie(
+            response,
+            admin_label=user_label,
+            request=request,
+            token=token,
+            role=role,
+            is_allowed=True,
+        )
 
     try:
         record_bot_session(
@@ -1725,24 +1883,32 @@ async def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, respon
             telegram_id=tg_id,
             username=username or "",
             first_name=first_name or "",
-            status="admin" if is_admin else ("whitelisted" if is_whitelisted else "user"),
-            details_json=json.dumps({"is_admin": is_admin, "is_whitelisted": is_whitelisted}),
+            status=role,
+            details_json=json.dumps(
+                {
+                    "is_admin": is_admin,
+                    "is_whitelisted": is_whitelisted,
+                    "role": role,
+                }
+            ),
         )
     except Exception:
         pass
 
     return {
         "ok": True,
-        "authenticated": True,
+        "authenticated": allowed,
         "is_admin": is_admin,
         "is_whitelisted": is_whitelisted,
+        "role": role,
+        "permissions": sorted(session_permissions({"role": role, "is_allowed": True})) if allowed else [],
         "user": {
             "id": tg_id,
             "username": username,
             "first_name": first_name,
         },
         "token": token,
-        "admin_label": user_label if (is_admin or is_whitelisted) else None,
+        "admin_label": user_label if allowed else None,
     }
 
 
@@ -1756,28 +1922,30 @@ async def api_miniapp_auth_status(
     x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    token = toktracker_admin_session or x_admin_session
-    if not token and authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
+    token = _extract_session_token(toktracker_admin_session, x_admin_session, authorization)
 
     session_payload = admin_auth_manager.verify_session_token(token)
     if session_payload:
-        role = session_payload.get("role", "admin")
-        is_admin = (role == "admin")
-        is_allowed = bool(session_payload.get("is_allowed", True))
+        role = normalize_role(session_payload.get("role"))
+        is_admin = role == ROLE_ADMIN and not is_blocked(session_payload.get("is_allowed", True))
+        is_whitelisted = role in (ROLE_USER, ROLE_MODERATOR, ROLE_ADMIN) and not is_blocked(
+            session_payload.get("is_allowed", True)
+        )
         return {
             "authenticated": True,
             "is_admin": is_admin,
-            "is_whitelisted": is_allowed or is_admin,
+            "is_whitelisted": is_whitelisted,
             "role": role,
+            "permissions": sorted(session_permissions(session_payload)),
             "admin_label": session_payload.get("sub", "admin"),
             "exp": session_payload.get("exp"),
         }
-    is_public = (get_telegram_access_mode() == "public")
     return {
         "authenticated": False,
         "is_admin": False,
-        "is_whitelisted": is_public,
+        "is_whitelisted": False,
+        "role": None,
+        "permissions": [PERM_PUBLIC_VIEW],
         "admin_label": None,
     }
 
@@ -1799,25 +1967,23 @@ async def api_miniapp_radar(
     toktracker_admin_session: Optional[str] = Cookie(default=None),
     x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
 ):
     init_db()
-    token = toktracker_admin_session or x_admin_session
-    if not token and authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
+    try:
+        payload = _resolve_access_payload(
+            toktracker_admin_session,
+            x_admin_session,
+            authorization,
+            x_api_key,
+            api_key,
+        )
+    except HTTPException:
+        payload = None
 
-    is_authorized = False
-    is_admin = False
-
-    if token:
-        payload = admin_auth_manager.verify_session_token(token)
-        if payload:
-            is_admin = (payload.get("role") == "admin")
-            is_allowed = bool(payload.get("is_allowed", True))
-            if is_admin or is_allowed:
-                is_authorized = True
-
-    if not is_authorized and get_telegram_access_mode() == "public":
-        is_authorized = True
+    is_authorized = bool(payload and has_permission(payload, PERM_RADAR_VIEW))
+    is_admin = bool(payload and normalize_role(payload.get("role")) == ROLE_ADMIN)
 
     if not is_authorized:
         return {
@@ -1887,12 +2053,21 @@ async def api_miniapp_auth_verify_otp(request: Request, payload: MiniAppVerifyCo
             detail="Ungültiger oder abgelaufener Einmal-Code.",
         )
     await reset_rate_limit("miniapp_verify_otp", _extract_client_ip(request))
-    token = admin_auth_manager.create_session_token(admin_label=admin_label)
-    _set_admin_session_cookie(response, admin_label=admin_label, request=request, token=token)
+    token = admin_auth_manager.create_session_token(admin_label=admin_label, role=ROLE_ADMIN)
+    _set_admin_session_cookie(
+        response,
+        admin_label=admin_label,
+        request=request,
+        token=token,
+        role=ROLE_ADMIN,
+    )
     return {
         "ok": True,
         "authenticated": True,
         "is_admin": True,
+        "is_whitelisted": True,
+        "role": ROLE_ADMIN,
+        "permissions": sorted(ALL_PERMISSIONS),
         "admin_label": admin_label,
         "token": token,
     }
@@ -1931,7 +2106,7 @@ async def api_miniapp_analytics(
     response_model=DailyBotReportResponse,
     tags=["Telegram Bot API"],
     summary="24h-Gesamtbericht über alle Streamer (für täglichen Telegram-Cronjob)",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
 async def api_v1_daily_report(
     hours: int = Query(24, ge=1, le=720, description="Auswertungszeitraum in Stunden (Standard: 24h)"),
@@ -1946,7 +2121,7 @@ async def api_v1_daily_report(
     "/api/v1/telegram/send-report",
     tags=["Telegram Bot API"],
     summary="Sendet den 24h-Bericht sofort über den integrierten Telegram-Bot",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_REPORTS_SEND))],
 )
 async def api_v1_telegram_send_report(
     hours: int = Query(24, ge=1, le=720),
@@ -1963,13 +2138,13 @@ async def api_v1_telegram_send_report(
     "/api/telegram/users",
     tags=["Telegram Bot API"],
     summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
 )
 @app.get(
     "/api/v1/telegram/users",
     tags=["Telegram Bot API"],
     summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
 )
 async def api_get_telegram_users():
     init_db()
@@ -1983,13 +2158,13 @@ async def api_get_telegram_users():
     "/api/telegram/users",
     tags=["Telegram Bot API"],
     summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
 )
 @app.post(
     "/api/v1/telegram/users",
     tags=["Telegram Bot API"],
     summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
 )
 async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
     init_db()
@@ -2010,13 +2185,13 @@ async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
     "/api/telegram/users/{record_id}",
     tags=["Telegram Bot API"],
     summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
 )
 @app.delete(
     "/api/v1/telegram/users/{record_id}",
     tags=["Telegram Bot API"],
     summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
 )
 async def api_delete_telegram_user(record_id: int):
     init_db()
@@ -2031,7 +2206,7 @@ async def api_delete_telegram_user(record_id: int):
     response_model=StreamerReportCard,
     tags=["Telegram Bot API"],
     summary="Einzelabfrage für einen bestimmten Streamer per @username oder ID",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
 async def api_v1_streamer_single_report(
     identifier: str,
@@ -2051,8 +2226,8 @@ async def api_v1_streamer_single_report(
 # 3. ADMIN BACKEND- & MANAGEMENT-ENDPOINTS (GESCHÜTZT)
 # =====================================================================
 
-@app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
     init_db()
     data = await asyncio.to_thread(get_dashboard_overview, period=period)
@@ -2068,8 +2243,8 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
     return data
 
 
-@app.get("/api/analytics", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/analytics", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/analytics", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/analytics", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_analytics(
     streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID für Einzelanalyse (sonst alle Streamer)"),
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
@@ -2081,13 +2256,13 @@ async def api_analytics(
     "/api/site-analytics",
     tags=["Site & Bot Analytics"],
     summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
 @app.get(
     "/api/v1/site-analytics",
     tags=["Site & Bot Analytics"],
     summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
 async def api_site_analytics(
     period: str = Query("today", description="all | today | 24h | 7d | 30d"),
@@ -2125,13 +2300,13 @@ async def api_site_analytics(
     "/api/site-analytics/api-calls",
     tags=["Site & Bot Analytics"],
     summary="Liefert detaillierte Statistiken und Logs zu externen API-Aufrufen",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
 @app.get(
     "/api/v1/site-analytics/api-calls",
     tags=["Site & Bot Analytics"],
     summary="Liefert detaillierte Statistiken und Logs zu externen API-Aufrufen",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
 async def api_site_analytics_api_calls(
     period: str = Query("today", description="all | today | 24h | 7d | 30d"),
@@ -2202,13 +2377,13 @@ async def api_donor_detail(username: str):
     "/api/donor-radar/donors/{username}/crm",
     tags=["Spenderradar & Chatlog"],
     summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_radar_write_access)],
 )
 @app.post(
     "/api/v1/donor-radar/donors/{username}/crm",
     tags=["Spenderradar & Chatlog"],
     summary="Aktualisiert VIP-Status, Tags und Notizen für einen Spender",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_radar_write_access)],
 )
 async def api_update_donor_crm(username: str, req: DonorCRMUpdateRequest):
     init_db()
@@ -2226,13 +2401,13 @@ async def api_update_donor_crm(username: str, req: DonorCRMUpdateRequest):
     "/api/donor-radar/donors/{username}/toggle-vip",
     tags=["Spenderradar & Chatlog"],
     summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_radar_write_access)],
 )
 @app.post(
     "/api/v1/donor-radar/donors/{username}/toggle-vip",
     tags=["Spenderradar & Chatlog"],
     summary="Schaltet den VIP-Watchlist-Status eines Spenders um",
-    dependencies=[Depends(verify_radar_access)],
+    dependencies=[Depends(verify_radar_write_access)],
 )
 async def api_toggle_donor_vip(username: str):
     init_db()
@@ -2420,13 +2595,19 @@ async def api_chat_intelligence_analysis(
     "/api/chat-intelligence/export",
     tags=["Chat Intelligence"],
     summary="Exportiert Chatnachrichten eines Streams als CSV, JSON oder Textdatei",
-    dependencies=[Depends(verify_chat_intelligence_access)],
+    dependencies=[
+        Depends(verify_chat_intelligence_access),
+        Depends(require_permission(PERM_EXPORT_DOWNLOAD)),
+    ],
 )
 @app.get(
     "/api/v1/chat-intelligence/export",
     tags=["Chat Intelligence"],
     summary="Exportiert Chatnachrichten eines Streams als CSV, JSON oder Textdatei",
-    dependencies=[Depends(verify_chat_intelligence_access)],
+    dependencies=[
+        Depends(verify_chat_intelligence_access),
+        Depends(require_permission(PERM_EXPORT_DOWNLOAD)),
+    ],
 )
 async def api_chat_intelligence_export(
     streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
@@ -2497,8 +2678,8 @@ async def api_chat_intelligence_export(
 
 
 
-@app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/battles", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/battles", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_get_battles(
     streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
@@ -2534,8 +2715,8 @@ async def api_get_battles(
     return data
 
 
-@app.get("/api/battles/stats", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/battles/stats", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/battles/stats", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/battles/stats", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_get_battle_stats(
     streamer_id: Optional[int] = Query(None, description="Streamer-ID"),
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
@@ -2545,8 +2726,8 @@ async def api_get_battle_stats(
     return await asyncio.to_thread(get_battle_stats, streamer_id=streamer_id, period=period)
 
 
-@app.get("/api/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/battles/{battle_id}", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_get_battle_detail(battle_id: int):
     init_db()
     battle = await asyncio.to_thread(get_battle_details, battle_id, include_raw=True, include_gifts=True)
@@ -2555,8 +2736,8 @@ async def api_get_battle_detail(battle_id: int):
     return battle
 
 
-@app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/system/status", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/system/status", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SYSTEM_VIEW))])
+@app.get("/api/v1/system/status", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SYSTEM_VIEW))])
 async def api_system_status():
     diag = monitor_manager.get_all_diagnostics()
     diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
@@ -2602,14 +2783,14 @@ async def api_health():
     return JSONResponse(status_code=200 if health["status"] == "ok" else 503, content=health)
 
 
-@app.get("/api/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/system/health", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/system/health", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SYSTEM_VIEW))])
+@app.get("/api/v1/system/health", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SYSTEM_VIEW))])
 async def api_system_health(force_refresh: bool = False):
     return await asyncio.to_thread(get_system_health, force_refresh)
 
 
-@app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.get("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_streamer_detail(identifier: str, period: str = Query("all")):
     init_db()
     s_row = get_streamer_by_id_or_username(identifier)
@@ -2627,8 +2808,8 @@ async def api_streamer_detail(identifier: str, period: str = Query("all")):
     return detail
 
 
-@app.post("/api/streamers", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.post("/api/v1/streamers", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/streamers", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.post("/api/v1/streamers", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 async def api_add_streamer(payload: StreamerCreateRequest):
     init_db()
     username = payload.username.strip().lstrip("@").lower()
@@ -2663,8 +2844,8 @@ async def api_add_streamer(payload: StreamerCreateRequest):
     }
 
 
-@app.post("/api/streamers/{identifier}/refresh", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.post("/api/v1/streamers/{identifier}/refresh", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/streamers/{identifier}/refresh", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.post("/api/v1/streamers/{identifier}/refresh", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 async def api_refresh_streamer(identifier: str):
     init_db()
     row = get_streamer_by_id_or_username(identifier)
@@ -2684,8 +2865,8 @@ async def api_refresh_streamer(identifier: str):
     return {"ok": True, "streamer": updated, "profile": profile}
 
 
-@app.post("/api/streamers/{identifier}/track", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.post("/api/v1/streamers/{identifier}/track", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/streamers/{identifier}/track", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.post("/api/v1/streamers/{identifier}/track", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 async def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequest] = None):
     init_db()
     req = payload or TrackActionRequest()
@@ -2703,8 +2884,8 @@ async def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequ
     )
 
 
-@app.delete("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.delete("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.delete("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.delete("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 async def api_delete_streamer(identifier: str):
     init_db()
     row = get_streamer_by_id_or_username(identifier)
@@ -2716,8 +2897,8 @@ async def api_delete_streamer(identifier: str):
     return {"ok": True, "deleted_username": row["username"]}
 
 
-@app.post("/api/gifts", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
-@app.post("/api/v1/gifts", tags=["Telegram Bot API"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/gifts", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_GIFTS_BOOK))])
+@app.post("/api/v1/gifts", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_GIFTS_BOOK))])
 async def api_record_gift(payload: GiftCreateRequest):
     init_db()
     streamer_id = payload.streamer_id
@@ -2796,7 +2977,7 @@ def _fetch_battle_export_rows(streamer_id: Optional[int]) -> List[Dict[str, Any]
     return [dict(r) for r in rows]
 
 
-@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_EXPORT_DOWNLOAD))])
 async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
     init_db()
     rows = await asyncio.to_thread(_fetch_gift_export_rows, streamer_id)
@@ -2854,7 +3035,7 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
     )
 
 
-@app.get("/api/export/battles.csv", tags=["TikTok Battles"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/export/battles.csv", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_EXPORT_DOWNLOAD))])
 async def api_export_battles_csv(streamer_id: Optional[int] = Query(None)):
     init_db()
     b_rows = await asyncio.to_thread(_fetch_battle_export_rows, streamer_id)
@@ -2932,13 +3113,13 @@ async def api_export_battles_csv(streamer_id: Optional[int] = Query(None)):
     )
 
 
-@app.get("/api/settings", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.get("/api/settings", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))])
 async def api_get_settings():
     init_db()
     return get_settings()
 
 
-@app.post("/api/settings", tags=["System & Workers"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/settings", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))])
 async def api_update_settings(payload: SettingsUpdateRequest):
     init_db()
     updated = update_settings(payload.model_dump(exclude_none=True))
@@ -2950,14 +3131,14 @@ async def api_update_settings(payload: SettingsUpdateRequest):
     return {"ok": True, "settings": updated}
 
 
-@app.post("/api/demo/seed", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/demo/seed", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))])
 async def api_seed_demo():
     init_db()
     seed_demo_data()
     return {"ok": True, "message": "Demo-Daten geladen."}
 
 
-@app.post("/api/demo/clear", tags=["Dashboard & Data"], dependencies=[Depends(verify_admin_or_api_key)])
+@app.post("/api/demo/clear", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))])
 async def api_clear_demo():
     init_db()
     removed = clear_demo_data()
@@ -2972,7 +3153,7 @@ async def api_clear_demo():
     "/api/admin/sqlite/inspect",
     tags=["System & Workers"],
     summary="Untersucht eine SQLite-Datei vor dem Import (Standard: tiktok_earnings.db)",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))],
 )
 async def api_sqlite_inspect(file_path: Optional[str] = Query(None)):
     target_path = file_path.strip() if file_path and file_path.strip() else config.db_path
@@ -3005,7 +3186,7 @@ async def api_sqlite_inspect(file_path: Optional[str] = Query(None)):
     "/api/admin/sqlite/import",
     tags=["System & Workers"],
     summary="Führt den Datenimport aus der SQLite-Datei in die aktive Datenbank aus",
-    dependencies=[Depends(verify_admin_or_api_key)],
+    dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))],
 )
 async def api_sqlite_import(payload: Optional[SqliteImportRequest] = None):
     init_db()

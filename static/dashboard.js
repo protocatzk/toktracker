@@ -370,7 +370,17 @@ function renderTelegramUsers(users, accessMode) {
                 statusHtml = `<span class="status-tag danger">GESPERRT</span>`;
             }
 
-            const roleBadge = u.role === "admin" ? `<strong>ADMIN</strong>` : `Nutzer`;
+            const roleLabels = {
+                viewer: "Gast / Zuschauer",
+                user: "Nutzer / Mitglied",
+                moderator: "Moderator",
+                admin: "Administrator",
+            };
+            const currentRole = roleLabels[u.role] ? u.role : "viewer";
+            const roleBadge = `<strong>${roleLabels[currentRole]}</strong>`;
+            const roleOptions = Object.keys(roleLabels)
+                .map((role) => `<option value="${role}" ${role === currentRole ? "selected" : ""}>${roleLabels[role]}</option>`)
+                .join("");
             const ident = u.telegram_id ? String(u.telegram_id) : `@${u.username}`;
             const unameStr = u.username ? `@${u.username}` : "-";
             const fnameStr = u.first_name ? ` (${u.first_name})` : "";
@@ -388,14 +398,12 @@ function renderTelegramUsers(users, accessMode) {
                         <div class="action-group">
                             ${
                                 allowed !== 1
-                                    ? `<button type="button" class="sm primary" onclick="updateTgUser('${ident}', 1, '${u.role || "user"}')">Freischalten</button>`
-                                    : `<button type="button" class="sm" onclick="updateTgUser('${ident}', -1, 'user')">Sperren</button>`
+                                    ? `<button type="button" class="sm primary" onclick="updateTgUser('${ident}', 1, '${currentRole}')">Freischalten</button>`
+                                    : `<button type="button" class="sm" onclick="updateTgUser('${ident}', -1, '${currentRole}')">Sperren</button>`
                             }
-                            ${
-                                u.role !== "admin"
-                                    ? `<button type="button" class="sm" onclick="updateTgUser('${ident}', 1, 'admin')">→ Admin</button>`
-                                    : `<button type="button" class="sm" onclick="updateTgUser('${ident}', 1, 'user')">→ Nutzer</button>`
-                            }
+                            <select class="sm" onchange="updateTgUser('${ident}', ${allowed}, this.value)" title="Rolle ändern">
+                                ${roleOptions}
+                            </select>
                             <button type="button" class="sm danger" onclick="deleteTgUser(${u.id})">X</button>
                         </div>
                     </td>

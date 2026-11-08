@@ -61,6 +61,20 @@ from database import (
 )
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.monitor_client import monitor_client as monitor_manager
+from shared.permissions import (
+    PERM_ANALYTICS_VIEW,
+    PERM_CRM_EDIT,
+    PERM_PUBLIC_VIEW,
+    PERM_RADAR_VIEW,
+    PERM_SETTINGS_MANAGE,
+    PERM_STREAMERS_MANAGE,
+    PERM_SYSTEM_VIEW,
+    PERM_USERS_MANAGE,
+    ROLE_USER,
+    normalize_role,
+    permissions_for,
+    role_label,
+)
 from tiktok_service import fetch_tiktok_user_info
 
 PICTURES_DIR = os.path.join(BASE_DIR, "pictures")
@@ -396,7 +410,7 @@ class TelegramBotService:
             BotCommand("add", "[Admin] Streamer hinzufügen & Live-Worker starten"),
             BotCommand("track", "[Admin] Live-Überwachung für einen Streamer starten"),
             BotCommand("stop", "[Admin] Live-Überwachung für einen Streamer stoppen"),
-            BotCommand("allow", "[Admin] Nutzer per ID, @username oder Reply freischalten"),
+            BotCommand("allow", "[Admin] Nutzer freischalten (viewer|user|moderator|admin)"),
             BotCommand("revoke", "[Admin] Nutzer-Berechtigung entziehen / sperren"),
             BotCommand("users", "[Admin] Freigeschaltete Nutzer & offene Anfragen auflisten"),
             BotCommand("mode", "[Admin] Zugriffsmodus wechseln (whitelist oder public)"),
@@ -668,7 +682,11 @@ class TelegramBotService:
         return update.effective_chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
 
     async def _authorize(
-        self, update: Update, require_admin: bool = False
+        self,
+        update: Update,
+        require_admin: bool = False,
+        require_permission: Optional[str] = None,
+        require_any_permission: Optional[Set[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         if not update.effective_user or not update.effective_message or not update.effective_chat:
             return None
@@ -715,6 +733,9 @@ class TelegramBotService:
             )
             return None
 
+        access["role"] = normalize_role(access.get("role"))
+        access["permissions"] = set(permissions_for(access["role"], 1 if access["allowed"] else 0))
+
         if require_admin and not access["is_admin"]:
             self._log(
                 "INFO",
@@ -722,6 +743,25 @@ class TelegramBotService:
             )
             await update.effective_message.reply_text(
                 "⛔ <b>Keine Berechtigung:</b> Dieser Verwaltungsbefehl ist nur für Administratoren freigegeben.",
+                parse_mode=ParseMode.HTML,
+            )
+            return None
+
+        missing_permission = None
+        if require_permission and require_permission not in access["permissions"]:
+            missing_permission = require_permission
+        elif require_any_permission and not (access["permissions"] & set(require_any_permission)):
+            missing_permission = ", ".join(sorted(require_any_permission))
+
+        if missing_permission:
+            self._log(
+                "INFO",
+                f"Befehl verweigert für {uname_display} (ID: {tg_user.id}){chat_context} "
+                f"[Rolle: {access['role']}, fehlt: {missing_permission}].",
+            )
+            await update.effective_message.reply_text(
+                "⛔ <b>Keine Berechtigung:</b> Deine Rolle "
+                f"<code>{html.escape(role_label(access['role']))}</code> darf diesen Befehl nicht ausführen.",
                 parse_mode=ParseMode.HTML,
             )
             return None
@@ -989,10 +1029,10 @@ class TelegramBotService:
             int(tg_chat.id),
             tg_chat.title or "",
         )
-        role_label = (
-            "Admin"
-            if access["is_admin"]
-            else ("Freigeschaltet" if access["allowed"] else "Gesperrt / Wartend")
+        role_display = (
+            role_label(access.get("role"))
+            if access["allowed"]
+            else "Gesperrt / Wartend"
         )
         group_line = ""
         if self._is_group_chat(update):
@@ -1006,14 +1046,14 @@ class TelegramBotService:
             f"• <b>Deine User-ID:</b> <code>{tg_user.id}</code>\n"
             f"• <b>Dein Username:</b> <code>@{html.escape(tg_user.username or '-')}</code>\n"
             f"{group_line}"
-            f"• <b>Dein Status:</b> <b>{role_label}</b> (Bot-Modus: <code>{access['mode']}</code>)",
+            f"• <b>Dein Status:</b> <b>{role_display}</b> (Bot-Modus: <code>{access['mode']}</code>)",
             parse_mode=ParseMode.HTML,
         )
 
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_user:
             return
-        access = await self._authorize(update, require_admin=False)
+        access = await self._authorize(update, require_permission=PERM_PUBLIC_VIEW)
         if not access:
             return
 
@@ -1027,39 +1067,58 @@ class TelegramBotService:
             else f"📌 <b>Deine ID:</b> <code>{user_id}</code>"
         )
 
-        admin_section = ""
-        if access["is_admin"]:
-            admin_section = (
-                "\n\n<b>🔐 Admin-Befehle:</b>\n"
-                "• <code>/login</code> – Einmal-Code für das Web-Admin-Panel (<code>/admin</code>)\n"
-                "• <code>/add &lt;username&gt;</code> – Streamer hinzufügen &amp; Worker starten\n"
-                "• <code>/track &lt;username&gt;</code> | <code>/stop &lt;username&gt;</code> – Worker steuern\n"
-                "• <code>/allow &lt;id|@user&gt; [admin|user]</code> – Nutzer freischalten (oder per Reply!)\n"
-                "• <code>/revoke &lt;id|@user&gt;</code> – Zugriff entziehen (oder per Reply!)\n"
-                "• <code>/users</code> – Nutzerliste &amp; Anfragen anzeigen\n"
-                "• <code>/mode &lt;whitelist|public&gt;</code> – Zugriffsmodus umschalten"
+        perms = access.get("permissions", set())
+        sections: List[str] = []
+
+        public_lines = [
+            "• <code>/streamers</code> – 👥 Alle Kanäle mit Live-Status (🟢/⚪) &amp; Zuschauern",
+            "• <code>/gifts [streamer]</code> – 🎁 Live Gift-Ticker der letzten Geschenke",
+            "• <code>/app</code> – 📱 toktracker Mini-App öffnen",
+            "• <code>/id</code> – 📌 Eigene User-ID &amp; Gruppen-ID prüfen",
+        ]
+        sections.append("<b>🌐 Öffentliche Befehle:</b>\n" + "\n".join(public_lines))
+
+        if PERM_ANALYTICS_VIEW in perms:
+            sections.append(
+                "<b>📊 Statistik-Befehle:</b>\n"
+                "• <code>/overview [heute|24h|7d|30d|all]</code> – Finanz- &amp; Performance-Dashboard\n"
+                "• <code>/report [stunden]</code> – 24h-Gesamtbericht aller Streamer\n"
+                "• <code>/streamer &lt;username&gt; [stunden]</code> – Detail-Bericht pro Streamer\n"
+                "• <code>/status</code> – Laufzeit-Status aller TikTokLive-Worker"
             )
+
+        if PERM_RADAR_VIEW in perms:
+            sections.append(
+                "<b>🐋 Whitelist-Befehle:</b>\n"
+                "• <code>/radar [all|whale|shark|dolphin|vip]</code> – Spender-Radar &amp; Rangliste\n"
+                "• <code>/whales [min_coins]</code> – Live-Feed der neuesten Großspenden\n"
+                "• <code>/donor &lt;username&gt;</code> – Spender-Dossier &amp; Stammkanal\n"
+                "• <code>/vip [add|remove &lt;user&gt;]</code> – VIP-Watchlist &amp; Spender-Markierungen\n"
+                "• <code>/loyalty [tage]</code> – Frontenwechsler &amp; Streamer-Überschneidungen"
+            )
+
+        admin_lines: List[str] = []
+        if access["is_admin"]:
+            admin_lines.append("• <code>/login</code> – Einmal-Code für das Web-Admin-Panel (<code>/admin</code>)")
+        if PERM_STREAMERS_MANAGE in perms:
+            admin_lines.append("• <code>/add &lt;username&gt;</code> – Streamer hinzufügen &amp; Worker starten")
+            admin_lines.append("• <code>/track &lt;username&gt;</code> | <code>/stop &lt;username&gt;</code> – Worker steuern")
+        if PERM_USERS_MANAGE in perms:
+            admin_lines.append("• <code>/allow &lt;id|@user&gt; [viewer|user|moderator|admin]</code> – Nutzer freischalten")
+            admin_lines.append("• <code>/revoke &lt;id|@user&gt;</code> – Zugriff entziehen (oder per Reply!)")
+            admin_lines.append("• <code>/users</code> – Nutzerliste &amp; Anfragen anzeigen")
+        if PERM_SETTINGS_MANAGE in perms:
+            admin_lines.append("• <code>/mode &lt;whitelist|public&gt;</code> – Zugriffsmodus umschalten")
+        if admin_lines:
+            sections.append("<b>🔐 Verwaltungs-Befehle:</b>\n" + "\n".join(admin_lines))
 
         text = (
             "<b>🚀 Willkommen bei toktracker!</b>\n\n"
             "toktracker überwacht TikTok-Streamer in Echtzeit, erfasst alle Live-Geschenke "
             "(Coins &amp; Diamonds) und berechnet die Netto-Creator-Auszahlung in <b>EUR (€)</b> und <b>USD ($)</b>.\n\n"
-            f"{id_info} | <b>Modus:</b> <code>{access['mode'].upper()}</code>\n\n"
-            "<b>📋 Abfrage-Befehle (Privatchat &amp; Gruppe):</b>\n"
-            "• <code>/overview [heute|24h|7d|30d|all]</code> – 📊 Finanz- &amp; Performance-Dashboard\n"
-            "• <code>/radar [all|whale|shark|dolphin|vip]</code> – 🐋 Spender-Radar &amp; Rangliste\n"
-            "• <code>/whales [min_coins]</code> – ⚡ Live-Feed der neuesten Großspenden\n"
-            "• <code>/donor &lt;username&gt;</code> – 👤 Spender-Dossier, Stammkanal &amp; 1-Klick VIP\n"
-            "• <code>/vip [add|remove &lt;user&gt;]</code> – ⭐ VIP-Watchlist &amp; Spender-Markierungen\n"
-            "• <code>/loyalty [tage]</code> – 🔀 Frontenwechsler &amp; Streamer-Überschneidungen\n"
-            "• <code>/streamers</code> – 👥 Alle Kanäle mit Live-Status (🟢/⚪) &amp; Zuschauern\n"
-            "• <code>/gifts [streamer]</code> – 🎁 Live Gift-Ticker der letzten Geschenke\n"
-            "• <code>/streamer &lt;username&gt; [stunden]</code> – 📊 Detail-Bericht pro Streamer\n"
-            "• <code>/report [stunden]</code> – 📑 24h-Gesamtbericht aller Streamer\n"
-            "• <code>/status</code> – ⚙️ Laufzeit-Status aller TikTokLive-Worker\n"
-            "• <code>/app</code> – 📱 toktracker Mini-App öffnen\n"
-            "• <code>/id</code> – 📌 Eigene User-ID &amp; Gruppen-ID prüfen"
-            f"{admin_section}"
+            f"{id_info} | <b>Rolle:</b> <code>{html.escape(role_label(access.get('role')))}</code> | "
+            f"<b>Modus:</b> <code>{access['mode'].upper()}</code>\n\n"
+            + "\n\n".join(sections)
         )
 
         buttons = []
@@ -1094,7 +1153,7 @@ class TelegramBotService:
     async def _cmd_miniapp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        access = await self._authorize(update, require_admin=False)
+        access = await self._authorize(update, require_permission=PERM_PUBLIC_VIEW)
         if not access:
             return
 
@@ -1153,7 +1212,7 @@ class TelegramBotService:
     async def _cmd_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_ANALYTICS_VIEW):
             return
 
         hours = 24
@@ -1173,7 +1232,7 @@ class TelegramBotService:
     async def _cmd_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_ANALYTICS_VIEW):
             return
 
         if not context.args:
@@ -1346,7 +1405,7 @@ class TelegramBotService:
     async def _cmd_overview(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_ANALYTICS_VIEW):
             return
 
         period = "today"
@@ -1436,7 +1495,7 @@ class TelegramBotService:
     async def _cmd_radar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
             return
 
         tier = "all"
@@ -1504,7 +1563,7 @@ class TelegramBotService:
     async def _cmd_whales(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
             return
 
         min_coins = 1000
@@ -1527,7 +1586,9 @@ class TelegramBotService:
     # -----------------------------------------------------------------
     # SPENDER-DOSSIER & CRM (/donor)
     # -----------------------------------------------------------------
-    def _format_donor_view(self, username: str) -> Tuple[str, InlineKeyboardMarkup]:
+    def _format_donor_view(
+        self, username: str, can_edit_crm: bool = True
+    ) -> Tuple[str, InlineKeyboardMarkup]:
         clean_uname = username.strip().lstrip("@").lower()
         data = get_donor_details(clean_uname)
         if not data or not data.get("profile"):
@@ -1596,12 +1657,17 @@ class TelegramBotService:
 
         text = "\n".join(lines)
 
-        vip_btn_label = "⭐ VIP-Status entfernen" if is_vip else "⭐ Als VIP markieren"
-        buttons = [
-            [
+        first_row = [
+            InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"donor_refresh:{p['username']}"),
+        ]
+        if can_edit_crm:
+            vip_btn_label = "⭐ VIP-Status entfernen" if is_vip else "⭐ Als VIP markieren"
+            first_row.insert(
+                0,
                 InlineKeyboardButton(vip_btn_label, callback_data=f"donor_vip_toggle:{p['username']}"),
-                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"donor_refresh:{p['username']}"),
-            ],
+            )
+        buttons = [
+            first_row,
             [
                 InlineKeyboardButton("🎯 Zum Spender-Radar", callback_data="radar_tier:all"),
             ],
@@ -1611,7 +1677,8 @@ class TelegramBotService:
     async def _cmd_donor(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        access = await self._authorize(update, require_permission=PERM_RADAR_VIEW)
+        if not access:
             return
 
         if not context.args:
@@ -1623,7 +1690,11 @@ class TelegramBotService:
             return
 
         uname = context.args[0].strip().lstrip("@").lower()
-        text, markup = await asyncio.to_thread(self._format_donor_view, uname)
+        text, markup = await asyncio.to_thread(
+            self._format_donor_view,
+            uname,
+            PERM_CRM_EDIT in access["permissions"],
+        )
         await update.effective_message.reply_text(
             text,
             parse_mode=ParseMode.HTML,
@@ -1637,7 +1708,7 @@ class TelegramBotService:
     async def _cmd_vip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
             return
 
         args = context.args or []
@@ -1671,7 +1742,7 @@ class TelegramBotService:
             await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
             return
 
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_CRM_EDIT):
             return
 
         first = args[0].lower().strip()
@@ -1759,7 +1830,7 @@ class TelegramBotService:
     async def _cmd_loyalty(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_RADAR_VIEW):
             return
 
         days = 14
@@ -1814,7 +1885,7 @@ class TelegramBotService:
     async def _cmd_streamers(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_PUBLIC_VIEW):
             return
 
         text, markup = await asyncio.to_thread(self._format_streamers_view)
@@ -1872,7 +1943,7 @@ class TelegramBotService:
     async def _cmd_gifts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_PUBLIC_VIEW):
             return
 
         streamer_ident = context.args[0].strip().lstrip("@") if context.args else None
@@ -1910,8 +1981,27 @@ class TelegramBotService:
         action = parts[0]
         val = parts[1] if len(parts) > 1 else ""
 
+        access_role = normalize_role(access.get("role"))
+        access_perms = set(permissions_for(access_role, 1))
+
+        async def _deny_permission(permission: str) -> None:
+            await query.answer(
+                f"⛔ Deine Rolle ({role_label(access_role)}) darf diese Aktion nicht ausführen.",
+                show_alert=True,
+            )
+
         text = None
         markup = None
+
+        if action in ("overview_period", "overview_streamer") and PERM_ANALYTICS_VIEW not in access_perms:
+            await _deny_permission(PERM_ANALYTICS_VIEW)
+            return
+        if action in ("radar_tier", "whales_min", "donor_refresh", "loyalty_days") and PERM_RADAR_VIEW not in access_perms:
+            await _deny_permission(PERM_RADAR_VIEW)
+            return
+        if action == "donor_vip_toggle" and PERM_CRM_EDIT not in access_perms:
+            await _deny_permission(PERM_CRM_EDIT)
+            return
 
         if action == "overview_period":
             await query.answer()
@@ -1933,11 +2023,15 @@ class TelegramBotService:
             new_vip = await asyncio.to_thread(toggle_donor_vip, uname)
             alert_msg = f"⭐ @{uname} ist jetzt VIP!" if new_vip else f"ℹ️ VIP-Status für @{uname} entfernt."
             await query.answer(alert_msg)
-            text, markup = await asyncio.to_thread(self._format_donor_view, uname)
+            text, markup = await asyncio.to_thread(self._format_donor_view, uname, True)
         elif action == "donor_refresh":
             await query.answer("Aktualisiert")
             uname = val.strip().lower()
-            text, markup = await asyncio.to_thread(self._format_donor_view, uname)
+            text, markup = await asyncio.to_thread(
+                self._format_donor_view,
+                uname,
+                PERM_CRM_EDIT in access_perms,
+            )
         elif action == "loyalty_days":
             await query.answer()
             try:
@@ -1968,7 +2062,7 @@ class TelegramBotService:
     async def _cmd_add_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
             return
 
         if not context.args:
@@ -1998,7 +2092,7 @@ class TelegramBotService:
     async def _cmd_track_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
             return
         if not context.args:
             await update.effective_message.reply_text(
@@ -2015,7 +2109,7 @@ class TelegramBotService:
     async def _cmd_stop_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_STREAMERS_MANAGE):
             return
         if not context.args:
             await update.effective_message.reply_text(
@@ -2032,7 +2126,7 @@ class TelegramBotService:
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=False):
+        if not await self._authorize(update, require_permission=PERM_SYSTEM_VIEW):
             return
         diag = monitor_manager.get_all_diagnostics()
         workers = diag.get("workers", [])
@@ -2068,7 +2162,7 @@ class TelegramBotService:
     async def _cmd_allow_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_USERS_MANAGE):
             return
 
         reply_msg = update.effective_message.reply_to_message
@@ -2076,7 +2170,8 @@ class TelegramBotService:
         tg_id_override: Optional[int] = None
         uname_override: Optional[str] = None
         fname_override: Optional[str] = None
-        role = "user"
+        role = ROLE_USER
+        allowed_roles = ("viewer", "user", "moderator", "admin")
 
         if reply_msg and reply_msg.from_user and not reply_msg.from_user.is_bot:
             target_u = reply_msg.from_user
@@ -2084,21 +2179,23 @@ class TelegramBotService:
             tg_id_override = int(target_u.id)
             uname_override = target_u.username or None
             fname_override = target_u.first_name or None
-            if context.args and context.args[0].lower() in ("user", "admin"):
+            if context.args and context.args[0].lower() in allowed_roles:
                 role = context.args[0].lower()
         elif context.args:
             ident = context.args[0].strip()
-            if len(context.args) > 1 and context.args[1].lower() in ("user", "admin"):
+            if len(context.args) > 1 and context.args[1].lower() in allowed_roles:
                 role = context.args[1].lower()
 
         if not ident:
             await update.effective_message.reply_text(
                 "Verwendung:\n"
-                "• <code>/allow &lt;telegram_id_oder_@username&gt; [user|admin]</code>\n"
+                "• <code>/allow &lt;telegram_id_oder_@username&gt; [viewer|user|moderator|admin]</code>\n"
                 "• Oder in einer Gruppe einfach auf die Nachricht einer Person mit <code>/allow</code> antworten!",
                 parse_mode=ParseMode.HTML,
             )
             return
+
+        role = normalize_role(role)
 
         row = await asyncio.to_thread(
             upsert_telegram_user_permission,
@@ -2121,7 +2218,7 @@ class TelegramBotService:
     async def _cmd_revoke_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_USERS_MANAGE):
             return
 
         reply_msg = update.effective_message.reply_to_message
@@ -2166,7 +2263,7 @@ class TelegramBotService:
     async def _cmd_list_users(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_USERS_MANAGE):
             return
 
         users = await asyncio.to_thread(list_telegram_users)
@@ -2179,7 +2276,7 @@ class TelegramBotService:
         for u in users[:30]:
             st = int(u.get("is_allowed", 0))
             badge = "✅" if st == 1 else ("⏳" if st == 0 else "🚫")
-            role_tag = " [ADMIN]" if u.get("role") == "admin" else ""
+            role_tag = f" [{role_label(u.get('role')).upper()}]"
             uname = f"@{u['username']}" if u.get("username") else (u.get("first_name") or "-")
             tg_id = u.get("telegram_id") or "-"
             lines.append(
@@ -2190,7 +2287,7 @@ class TelegramBotService:
     async def _cmd_access_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
             return
-        if not await self._authorize(update, require_admin=True):
+        if not await self._authorize(update, require_permission=PERM_SETTINGS_MANAGE):
             return
 
         if not context.args or context.args[0].lower() not in ("whitelist", "public"):
@@ -2199,7 +2296,7 @@ class TelegramBotService:
                 f"🔐 Aktueller Zugriffsmodus: <b>{curr.upper()}</b>\n\n"
                 "Umschalten mit:\n"
                 "• <code>/mode whitelist</code> – Nur freigeschaltete Personen (@username oder ID) dürfen den Bot im Privatchat &amp; in Gruppen nutzen\n"
-                "• <code>/mode public</code> – Alle Telegram-Nutzer dürfen Berichte abrufen (Admins verwalten weiterhin)",
+                "• <code>/mode public</code> – Alle Telegram-Nutzer erhalten die Rolle Viewer (nur öffentliche Inhalte; Radar/Chat bleiben Whitelist)",
                 parse_mode=ParseMode.HTML,
             )
             return

@@ -19,7 +19,7 @@
                 if (res.ok && data.ok) {
                     setStatus("✅ Verifizierung erfolgreich! Öffne Admin-Dashboard...", "success");
                     setTimeout(function () {
-                        window.location.href = data.redirect || "/admin";
+                        window.location.href = data.redirect || "/public";
                     }, 350);
                 } else {
                     setStatus(data.detail || "Authentifizierung fehlgeschlagen: Dein Account besitzt keine Admin-Berechtigung.", "error");
@@ -63,7 +63,7 @@
             <span class="pill"><span class="live-dot"></span>GATEWAY: <strong>ACTIVE</strong></span>
             <span class="pill hide-sm">BOT: <strong>@{{ telegram_bot_username }}</strong></span>
             <span class="pill hide-sm">TELEGRAM: <strong>{{ telegram_state | upper }}</strong></span>
-            <a class="btn-link sm" href="/">← Öffentliches User-Panel</a>
+            <a class="btn-link sm" href="/public">← Öffentliches User-Panel</a>
             <button type="button" id="btnThemeToggle" class="mono sm" title="Theme wechseln">Theme: DARK</button>
         </div>
     </div>
@@ -79,7 +79,7 @@
         </div>
         <div class="toolbar-controls">
             <a class="btn-link sm mono" href="/miniapp" target="_blank" rel="noopener">📱 Mini-App ↗</a>
-            <a class="btn-link primary sm" href="/">Public Panel →</a>
+            <a class="btn-link primary sm" href="/public">Public Panel →</a>
         </div>
     </div>
 </nav>
@@ -146,7 +146,7 @@
     <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div>toktracker &middot; LIVE TIKTOK EARNINGS &amp; BATTLE TRACKER</div>
         <div>
-            <a href="/">Public Panel</a> &middot; <a href="/miniapp">Mini-App</a> &middot; <a href="/admin">Admin Console</a>
+            <a href="/public">Public Panel</a> &middot; <a href="/miniapp">Mini-App</a> &middot; <a href="/admin">Admin Console</a>
         </div>
     </div>
 </footer>
@@ -183,7 +183,7 @@
                     if (res.ok && data.ok) {
                         setStatus("✅ Passwort akzeptiert! Öffne Admin-Dashboard...", "success");
                         setTimeout(function () {
-                            window.location.href = data.redirect || "/admin";
+                            window.location.href = data.redirect || "/public";
                         }, 350);
                     } else {
                         setStatus(data.detail || "Ungültiges Admin-Passwort.", "error");

@@ -13,7 +13,7 @@
 <!-- Header -->
 <header class="app-header">
     <div class="header-inner">
-        <a href="/admin" class="brand-block">
+        <a href="{% if is_admin %}/admin{% else %}/stats{% endif %}" class="brand-block">
             <img src="/pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">
@@ -24,12 +24,14 @@
             </div>
         </a>
         <div class="status-strip">
-            <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
-            <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
-            <span class="pill">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
-            <a class="btn-link sm" href="/admin">← Admin-Dashboard</a>
-            <a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>
-            <a class="btn-link primary sm" href="/">Öffentliches Panel →</a>
+            <span class="pill">Rolle: <strong>{{ role }}</strong></span>
+            <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+            <span class="pill hide-sm">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
+            <span class="pill hide-sm">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
+            {% if is_admin %}<a class="btn-link sm" href="/admin">← Admin-Dashboard</a>{% endif %}
+            <a class="btn-link sm" href="/stats">📈 Statistiken</a>
+            {% if 'radar.view' in permissions %}<a class="btn-link sm" href="/donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>{% endif %}
+            <a class="btn-link primary sm" href="/public">Öffentliches Panel →</a>
             <a class="btn-link sm" href="/logout">Abmelden</a>
 
         </div>
@@ -521,7 +523,7 @@
 <footer class="app-footer">
     <div>toktracker · WEBSITE &amp; BOT ANALYTICS</div>
     <div>
-        <a href="/admin">← Zurück zum Admin-Dashboard</a> · <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="/">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="/docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="/logout">Abmelden</a>
+        <a href="/admin">← Zurück zum Admin-Dashboard</a> · <a href="/donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> · <a href="/public">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="/docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="/logout">Abmelden</a>
     </div>
 
 </footer>

@@ -8,11 +8,13 @@ except ImportError:  # pragma: no cover
     import _bootstrap  # noqa: F401
 
 import unittest
+from unittest.mock import patch
 
 import httpx
 
 from app import app
 from shared.auth_store import admin_auth_manager
+from shared.config import config
 
 
 class TestApiEndpoints(unittest.IsolatedAsyncioTestCase):
@@ -40,6 +42,18 @@ class TestApiEndpoints(unittest.IsolatedAsyncioTestCase):
         data = res_pub_api.json()
         self.assertIn("totals", data)
         self.assertIn("streamers", data)
+
+    async def test_landing_page_is_public(self):
+        res = await self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("TokTracker", res.text)
+        self.assertIn("LIVE EARNINGS", res.text)
+
+    async def test_landing_page_can_be_disabled(self):
+        with patch.object(config, "landing_page_enabled", False):
+            res = await self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("PUBLIC PORTAL", res.text)
 
     async def test_health_endpoint_is_public_and_lean(self):
         res = await self.client.get("/api/health")
