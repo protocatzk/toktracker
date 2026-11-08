@@ -205,6 +205,24 @@ def _init_mysql_schema() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS streamer_alerts (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                streamer_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                chat_title VARCHAR(255) DEFAULT '',
+                created_by_telegram_id BIGINT NULL,
+                created_by_username VARCHAR(191) DEFAULT '',
+                enabled TINYINT DEFAULT 1,
+                last_notified_session_id BIGINT NULL,
+                last_notified_at VARCHAR(64),
+                created_at VARCHAR(64) NOT NULL,
+                UNIQUE KEY uq_streamer_alert (streamer_id, chat_id),
+                CONSTRAINT fk_streamer_alerts_streamer FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS page_views (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 path VARCHAR(255) NOT NULL,
@@ -295,6 +313,7 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_battle_id", "battle_id")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_result", "result")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_opponent", "opponent_username")
+        _ensure_index_mysql(conn, "streamer_alerts", "idx_streamer_alerts_chat", "chat_id")
         _ensure_index_mysql(conn, "page_views", "idx_page_views_created", "created_at")
         _ensure_index_mysql(conn, "page_views", "idx_page_views_path", "path")
         _ensure_index_mysql(conn, "page_views", "idx_page_views_visitor", "visitor_hash, created_at")
@@ -444,6 +463,20 @@ def _init_sqlite_schema() -> None:
                 FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
                 FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
             );
+            CREATE TABLE IF NOT EXISTS streamer_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                streamer_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                chat_title TEXT DEFAULT '',
+                created_by_telegram_id INTEGER NULL,
+                created_by_username TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1,
+                last_notified_session_id INTEGER NULL,
+                last_notified_at TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(streamer_id, chat_id),
+                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS page_views (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT NOT NULL,
@@ -563,6 +596,8 @@ def _init_sqlite_schema() -> None:
                 ON tiktok_battles(result);
             CREATE INDEX IF NOT EXISTS idx_battles_opponent
                 ON tiktok_battles(opponent_username);
+            CREATE INDEX IF NOT EXISTS idx_streamer_alerts_chat
+                ON streamer_alerts(chat_id);
             CREATE INDEX IF NOT EXISTS idx_page_views_created
                 ON page_views(created_at);
             CREATE INDEX IF NOT EXISTS idx_page_views_path

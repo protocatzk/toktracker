@@ -114,6 +114,7 @@ from database import (  # noqa: E402
     batch_record_chat_messages,
     cleanup_old_chat_messages,
     end_stream_session,
+    get_active_stream_session,
     get_auto_monitor_streamers,
     get_donor_tier,
     get_known_donor_tiers,
@@ -126,6 +127,8 @@ from database import (  # noqa: E402
     update_stream_session_metrics,
     update_streamer_runtime_state,
 )
+from shared.bus import get_bus  # noqa: E402
+from shared.contracts import CHANNEL_LIVE_STATUS, EVENT_LIVE_STATUS  # noqa: E402
 
 logger = logging.getLogger("tiktok_service")
 if not logger.handlers:
@@ -726,6 +729,35 @@ class StreamerWorker:
         except Exception as exc:
             logger.debug("[@%s] Fehler beim Persistieren der Zuschauerzahlen: %s", self.username, exc)
 
+    async def _publish_live_status_event(
+        self,
+        session_id: int,
+        room_id: str,
+        title: str,
+        display_name: Optional[str],
+        avatar_url: Optional[str],
+        timestamp: str,
+    ) -> None:
+        """Meldet einen neuen Live-Stream an den Bot (Redis PubSub)."""
+        payload = {
+            "type": EVENT_LIVE_STATUS,
+            "streamer_id": int(self.streamer_id),
+            "username": self.username,
+            "display_name": display_name or self.username,
+            "avatar_url": avatar_url or "",
+            "room_id": room_id or "",
+            "session_id": int(session_id),
+            "title": title or "",
+            "timestamp": timestamp,
+        }
+        try:
+            bus = get_bus()
+            # Sync-Client ist thread-/loop-sicher und blockiert den Ingest-Loop nicht.
+            await asyncio.to_thread(bus.publish_sync, CHANNEL_LIVE_STATUS, payload)
+            self._log("INFO", f"Live-Status-Event für Session #{session_id} veröffentlicht.")
+        except Exception as exc:
+            self._log("ERROR", f"Live-Status-Event konnte nicht veröffentlicht werden: {exc}")
+
     def _register_handlers(self, client: Any) -> None:
         @client.on(ConnectEvent)
         async def on_connect(event: ConnectEvent) -> None:
@@ -750,10 +782,15 @@ class StreamerWorker:
                         if urls:
                             avatar_url = urls[0]
 
+            active_before = get_active_stream_session(self.streamer_id)
             session_id = start_stream_session(
                 streamer_id=self.streamer_id,
                 room_id=room_id,
                 title=title,
+            )
+            is_new_session = (
+                active_before is None
+                or int(active_before.get("id") or 0) != int(session_id)
             )
 
             now_iso = datetime.now().isoformat(timespec="seconds")
@@ -777,6 +814,16 @@ class StreamerWorker:
                 last_error="",
             )
             self._log("INFO", f"Verbunden mit Live-Stream (Room {room_id}, Session #{session_id}).")
+
+            if is_new_session:
+                await self._publish_live_status_event(
+                    session_id=session_id,
+                    room_id=room_id,
+                    title=title,
+                    display_name=display_name,
+                    avatar_url=avatar_url,
+                    timestamp=now_iso,
+                )
 
         @client.on(RoomUserSeqEvent)
         async def on_room_user_seq(event: RoomUserSeqEvent) -> None:

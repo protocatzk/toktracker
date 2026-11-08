@@ -179,6 +179,20 @@ def update_streamer_runtime_state(
         )
 
 
+def get_active_stream_session(streamer_id: int) -> Optional[Dict[str, Any]]:
+    """Liefert die aktuell aktive Stream-Session eines Streamers (oder None)."""
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM stream_sessions
+            WHERE streamer_id = ? AND status = 'active'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (int(streamer_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def start_stream_session(
     streamer_id: int, room_id: str = "", title: str = ""
 ) -> int:
