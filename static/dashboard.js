@@ -2,6 +2,7 @@ let currentPeriod = "all";
 let cachedStreamers = [];
 let cachedGifts = [];
 let cachedWorkers = [];
+let cachedStallTimeout = 120;
 let cachedTgLogs = [];
 
 let analyticsPeriod = "24h";
@@ -57,7 +58,10 @@ function switchTab(tabId) {
     document.querySelectorAll(".tab-panel").forEach((panel) => {
         panel.classList.toggle("active", panel.id === tabId);
     });
-    if (tabId === "tab-analytics") {
+    if (tabId === "tab-workers") {
+        renderWorkerHealthTable();
+        renderWorkerHealthLogs(cachedWorkers);
+    } else if (tabId === "tab-analytics") {
         if (!analyticsLoadedOnce) {
             analyticsLoadedOnce = true;
             setTimeout(() => {
@@ -118,7 +122,10 @@ async function loadOverview() {
                 }
             }
             cachedWorkers = data.system.workers || [];
+            cachedStallTimeout = Number(data.system.env_config?.tiktok_stall_timeout || 120);
             cachedTgLogs = tg ? tg.logs || [] : [];
+            renderWorkerHealthTable();
+            renderWorkerHealthLogs(cachedWorkers);
             renderServiceLogs();
 
             if (data.system.system_health) {
@@ -218,6 +225,145 @@ function updateAdminBannerPreview() {
             statusTag.className = "status-tag off";
         }
     }
+}
+
+function workerStateTagClass(state) {
+    if (state === "connected") return "live";
+    if (state === "error" || state === "stopped") return "danger";
+    return "polling";
+}
+
+function formatDurationSeconds(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return "—";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${Math.round(seconds % 60)}s`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function formatFrameAge(worker) {
+    const age = Number(worker.last_frame_age_seconds);
+    if (!Number.isFinite(age) || age < 0) return { text: "—", stale: false };
+    return {
+        text: `${age}s`,
+        stale: worker.state === "connected" && age > 60,
+    };
+}
+
+function renderWorkerHealthSummary(workers) {
+    const total = workers.length;
+    const running = workers.filter((w) => w.is_running).length;
+    const connected = workers.filter((w) => w.state === "connected").length;
+    const stalled = workers.filter((w) => {
+        const age = Number(w.last_frame_age_seconds);
+        return w.state === "connected" && Number.isFinite(age) && age > cachedStallTimeout;
+    }).length;
+    const rateLimited = workers.reduce((sum, w) => sum + Number(w.sign_rate_limited || 0), 0);
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(value);
+    };
+    setText("workerSummaryTotal", total);
+    setText("workerSummaryRunning", running);
+    setText("workerSummaryConnected", connected);
+    setText("workerSummaryStalled", stalled);
+    setText("workerSummaryRateLimited", rateLimited);
+
+    const badge = document.getElementById("badgeWorkers");
+    if (badge) badge.textContent = `${connected}/${total}`;
+}
+
+function renderWorkerHealthTable() {
+    const tbody = document.getElementById("workerHealthBody");
+    if (!tbody) return;
+
+    const filterVal = (document.getElementById("inputWorkerFilter")?.value || "").trim().toLowerCase();
+    const workers = cachedWorkers.filter((w) => {
+        if (!filterVal) return true;
+        const username = String(w.username || "").toLowerCase();
+        const state = String(w.state || "").toLowerCase();
+        const reason = String(w.last_disconnect_reason || "").toLowerCase();
+        return username.includes(filterVal) || state.includes(filterVal) || reason.includes(filterVal);
+    });
+
+    renderWorkerHealthSummary(cachedWorkers);
+
+    if (workers.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="muted">Keine Worker-Daten für diesen Filter vorhanden.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = workers
+        .map((w) => {
+            const state = String(w.state || "unknown");
+            const frame = formatFrameAge(w);
+            const logs = (w.logs || []).slice(0, 3);
+            const logRows = logs
+                .map(
+                    (l) =>
+                        `<div style="font-size:10px; white-space:pre-wrap;">${escapeHtml(l.timestamp || "")} [${escapeHtml(l.level || "")}] ${escapeHtml(l.message || "")}</div>`
+                )
+                .join("");
+            const logHtml = logs.length
+                ? `<details><summary class="mono" style="cursor:pointer; font-size:10px;">${logs.length} Zeilen</summary>${logRows}</details>`
+                : `<span class="muted">—</span>`;
+            const nextRetry = w.next_retry_at
+                ? `<span class="mono">${escapeHtml(String(w.next_retry_at).slice(11, 19))}</span>`
+                : `<span class="muted">—</span>`;
+            const lastReason = w.last_disconnect_reason
+                ? `<span class="mono">${escapeHtml(String(w.last_disconnect_reason))}</span>`
+                : `<span class="muted">—</span>`;
+
+            return `
+                <tr>
+                    <td>
+                        <strong>@${escapeHtml(w.username || "")}</strong>
+                        <div class="mono muted" style="font-size:10px;">Worker #${escapeHtml(String(w.streamer_id || ""))}${w.room_id ? ` · Room ${escapeHtml(String(w.room_id))}` : ""}</div>
+                    </td>
+                    <td>
+                        <div style="display:flex; gap:5px; flex-wrap:wrap; align-items:center;">
+                            <span class="status-tag ${workerStateTagClass(state)}">${escapeHtml(state.toUpperCase())}</span>
+                            <span class="mono muted" style="font-size:10px;">${w.auto_reconnect ? "AUTO" : "MANUELL"}</span>
+                        </div>
+                        ${w.last_error ? `<div class="mono err-text" style="font-size:10px; margin-top:3px;">${escapeHtml(w.last_error)}</div>` : ""}
+                    </td>
+                    <td class="num-col"><span class="mono ${frame.stale ? "err-text" : ""}">${frame.text}</span></td>
+                    <td class="num-col hide-sm"><span class="mono">${formatDurationSeconds(w.connected_for_seconds)}</span></td>
+                    <td class="num-col hide-sm"><span class="mono">${fmtNum(w.reconnect_attempts || 0)}</span></td>
+                    <td class="num-col hide-sm"><span class="mono ${Number(w.stall_reconnects || 0) > 0 ? "err-text" : ""}">${fmtNum(w.stall_reconnects || 0)}</span></td>
+                    <td class="num-col hide-sm"><span class="mono ${Number(w.sign_rate_limited || 0) > 0 ? "err-text" : ""}">${fmtNum(w.sign_rate_limited || 0)}</span></td>
+                    <td class="hide-md">${lastReason}</td>
+                    <td class="hide-md">${nextRetry}</td>
+                    <td class="hide-sm">${logHtml}</td>
+                </tr>
+            `;
+        })
+        .join("");
+}
+
+function renderWorkerHealthLogs(workers) {
+    const box = document.getElementById("workerHealthLogBox");
+    if (!box) return;
+
+    const lines = [];
+    workers.forEach((w) => {
+        (w.logs || []).forEach((l) => {
+            lines.push({
+                timestamp: String(l.timestamp || ""),
+                text: `${l.timestamp || ""} [@${w.username || "?"}] [${l.level || ""}] ${l.message || ""}`,
+            });
+        });
+    });
+
+    if (lines.length === 0) {
+        box.innerHTML = "Keine Worker-Logs vorhanden.";
+        return;
+    }
+
+    lines.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    box.innerHTML = lines.slice(0, 60).map((line) => escapeHtml(line.text)).join("<br/>");
 }
 
 function renderWorkerHealth(diag) {
@@ -2886,6 +3032,8 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("inputStreamerFilter").addEventListener("input", renderStreamerTable);
     document.getElementById("inputGiftFilter").addEventListener("input", renderGiftLog);
     document.getElementById("selectLogSource").addEventListener("change", renderServiceLogs);
+    document.getElementById("inputWorkerFilter")?.addEventListener("input", renderWorkerHealthTable);
+    document.getElementById("btnRefreshWorkers")?.addEventListener("click", loadOverview);
 
     document.getElementById("btnSendTelegramReport").addEventListener("click", async () => {
         const res = await fetch("api/v1/telegram/send-report?hours=24", { method: "POST" });
