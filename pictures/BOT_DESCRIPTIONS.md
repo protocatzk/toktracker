@@ -1,63 +1,84 @@
-# Telegram Bot Bilder & Beschreibungen (@BotFather Vorlagen)
+# TT-INTELLIGENCE – Bot-Assets & @BotFather-Vorlagen
 
-In diesem Ordner (`/pictures`) liegen alle Grafiken für deinen **TikTok Live Earnings Tracker** Telegram-Bot:
+Alle Grafiken liegen in `/pictures` und werden im Industrial-Look der
+Startseite gehalten: `#0d1117`-Hintergrund, feines Raster, Mono-Typografie,
+harte Kanten und ein einzelner grüner Akzent (`#3fb950`).
 
-1. **`welcome_banner.jpg` (16:9)**
-   - **Verwendung:** Welcome-Banner bei `/start` & `/help` (wird automatisch von `telegram_service.py` mitgesendet) sowie als **Description Picture** in `@BotFather` (`/setdescriptionpic` – Hinweis: BotFather akzeptiert dort 640x360 px / 16:9).
-2. **`bot_avatar.jpg` (1:1)**
-   - **Verwendung:** Profilbild / Avatar des Bots in `@BotFather` (`/setuserpic`).
-3. **`daily_report_banner.jpg` (16:9)**
-   - **Verwendung:** Header-Grafik für den automatischen **24h Streamer Analytics Report** und `/report` (wird von `telegram_service.py` als Bild-Header genutzt).
+1. **`welcome_banner.jpg` (16:9, 1280×720)**
+   - Verwendung: `/start` & `/help` sowie als Description-Picture in
+     `@BotFather` (`/setdescriptionpic`, empfohlen 640×360 px / 16:9).
+2. **`bot_avatar.jpg` (1:1, 1024×1024)**
+   - Verwendung: Profilbild des Bots (`/setuserpic`).
+3. **`daily_report_banner.jpg` (16:9, 1280×720)**
+   - Verwendung: Header des automatischen 24h-Reports und `/report`.
 
 ---
 
-## 1. Bot-Name (`/setname` in @BotFather)
+## 1. Bot-Name (`/setname`)
+
 ```text
-TikTok Live Earnings Tracker 📊
+TT-INTELLIGENCE
 ```
 
 ---
 
-## 2. Kurzbeschreibung / About-Text (`/setabouttext` in @BotFather – max. 120 Zeichen)
-*(Erscheint in der Profil-Info des Bots und beim Teilen des Bot-Links)*
+## 2. Kurzbeschreibung (`/setabouttext`, max. 120 Zeichen)
+
 ```text
-📊 Echtzeit TikTok-Live Einnahmen-Tracker: Coins, Diamonds, EUR/USD-Payouts & automatische 24h-Streamer-Berichte.
+Live Earnings Intelligence: TikTok-Geschenke, Coins, Zuschauer und Netto-Payouts in Echtzeit.
 ```
 
 ---
 
-## 3. Welcome-Beschreibung / „What can this bot do?“ (`/setdescription` in @BotFather – max. 512 Zeichen)
-*(Erscheint gemeinsam mit `welcome_banner.jpg` im leeren Chat-Fenster, noch bevor der Nutzer auf „Starten“ klickt)*
+## 3. Welcome-Beschreibung (`/setdescription`, max. 512 Zeichen)
+
 ```text
-Willkommen beim TikTok Live Earnings Tracker! 🚀💎
+TT-INTELLIGENCE überwacht TikTok-Livestreams in Echtzeit.
 
-Dieser Bot überwacht TikTok-Livestreams in Echtzeit und wertet alle empfangenen Geschenke (Coins & Diamonds) präzise in EUR (€) und USD ($) aus.
+// GESCHENKE · COINS · ZUSCHAUER
+// NETTO-PAYOUTS IN EUR & USD
+// 24H-REPORTS · SPENDER-RADAR · MINI-APP
 
-✨ Features:
-• 🕒 Automatischer 24h-Gesamtbericht aller Streamer
-• 🔍 Einzelabfragen pro Streamer (@username)
-• 💰 Netto Creator-Payout & Brutto Shop-Kaufwert
-• 🎁 Top-Geschenke, Top-Spender (Gifter) & Peak-Zuschauer
-
-👇 Klicke unten auf „Starten“ (/start), um das Hauptmenü zu öffnen!
+Starte mit /start das Hauptmenü.
 ```
 
 ---
 
-## 4. Befehlsliste für das Telegram-Menü (`/setcommands` in @BotFather)
-*(Einfach komplett kopieren und bei `@BotFather` nach `/setcommands` einfügen)*
+## 4. Befehlsliste (`/setcommands`)
+
 ```text
-start - Hauptmenü & Befehlsübersicht öffnen
-report - 24h-Gesamtbericht aller überwachten Streamer abrufen
-streamer - Einzelabfrage für einen Streamer (z.B. /streamer arbrita.a)
-status - Laufzeit-Status aller aktiven TikTokLive-Worker prüfen
-id - Eigene Telegram-ID & Berechtigungsstatus anzeigen
-help - Hilfe & verfügbare Befehle anzeigen
-add - [Admin] Streamer hinzufügen & Live-Worker starten
-track - [Admin] Live-Überwachung für einen Streamer starten
-stop - [Admin] Live-Überwachung für einen Streamer stoppen
-allow - [Admin] Nutzer für den Bot freischalten (ID oder @username)
-revoke - [Admin] Nutzer-Berechtigung entziehen / sperren
-users - [Admin] Freigeschaltete Nutzer & offene Anfragen auflisten
-mode - [Admin] Zugriffsmodus wechseln (whitelist oder public)
+start - Hauptmenü & Befehlsübersicht
+overview - Finanz-Dashboard (Heute, 24h, 7d, 30d, Gesamt)
+radar - Spender-Radar nach Tiers
+whales - Ticker der neuesten Großspenden
+donor - Spender-Dossier & Stammkanal (<username>)
+vip - VIP-Watchlist anzeigen oder Spender markieren
+loyalty - Frontenwechsler & Streamer-Überschneidungen
+streamers - Alle Kanäle mit Live-Status
+gifts - Gift-Ticker der letzten Geschenke
+streamer - Einzelabfrage für einen Streamer (<username>)
+report - Gesamtbericht aller überwachten Streamer
+status - Laufzeit-Status der TikTokLive-Worker
+app - Mini-App: Live-Matches & Einnahmen
+id - Eigene Telegram-ID, Gruppen-ID & Berechtigung
+login - [Admin] Einmal-Code für das Web-Panel
+add - [Admin] Streamer anlegen & Live-Worker starten
+track - [Admin] Live-Überwachung starten
+stop - [Admin] Live-Überwachung stoppen
+allow - [Admin] Nutzer freischalten
+revoke - [Admin] Nutzer-Berechtigung entziehen
+users - [Admin] Nutzer & offene Anfragen auflisten
+mode - [Admin] Zugriffsmodus (whitelist | public)
+alert - [Admin] Live-Alert in diesem Chat verwalten
 ```
+
+---
+
+## Gestaltungsregeln der Bot-Texte
+
+- Eyebrow: `// TT-INTELLIGENCE · 01 / TITEL` in `<code>`.
+- Kennzahlen: ausgerichtete `<pre>`-Tabelle, Breite ≤ 34 Zeichen.
+- Status: `● LIVE` / `○ OFFLINE`, Ränge als `01`, `02`.
+- Trenner: `────────────────────────`.
+- Footer: `TT-I · TT.MM.JJJJ HH:MM`.
+- Keine Emoji-Ketten; erlaubte Glyphen: `● ○ ◆ ▸ ✓ → ↗`.
