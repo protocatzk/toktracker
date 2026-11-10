@@ -1,0 +1,167 @@
+/*
+ * TT-INTELLIGENCE – gemeinsames Industrial-Design-System.
+ *
+ * Referenz ist die öffentliche Startseite (static/landing.css):
+ * dunkle Flächen, dünne Rahmen, harte Kanten, Mono-Eyebrows,
+ * ein einziger grüner Akzent. Diese Datei liefert die Tokens und
+ * wenige wiederverwendbare Primitive für Mini-App und Folgeseiten.
+ */
+
+:root {
+    --bg: #0d1117;
+    --surface: #12171f;
+    --surface-2: #161b22;
+    --border: #2a313c;
+    --border-subtle: #1e242d;
+    --border-strong: #f0f6fc;
+    --text: #e6edf3;
+    --text-strong: #f0f6fc;
+    --muted: #8b949e;
+    --accent: #3fb950;
+    --warn: #f59e0b;
+    --danger: #f85149;
+
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+    --radius-sm: 0px;
+    --radius-md: 2px;
+    --radius-lg: 2px;
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+
+    --line: 1px solid var(--border);
+    --line-subtle: 1px solid var(--border-subtle);
+    --line-strong: 2px solid var(--border-strong);
+
+    color-scheme: dark;
+}
+
+/* Mono-Eyebrow wie auf der Startseite: // 01 / SECTION */
+.eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.4px;
+    line-height: 1.2;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+}
+
+/* Panel mit harter Oberkante */
+.panel {
+    background: var(--surface);
+    border: var(--line);
+    border-top: var(--line-strong);
+}
+
+.rule {
+    height: 0;
+    border: 0;
+    border-top: var(--line-subtle);
+    margin: 0;
+}
+
+/* Spec-Zeile: Label links (Mono), Wert rechts */
+.spec-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: var(--line-subtle);
+}
+
+.spec-row:last-child {
+    border-bottom: 0;
+}
+
+.spec-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.spec-value {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text);
+    text-align: right;
+}
+
+/* Kurze technische Tags wie auf der Startseite */
+.tag {
+    display: inline-block;
+    padding: 3px 7px;
+    border: var(--line);
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.status-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    vertical-align: 1px;
+    background: var(--accent);
+    border-radius: 50%;
+}
+
+.status-dot.offline {
+    background: var(--muted);
+}
+
+.status-dot.warn {
+    background: var(--warn);
+}
+
+.status-dot.danger {
+    background: var(--danger);
+}
+
+/* Einheitliche Buttons (eckig, Mono, invertiert für Primäraktion) */
+.brand-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 14px;
+    border: var(--line);
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.brand-btn:hover {
+    border-color: var(--border-strong);
+    background: #21262d;
+}
+
+.brand-btn.primary {
+    background: var(--text-strong);
+    border-color: var(--text-strong);
+    color: var(--bg);
+}
+
+.brand-btn.primary:hover {
+    background: #ffffff;
+}
