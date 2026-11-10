@@ -12,7 +12,7 @@
 <!-- Header -->
 <header class="app-header">
     <div class="header-inner">
-        <a href="{% if is_admin %}/admin{% elif 'analytics.view' in permissions %}/stats{% else %}/public{% endif %}" class="brand-block">
+        <a href="{% if is_admin %}admin{% elif 'analytics.view' in permissions %}stats{% else %}public{% endif %}" class="brand-block">
             <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
             <div class="brand-text">
                 <div class="brand-title-row">

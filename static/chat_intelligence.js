@@ -646,7 +646,11 @@
             }
             const res = await fetch(url);
             if (!res.ok) {
-                if (res.status === 401 || res.status === 403) {
+                if (res.status === 401) {
+                    window.location.href = loginUrl();
+                    return;
+                }
+                if (res.status === 403) {
                     window.location.reload();
                     return;
                 }
@@ -689,7 +693,11 @@
 
             const res = await fetch(url);
             if (!res.ok) {
-                if (res.status === 401 || res.status === 403) {
+                if (res.status === 401) {
+                    window.location.href = loginUrl();
+                    return;
+                }
+                if (res.status === 403) {
                     window.location.reload();
                     return;
                 }

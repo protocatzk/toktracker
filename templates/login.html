@@ -6,20 +6,30 @@
 
 {% block head %}
     <script>
+        // Serverseitig validiertes Rücksprungziel (z.B. /chat-intelligence).
+        var LOGIN_NEXT = {{ (next_url or "")|tojson }};
+
+        // Hängt das Rücksprungziel an Login-API-Aufrufe, damit nach der
+        // Anmeldung wieder die ursprüngliche Seite geöffnet wird.
+        function withNext(url) {
+            if (!LOGIN_NEXT) return url;
+            return url + (url.indexOf("?") === -1 ? "?" : "&") + "next=" + encodeURIComponent(LOGIN_NEXT);
+        }
+
         // Globale Callback-Funktion für das Telegram Login Widget sofort im Head definieren
         window.onTelegramAuth = async function (user) {
             setStatus("Verifiziere Administrator-Berechtigung über Telegram...", "info");
             try {
-                const res = await fetch("api/auth/telegram/widget", {
+                const res = await fetch(withNext("api/auth/telegram/widget"), {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(user),
                 });
                 const data = await res.json().catch(function () { return {}; });
                 if (res.ok && data.ok) {
-                    setStatus("✅ Verifizierung erfolgreich! Öffne Admin-Dashboard...", "success");
+                    setStatus("✅ Verifizierung erfolgreich! Öffne Zielseite...", "success");
                     setTimeout(function () {
-                        window.location.href = appUrl(data.redirect || "/public");
+                        window.location.href = appUrl(data.redirect || LOGIN_NEXT || "/public");
                     }, 350);
                 } else {
                     setStatus(data.detail || "Authentifizierung fehlgeschlagen: Dein Account besitzt keine Admin-Berechtigung.", "error");
@@ -115,7 +125,7 @@
                             data-size="large"
                             data-radius="0"
                             data-onauth="onTelegramAuth(user)"
-                            data-auth-url="api/auth/telegram/widget-callback"
+                            data-auth-url="api/auth/telegram/widget-callback{% if next_url %}?next={{ next_url|urlencode }}{% endif %}"
                             data-request-access="write"
                         ></script>
                     {% else %}
@@ -174,16 +184,16 @@
 
                 setStatus("Prüfe Admin-Passwort...", "info");
                 try {
-                    var res = await fetch("api/auth/password", {
+                    var res = await fetch(withNext("api/auth/password"), {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ password: pwd }),
                     });
                     var data = await res.json().catch(function () { return {}; });
                     if (res.ok && data.ok) {
-                        setStatus("✅ Passwort akzeptiert! Öffne Admin-Dashboard...", "success");
+                        setStatus("✅ Passwort akzeptiert! Öffne Zielseite...", "success");
                         setTimeout(function () {
-                            window.location.href = appUrl(data.redirect || "/public");
+                            window.location.href = appUrl(data.redirect || LOGIN_NEXT || "/public");
                         }, 350);
                     } else {
                         setStatus(data.detail || "Ungültiges Admin-Passwort.", "error");

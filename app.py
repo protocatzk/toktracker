@@ -556,8 +556,16 @@ async def access_gate_middleware(request: Request, call_next):
                     },
                 )
             else:
-                message = urllib.parse.quote("Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden.")
-                response = RedirectResponse(url=f"/login?error={message}", status_code=302)
+                target = path
+                if request.url.query:
+                    target = f"{path}?{request.url.query}"
+                response = RedirectResponse(
+                    url=_login_url(
+                        error="Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden.",
+                        next_url=target,
+                    ),
+                    status_code=302,
+                )
             response.headers["X-Robots-Tag"] = "noindex, nofollow"
             return response
 
@@ -749,6 +757,53 @@ def _redirect_for_role(role: Optional[str]) -> str:
     return "/public"
 
 
+def _safe_next_path(value: Optional[str]) -> Optional[str]:
+    """
+    Validiert einen ``next``-Parameter und liefert einen app-internen Pfad.
+
+    Erlaubt werden ausschließlich absolute Pfade innerhalb der App (``/foo``).
+    Protokoll-relative URLs (``//evil``), externe URLs, Backslashes und
+    Steuerzeichen werden verworfen (Open-Redirect-Schutz). Ein bereits
+    enthaltener ``APP_BASE_PATH`` (z.B. ``/track/chat-intelligence``) wird
+    entfernt, damit der Pfad nicht doppelt präfigiert wird.
+    """
+    raw = (value or "").strip()
+    if not raw or not raw.startswith("/") or raw.startswith("//"):
+        return None
+    if "\\" in raw or any(ch in raw for ch in ("\r", "\n", "\x00")):
+        return None
+
+    parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        return None
+
+    path = parsed.path or "/"
+    prefix = _normalize_base_path(config.app_base_path)
+    if prefix and (path == prefix or path.startswith(prefix + "/")):
+        path = path[len(prefix):] or "/"
+
+    result = path
+    if parsed.query:
+        result += f"?{parsed.query}"
+    return result
+
+
+def _resolve_post_login_redirect(next_value: Optional[str], role: Optional[str]) -> str:
+    """Ziel nach erfolgreichem Login: validiertes ``next`` oder Rollen-Startseite."""
+    return _safe_next_path(next_value) or _redirect_for_role(role)
+
+
+def _login_url(error: Optional[str] = None, next_url: Optional[str] = None) -> str:
+    """Baut eine Login-URL mit optionaler Fehlermeldung und Rücksprungziel."""
+    params: Dict[str, str] = {}
+    safe_next = _safe_next_path(next_url)
+    if safe_next:
+        params["next"] = safe_next
+    if error:
+        params["error"] = error
+    return "/login" + (f"?{urllib.parse.urlencode(params)}" if params else "")
+
+
 def _set_admin_session_cookie(
     response: Response,
     admin_label: str,
@@ -898,10 +953,11 @@ async def admin_login_page(
     """
     Login-Seite (/login) für die Telegram-basierte Admin-Authentifizierung.
     """
+    next_value = request.query_params.get("next")
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if session_payload:
         return RedirectResponse(
-            url=_redirect_for_role(session_payload.get("role")),
+            url=_resolve_post_login_redirect(next_value, session_payload.get("role")),
             status_code=302,
         )
 
@@ -915,6 +971,7 @@ async def admin_login_page(
             "telegram_state": tg_diag.get("state") or "offline",
             "has_admin_password": bool(config.admin_password),
             "error_message": request.query_params.get("error", ""),
+            "next_url": _safe_next_path(next_value) or "",
         },
     )
 
@@ -964,7 +1021,7 @@ async def admin_console(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url=_login_url(next_url="/admin"), status_code=302)
     if normalize_role(session_payload.get("role")) != ROLE_ADMIN or is_blocked(session_payload.get("is_allowed", True)):
         return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
@@ -1002,7 +1059,7 @@ async def access_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login?next=/access", status_code=302)
+        return RedirectResponse(url=_login_url(next_url="/access"), status_code=302)
     if not has_permission(session_payload, PERM_USERS_MANAGE):
         return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
@@ -1077,7 +1134,7 @@ async def site_analytics_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login?next=/site-analytics", status_code=302)
+        return RedirectResponse(url=_login_url(next_url="/site-analytics"), status_code=302)
     if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
         return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
@@ -1110,7 +1167,7 @@ async def stats_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login?next=/stats", status_code=302)
+        return RedirectResponse(url=_login_url(next_url="/stats"), status_code=302)
     if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
         return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
@@ -1148,7 +1205,7 @@ async def donor_radar_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login?next=/donor-radar", status_code=302)
+        return RedirectResponse(url=_login_url(next_url="/donor-radar"), status_code=302)
     if not has_permission(session_payload, PERM_RADAR_VIEW):
         return RedirectResponse(url=_redirect_for_role(session_payload.get("role")), status_code=302)
 
@@ -1182,7 +1239,7 @@ async def chat_intelligence_page(
     """
     session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
     if not session_payload:
-        return RedirectResponse(url="/login?next=/chat-intelligence", status_code=302)
+        return RedirectResponse(url=_login_url(next_url="/chat-intelligence"), status_code=302)
 
     is_admin = normalize_role(session_payload.get("role")) == ROLE_ADMIN
     if not has_permission(session_payload, PERM_CHATINTEL_VIEW):
@@ -1260,7 +1317,11 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
     tags=["Admin Authentication"],
     summary="Prüft, ob die Login-Anfrage in Telegram per 1-Klick-Button freigegeben wurde",
 )
-async def api_auth_telegram_poll(request: Request, challenge_id: str = Query(..., min_length=8)):
+async def api_auth_telegram_poll(
+    request: Request,
+    challenge_id: str = Query(..., min_length=8),
+    next_url: Optional[str] = Query(default=None, alias="next"),
+):
     poll_res = admin_auth_manager.poll_challenge(challenge_id)
     if poll_res.get("status") == "approved":
         try:
@@ -1275,7 +1336,7 @@ async def api_auth_telegram_poll(request: Request, challenge_id: str = Query(...
             content={
                 "ok": True,
                 "status": "approved",
-                "redirect": "/admin",
+                "redirect": _resolve_post_login_redirect(next_url, ROLE_ADMIN),
             }
         )
         _set_admin_session_cookie(resp, admin_label=poll_res.get("admin_label", "telegram_admin"), request=request)
@@ -1289,7 +1350,11 @@ async def api_auth_telegram_poll(request: Request, challenge_id: str = Query(...
     summary="Prüft den 6-stelligen Telegram Einmal-Code und setzt das Admin-Session-Cookie",
     dependencies=[Depends(_rate_limited("auth_telegram_verify", 10, AUTH_LIMIT_WINDOW))],
 )
-async def api_auth_telegram_verify(request: Request, payload: TelegramLoginVerifyPayload):
+async def api_auth_telegram_verify(
+    request: Request,
+    payload: TelegramLoginVerifyPayload,
+    next_url: Optional[str] = Query(default=None, alias="next"),
+):
     admin_label = admin_auth_manager.verify_code(
         code=payload.code,
         challenge_id=payload.challenge_id,
@@ -1305,7 +1370,7 @@ async def api_auth_telegram_verify(request: Request, payload: TelegramLoginVerif
         content={
             "ok": True,
             "admin": admin_label,
-            "redirect": "/admin",
+            "redirect": _resolve_post_login_redirect(next_url, ROLE_ADMIN),
         }
     )
     _set_admin_session_cookie(resp, admin_label=admin_label, request=request)
@@ -1317,7 +1382,11 @@ async def api_auth_telegram_verify(request: Request, payload: TelegramLoginVerif
     tags=["Admin Authentication"],
     summary="Verifiziert Authentifizierung über das offizielle Telegram Login Widget (OAuth Flow)",
 )
-async def api_auth_telegram_widget(request: Request, payload: TelegramWidgetAuthPayload):
+async def api_auth_telegram_widget(
+    request: Request,
+    payload: TelegramWidgetAuthPayload,
+    next_url: Optional[str] = Query(default=None, alias="next"),
+):
     init_db()
     auth_data = payload.model_dump(exclude_none=True)
     is_valid, err_msg, user_identifier = admin_auth_manager.verify_telegram_auth(auth_data)
@@ -1348,7 +1417,7 @@ async def api_auth_telegram_widget(request: Request, payload: TelegramWidgetAuth
             "ok": True,
             "admin": admin_label,
             "role": role,
-            "redirect": _redirect_for_role(role),
+            "redirect": _resolve_post_login_redirect(next_url, role),
         }
     )
     _set_admin_session_cookie(
@@ -1368,15 +1437,19 @@ async def api_auth_telegram_widget(request: Request, payload: TelegramWidgetAuth
 async def api_auth_telegram_widget_callback(request: Request):
     init_db()
     auth_data = dict(request.query_params)
+    # ``next`` ist kein Telegram-Auth-Feld und darf die Signaturprüfung nicht verfälschen.
+    next_value = auth_data.pop("next", None)
     is_valid, err_msg, user_identifier = admin_auth_manager.verify_telegram_auth(auth_data)
     if not is_valid:
-        encoded_err = urllib.parse.quote(err_msg or "Ungültige Telegram-Signatur")
-        return RedirectResponse(url=f"/login?error={encoded_err}", status_code=302)
+        return RedirectResponse(
+            url=_login_url(error=err_msg or "Ungültige Telegram-Signatur", next_url=next_value),
+            status_code=302,
+        )
 
     try:
         tg_id = int(auth_data.get("id", 0))
     except (ValueError, TypeError):
-        return RedirectResponse(url="/login?error=Ungueltige_ID", status_code=302)
+        return RedirectResponse(url=_login_url(error="Ungueltige_ID", next_url=next_value), status_code=302)
 
     access_info = check_telegram_user_access(
         telegram_id=tg_id,
@@ -1387,11 +1460,11 @@ async def api_auth_telegram_widget_callback(request: Request):
     if not access_info.get("allowed"):
         uname = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
         msg = f"Account {uname} besitzt keine Freigabe fuer TokTracker."
-        return RedirectResponse(url=f"/login?error={urllib.parse.quote(msg)}", status_code=302)
+        return RedirectResponse(url=_login_url(error=msg, next_url=next_value), status_code=302)
 
     role = normalize_role(access_info.get("role"))
     admin_label = f"@{auth_data.get('username')}" if auth_data.get("username") else str(tg_id)
-    resp = RedirectResponse(url=_redirect_for_role(role), status_code=302)
+    resp = RedirectResponse(url=_resolve_post_login_redirect(next_value, role), status_code=302)
     _set_admin_session_cookie(
         resp,
         admin_label=admin_label,
@@ -1408,7 +1481,11 @@ async def api_auth_telegram_widget_callback(request: Request):
     summary="Notfall-Login mit konfiguriertem Admin-Passwort",
     dependencies=[Depends(_rate_limited("auth_password", 5, AUTH_LIMIT_WINDOW))],
 )
-async def api_auth_password(request: Request, payload: PasswordLoginPayload):
+async def api_auth_password(
+    request: Request,
+    payload: PasswordLoginPayload,
+    next_url: Optional[str] = Query(default=None, alias="next"),
+):
     clean_pwd = payload.password.strip()
     admin_label = admin_auth_manager.verify_code(clean_pwd)
     if not admin_label:
@@ -1421,7 +1498,7 @@ async def api_auth_password(request: Request, payload: PasswordLoginPayload):
         content={
             "ok": True,
             "admin": admin_label,
-            "redirect": "/admin",
+            "redirect": _resolve_post_login_redirect(next_url, ROLE_ADMIN),
         }
     )
     _set_admin_session_cookie(resp, admin_label=admin_label, request=request)

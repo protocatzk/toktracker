@@ -448,9 +448,7 @@
             });
             if (res.status === 401) {
                 // Zugriffssperre: Nutzer ist nicht per Telegram freigeschaltet.
-                window.location.href = "login?error=" + encodeURIComponent(
-                    "Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden."
-                );
+                window.location.href = loginUrl();
                 return;
             }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);

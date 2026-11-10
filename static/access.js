@@ -45,7 +45,7 @@
         var headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
         var res = await fetch(url, Object.assign({}, opts, { headers: headers }));
         if (res.status === 401) {
-            window.location.href = "login?next=/access";
+            window.location.href = loginUrl();
             throw new Error("Nicht angemeldet");
         }
         var data = null;

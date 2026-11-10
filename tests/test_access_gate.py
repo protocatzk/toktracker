@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
     import _bootstrap  # noqa: F401
 
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 import httpx
@@ -59,6 +60,13 @@ class TestGateBlocksAnonymous(GateTestCase):
                 res = await self.client.get(path)
                 self.assertEqual(res.status_code, 302)
                 self.assertIn("/login", res.headers["location"])
+
+    async def test_page_redirect_preserves_next_target_with_query(self):
+        res = await self.client.get("/chat-intelligence?period=7d")
+        self.assertEqual(res.status_code, 302)
+        parsed = urllib.parse.urlsplit(res.headers["location"])
+        params = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), ["/chat-intelligence?period=7d"])
 
     async def test_apis_return_401_json(self):
         for path in GATED_APIS:

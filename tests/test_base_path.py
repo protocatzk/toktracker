@@ -11,11 +11,13 @@ except ImportError:  # pragma: no cover
     import _bootstrap  # noqa: F401
 
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 import httpx
 
 from app import app
+from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.config import config
 
 
@@ -66,13 +68,75 @@ class TestBasePathDeployment(unittest.IsolatedAsyncioTestCase):
         self.assertIn('<base href="/track/"', res.text)
         self.assertIn('href="static/style.css', res.text)
         self.assertIn('src="static/common.js', res.text)
-        self.assertIn('fetch("api/auth/password"', res.text)
+        self.assertIn('withNext("api/auth/password"', res.text)
         self.assertNotIn('fetch("/api/', res.text)
+
+    async def test_login_page_keeps_next_redirect_target(self):
+        res = await self.client.get(
+            "/track/login?next=/chat-intelligence",
+            headers=self.prefixed("/track/login"),
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('var LOGIN_NEXT = "/chat-intelligence"', res.text)
+        self.assertIn("widget-callback?next=", res.text)
+
+    async def test_authenticated_login_redirects_to_next_with_prefix(self):
+        token = admin_auth_manager.create_session_token(admin_label="base_path_admin")
+        self.client.cookies.set(AdminAuthManager.COOKIE_NAME, token)
+        res = await self.client.get(
+            "/track/login?next=/chat-intelligence",
+            headers=self.prefixed("/track/login"),
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.headers["location"], "/track/chat-intelligence")
+
+    async def test_authenticated_login_does_not_double_prefix_next(self):
+        token = admin_auth_manager.create_session_token(admin_label="base_path_admin")
+        self.client.cookies.set(AdminAuthManager.COOKIE_NAME, token)
+        res = await self.client.get(
+            "/track/login?next=/track/chat-intelligence",
+            headers=self.prefixed("/track/login"),
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.headers["location"], "/track/chat-intelligence")
+
+    async def test_authenticated_login_rejects_external_next(self):
+        token = admin_auth_manager.create_session_token(admin_label="base_path_admin")
+        self.client.cookies.set(AdminAuthManager.COOKIE_NAME, token)
+        for target in ("https://evil.example/", "//evil.example/x", "/\\evil.example"):
+            with self.subTest(target=target):
+                res = await self.client.get(
+                    f"/track/login?next={urllib.parse.quote(target, safe='')}",
+                    headers=self.prefixed("/track/login"),
+                    follow_redirects=False,
+                )
+                self.assertEqual(res.status_code, 302)
+                self.assertEqual(res.headers["location"], "/track/admin")
+
+    async def test_gated_page_redirect_contains_next_target(self):
+        self._gate_patch = patch.object(config, "access_gate", "whitelist")
+        self._gate_patch.start()
+        try:
+            res = await self.client.get(
+                "/track/chat-intelligence",
+                headers=self.prefixed("/track/chat-intelligence"),
+                follow_redirects=False,
+            )
+        finally:
+            self._gate_patch.stop()
+        self.assertEqual(res.status_code, 302)
+        location = res.headers["location"]
+        self.assertTrue(location.startswith("/track/login?"), location)
+        self.assertIn("next=%2Fchat-intelligence", location)
 
     async def test_redirects_are_prefixed(self):
         res = await self.client.get("/track/admin", headers=self.prefixed("/track/admin"), follow_redirects=False)
         self.assertEqual(res.status_code, 302)
-        self.assertEqual(res.headers["location"], "/track/login")
+        location = res.headers["location"]
+        self.assertTrue(location.startswith("/track/login"), location)
+        self.assertIn("next=%2Fadmin", location)
 
     async def test_untrusted_prefix_is_ignored(self):
         res = await self.client.get("/", headers={"X-Forwarded-Prefix": "/evil"})
