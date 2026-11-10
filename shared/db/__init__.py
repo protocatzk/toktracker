@@ -77,6 +77,18 @@ from shared.db.donors import (  # noqa: F401
 from shared.db.gifts import (  # noqa: F401
     record_gift_event,
 )
+from shared.db.revenue import (  # noqa: F401
+    _invalidate_profile_cache,
+    _profile_insert,
+    assign_streamer_revenue_profile,
+    ensure_revenue_profiles,
+    get_default_revenue_profile,
+    get_revenue_profile,
+    get_revenue_profile_for_streamer,
+    list_revenue_profiles,
+    revenue_profile_summary,
+    update_revenue_profile,
+)
 from shared.db.schema import (  # noqa: F401
     _db_init_lock,
     _db_initialized,
@@ -183,6 +195,16 @@ __all__ = [
     "get_all_streamers_summary",
     "get_live_streamers",
     "record_gift_event",
+    "_invalidate_profile_cache",
+    "_profile_insert",
+    "list_revenue_profiles",
+    "get_revenue_profile",
+    "get_default_revenue_profile",
+    "get_revenue_profile_for_streamer",
+    "update_revenue_profile",
+    "assign_streamer_revenue_profile",
+    "ensure_revenue_profiles",
+    "revenue_profile_summary",
     "add_streamer_alert",
     "remove_streamer_alert",
     "list_streamer_alert_subscriptions",

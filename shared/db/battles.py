@@ -16,7 +16,8 @@ except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
 
 
 from shared.db._base import _get_period_cutoff, get_db
-from shared.db.settings import get_settings
+from shared.db.revenue import get_revenue_profile_for_streamer
+from shared.revenue import compute_gift_revenue
 
 
 def record_battle_start(
@@ -282,7 +283,6 @@ def record_battle_finish(
     aggregiert während des Duells generierte Geschenke/Coins/EUR und speichert den Endstand.
     """
     ended_at = ended_at or datetime.now().isoformat(timespec="seconds")
-    cfg = get_settings()
 
     # Platzierungs- und Ergebnisermittlung für Free-for-all Modi (1v1v1 und 1v1v1v1)
     if battle_mode in ("1v1v1", "1v1v1v1"):
@@ -335,10 +335,14 @@ def record_battle_finish(
         ).fetchone()
 
         coins_earned = int(gift_agg["coins"] or 0) if gift_agg else 0
-        usd_net = round(coins_earned * cfg["usd_per_diamond"], 2)
-        eur_net = round(usd_net * cfg["usd_to_eur_rate"], 2)
-        usd_gross = round(coins_earned * cfg["gross_usd_per_coin"], 2)
-        eur_gross = round(usd_gross * cfg["usd_to_eur_rate"], 2)
+        revenue = compute_gift_revenue(
+            coins_earned,
+            get_revenue_profile_for_streamer(streamer_id),
+        )
+        usd_net = round(revenue["usd_net"], 2)
+        eur_net = round(revenue["eur_net"], 2)
+        usd_gross = round(revenue["usd_gross"], 2)
+        eur_gross = round(revenue["eur_gross"], 2)
 
         duration_sec = b_row["duration_seconds"] or 300
         try:

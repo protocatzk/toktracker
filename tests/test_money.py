@@ -1,8 +1,8 @@
 """
 Tests für die Finanzberechnung (Coins -> USD -> EUR) und Zeitraum-Filter.
 
-Die Erwartungswerte folgen den Default-Kursen aus DEFAULT_SETTINGS
-(usd_per_diamond=0.005, usd_to_eur_rate=0.92).
+Die Erwartungswerte folgen dem Default-Revenue-Profil:
+coin_price_usd=0.0105, creator_share_pct=0.50, fx_rate=0.92.
 """
 
 try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
@@ -17,7 +17,6 @@ from shared.database import (
     _get_period_cutoff,
     delete_streamer,
     get_analytics_data,
-    get_settings,
     record_gift_event,
     upsert_streamer,
 )
@@ -47,7 +46,6 @@ class TestGiftRevenue(unittest.TestCase):
         delete_streamer(self.streamer_id)
 
     def test_coin_to_currency_conversion(self):
-        cfg = get_settings()
         event, created = record_gift_event(
             streamer_id=self.streamer_id,
             sender_username="donor_money",
@@ -60,10 +58,11 @@ class TestGiftRevenue(unittest.TestCase):
         self.assertIsNotNone(event)
 
         expected_coins = 200
-        expected_usd_net = round(expected_coins * cfg["usd_per_diamond"], 4)
-        expected_eur_net = round(expected_usd_net * cfg["usd_to_eur_rate"], 4)
-        expected_usd_gross = round(expected_coins * cfg["gross_usd_per_coin"], 4)
-        expected_eur_gross = round(expected_usd_gross * cfg["usd_to_eur_rate"], 4)
+        # Default-Profil: $0.0105 pro Coin, 50 % Creator-Anteil, USD->EUR 0.92
+        expected_usd_gross = round(expected_coins * 0.0105, 4)
+        expected_usd_net = round(expected_usd_gross * 0.50, 4)
+        expected_eur_net = round(expected_usd_net * 0.92, 4)
+        expected_eur_gross = round(expected_usd_gross * 0.92, 4)
 
         self.assertEqual(int(event["total_coins"]), expected_coins)
         self.assertAlmostEqual(float(event["usd_net"]), expected_usd_net, places=4)
@@ -87,8 +86,8 @@ class TestGiftRevenue(unittest.TestCase):
         self.assertEqual(totals["total_coins"], 200)  # 50*1 + 50*3
         self.assertEqual(totals["gift_events_count"], 2)
         self.assertEqual(totals["unique_gifters"], 1)
-        self.assertAlmostEqual(totals["usd_net"], 1.0, places=2)
-        self.assertAlmostEqual(totals["eur_net"], 0.92, places=2)
+        self.assertAlmostEqual(totals["usd_net"], 1.05, places=2)
+        self.assertAlmostEqual(totals["eur_net"], 0.97, places=2)
 
     def test_duplicate_event_uid_is_ignored(self):
         event_uid = f"money-{uuid.uuid4().hex}"

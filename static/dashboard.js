@@ -3,6 +3,7 @@ let cachedStreamers = [];
 let cachedGifts = [];
 let cachedWorkers = [];
 let cachedStallTimeout = 120;
+let cachedRevenueProfiles = [];
 let cachedTgLogs = [];
 
 let analyticsPeriod = "24h";
@@ -92,6 +93,13 @@ async function loadOverview() {
         const t = data.totals || {};
         document.getElementById("sumNetEur").textContent = fmtEUR(t.eur_net);
         document.getElementById("sumNetUsd").textContent = `${fmtUSD(t.usd_net)} USD`;
+        const netRangeEl = document.getElementById("sumNetRange");
+        if (netRangeEl) {
+            netRangeEl.textContent =
+                t.eur_net_low !== undefined && t.eur_net_high !== undefined
+                    ? `Spanne: ${fmtEUR(t.eur_net_low)} – ${fmtEUR(t.eur_net_high)}`
+                    : "Spanne: —";
+        }
         document.getElementById("sumCoins").textContent = fmtNum(t.total_coins);
         document.getElementById("sumStreamersSub").textContent =
             `${fmtNum(t.streamer_count)} Streamer (${fmtNum(t.live_count)} LIVE)`;
@@ -135,6 +143,8 @@ async function loadOverview() {
 
         cachedStreamers = data.streamers || [];
         cachedGifts = data.recent_gifts || [];
+        cachedRevenueProfiles = data.revenue_profiles || [];
+        renderRevenueProfiles();
 
         renderStreamerTable();
         renderGiftLog();
@@ -386,6 +396,127 @@ function renderWorkerHealth(diag) {
     return `<div class="mono muted" style="margin-top:2px; font-size:11px;">${parts.join(" · ")}</div>`;
 }
 
+function renderRevenueProfiles() {
+    const select = document.getElementById("selectRevenueProfile");
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = cachedRevenueProfiles
+        .map((p) => `<option value="${p.id}">${escapeHtml(p.name || "Profil")}${p.is_default ? " · Standard" : ""}</option>`)
+        .join("");
+    if (previous && cachedRevenueProfiles.some((p) => String(p.id) === String(previous))) {
+        select.value = previous;
+    } else if (cachedRevenueProfiles.length > 0) {
+        select.value = cachedRevenueProfiles[0].id;
+    }
+    populateRevenueProfileForm(select.value);
+    renderRevenueStreamerAssignments();
+}
+
+function populateRevenueProfileForm(profileId) {
+    const profile = cachedRevenueProfiles.find((p) => String(p.id) === String(profileId));
+    if (!profile) return;
+    const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    };
+    setValue("revName", profile.name || "");
+    setValue("revGrossRegion", profile.gross_region || "DE");
+    setValue("revCreatorRegion", profile.creator_region || "DE");
+    setValue("revCoinPriceUsd", profile.coin_price_usd ?? 0.0105);
+    setValue("revCreatorSharePct", profile.creator_share_pct ?? 0.5);
+    setValue("revAgencySharePct", profile.agency_share_pct ?? 0);
+    setValue("revPayoutFeePct", profile.payout_fee_pct ?? 0);
+    setValue("revTaxPct", profile.tax_pct ?? 0);
+    setValue("revFxRate", profile.fx_rate ?? 0.92);
+    setValue("revCoinUncertaintyPct", profile.coin_price_uncertainty_pct ?? 0.10);
+    setValue("revShareUncertaintyPct", profile.creator_share_uncertainty_pct ?? 0.05);
+    setValue("revAgencyMaxPct", profile.agency_share_max_pct ?? 0.15);
+    setValue("revTaxMaxPct", profile.tax_max_pct ?? 0.30);
+    setValue("revFxUncertaintyPct", profile.fx_uncertainty_pct ?? 0.02);
+    const defaultEl = document.getElementById("revIsDefault");
+    if (defaultEl) defaultEl.checked = Boolean(profile.is_default);
+}
+
+function renderRevenueStreamerAssignments() {
+    const tbody = document.getElementById("revenueStreamerBody");
+    if (!tbody) return;
+    if (!cachedStreamers.length) {
+        tbody.innerHTML = `<tr><td colspan="2" class="muted">Keine Streamer vorhanden.</td></tr>`;
+        return;
+    }
+    const options = cachedRevenueProfiles
+        .map((p) => `<option value="${p.id}">${escapeHtml(p.name || "Profil")}</option>`)
+        .join("");
+    tbody.innerHTML = cachedStreamers
+        .map(
+            (s) => `
+            <tr>
+                <td><strong>@${escapeHtml(s.username || "")}</strong>
+                    <div class="mono muted" style="font-size:10px;">${escapeHtml(s.display_name || s.username || "")}</div>
+                </td>
+                <td>
+                    <select data-revenue-streamer-id="${s.id}" style="min-width:220px;">
+                        <option value="">Default</option>
+                        ${options}
+                    </select>
+                </td>
+            </tr>`
+        )
+        .join("");
+    tbody.querySelectorAll("select[data-revenue-streamer-id]").forEach((el) => {
+        const sid = el.getAttribute("data-revenue-streamer-id");
+        const streamer = cachedStreamers.find((s) => String(s.id) === String(sid));
+        if (streamer && streamer.revenue_profile_id) {
+            el.value = String(streamer.revenue_profile_id);
+        }
+        el.addEventListener("change", async () => {
+            const profileId = el.value ? Number(el.value) : null;
+            const res = await fetch("api/revenue/assign", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ streamer_id: Number(sid), profile_id: profileId }),
+            });
+            if (!res.ok) {
+                alert("Zuordnung konnte nicht gespeichert werden.");
+            }
+            loadOverview();
+        });
+    });
+}
+
+async function saveRevenueProfile() {
+    const select = document.getElementById("selectRevenueProfile");
+    if (!select || !select.value) return;
+    const num = (id) => parseFloat(document.getElementById(id)?.value || "0");
+    const payload = {
+        name: document.getElementById("revName")?.value || "",
+        gross_region: document.getElementById("revGrossRegion")?.value || "DE",
+        creator_region: document.getElementById("revCreatorRegion")?.value || "DE",
+        coin_price_usd: num("revCoinPriceUsd"),
+        creator_share_pct: num("revCreatorSharePct"),
+        agency_share_pct: num("revAgencySharePct"),
+        payout_fee_pct: num("revPayoutFeePct"),
+        tax_pct: num("revTaxPct"),
+        fx_rate: num("revFxRate"),
+        coin_price_uncertainty_pct: num("revCoinUncertaintyPct"),
+        creator_share_uncertainty_pct: num("revShareUncertaintyPct"),
+        agency_share_max_pct: num("revAgencyMaxPct"),
+        tax_max_pct: num("revTaxMaxPct"),
+        fx_uncertainty_pct: num("revFxUncertaintyPct"),
+        is_default: document.getElementById("revIsDefault")?.checked ? 1 : 0,
+    };
+    const res = await fetch(`api/revenue/profiles/${select.value}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        alert("Revenue-Profil konnte nicht gespeichert werden.");
+        return;
+    }
+    await loadOverview();
+}
+
 function renderStreamerTable() {
     const tbody = document.getElementById("streamerTableBody");
     const filterVal = (document.getElementById("inputStreamerFilter")?.value || "").trim().toLowerCase();
@@ -451,7 +582,10 @@ function renderStreamerTable() {
                         <strong>${fmtNum(s.total_coins)}</strong>
                         <div class="muted">${fmtNum(s.total_gifts_sent)} Gifts / ${s.unique_gifters} Gifter</div>
                     </td>
-                    <td class="num-col"><strong>${fmtEUR(s.eur_net)}</strong></td>
+                    <td class="num-col">
+                        <strong>${fmtEUR(s.eur_net)}</strong>
+                        ${s.eur_net_low !== undefined ? `<div class="muted" style="font-size:10px;">${fmtEUR(s.eur_net_low)} – ${fmtEUR(s.eur_net_high)}</div>` : ""}
+                    </td>
                     <td class="num-col hide-sm">${fmtUSD(s.usd_net)}</td>
                     <td class="num-col hide-md">${fmtEUR(s.eur_gross)}</td>
                     <td class="mono hide-sm">
@@ -645,7 +779,9 @@ async function showStreamerDetail(streamerId) {
     document.getElementById("detailTitle").textContent =
         `Auswertung: ${s.display_name || s.username} (@${s.username})`;
     document.getElementById("detailSubtitle").textContent =
-        `Netto: ${fmtEUR(data.summary.eur_net)} (${fmtUSD(data.summary.usd_net)}) · Coins: ${fmtNum(data.summary.total_coins)} · Brutto: ${fmtEUR(data.summary.eur_gross)}`;
+        `Netto: ${fmtEUR(data.summary.eur_net)} (${fmtUSD(data.summary.usd_net)})` +
+        `${data.summary.eur_net_low !== undefined ? ` · Spanne ${fmtEUR(data.summary.eur_net_low)}–${fmtEUR(data.summary.eur_net_high)}` : ""}` +
+        ` · Coins: ${fmtNum(data.summary.total_coins)} · Brutto: ${fmtEUR(data.summary.eur_gross)}`;
 
     const giftsBody = document.getElementById("detailGiftsBody");
     giftsBody.innerHTML =
@@ -3034,6 +3170,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("selectLogSource").addEventListener("change", renderServiceLogs);
     document.getElementById("inputWorkerFilter")?.addEventListener("input", renderWorkerHealthTable);
     document.getElementById("btnRefreshWorkers")?.addEventListener("click", loadOverview);
+    document.getElementById("selectRevenueProfile")?.addEventListener("change", (e) =>
+        populateRevenueProfileForm(e.target.value)
+    );
+    document.getElementById("btnSaveRevenueProfile")?.addEventListener("click", saveRevenueProfile);
 
     document.getElementById("btnSendTelegramReport").addEventListener("click", async () => {
         const res = await fetch("api/v1/telegram/send-report?hours=24", { method: "POST" });

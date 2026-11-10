@@ -16,7 +16,8 @@ except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
 
 
 from shared.db._base import get_db
-from shared.db.settings import get_settings
+from shared.db.revenue import get_revenue_profile_for_streamer
+from shared.revenue import compute_gift_revenue, normalize_profile
 
 
 def record_gift_event(
@@ -37,16 +38,20 @@ def record_gift_event(
     session_id: Optional[int] = None,
     source: str = "tiktoklive",
     created_at: Optional[str] = None,
+    revenue_profile: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], bool]:
-    cfg = get_settings()
     diamond_count = max(0, int(diamond_count))
     repeat_count = max(1, int(repeat_count))
     total_coins = diamond_count * repeat_count
 
-    usd_net = round(total_coins * cfg["usd_per_diamond"], 4)
-    eur_net = round(usd_net * cfg["usd_to_eur_rate"], 4)
-    usd_gross = round(total_coins * cfg["gross_usd_per_coin"], 4)
-    eur_gross = round(usd_gross * cfg["usd_to_eur_rate"], 4)
+    profile = revenue_profile or get_revenue_profile_for_streamer(streamer_id)
+    revenue = compute_gift_revenue(total_coins, profile)
+    snapshot = normalize_profile(profile)
+    profile_id = int(profile["id"]) if profile and profile.get("id") else None
+    usd_net = revenue["usd_net"]
+    eur_net = revenue["eur_net"]
+    usd_gross = revenue["usd_gross"]
+    eur_gross = revenue["eur_gross"]
 
     ts = created_at or datetime.now().isoformat(timespec="seconds")
 
@@ -66,9 +71,12 @@ def record_gift_event(
                 gift_id, gift_name, gift_icon_url,
                 diamond_count, repeat_count, combo_count, group_id, room_fan_tickets,
                 total_coins, usd_net, eur_net, usd_gross, eur_gross,
+                revenue_profile_id, revenue_model, coin_price_usd,
+                creator_share_pct, agency_share_pct, payout_fee_pct, tax_pct,
+                fx_rate, usd_net_low, usd_net_high, eur_net_low, eur_net_high,
                 source, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 streamer_id,
@@ -91,6 +99,18 @@ def record_gift_event(
                 eur_net,
                 usd_gross,
                 eur_gross,
+                profile_id,
+                "v2-profile" if profile_id else "legacy-settings",
+                snapshot["coin_price_usd"],
+                snapshot["creator_share_pct"],
+                snapshot["agency_share_pct"],
+                snapshot["payout_fee_pct"],
+                snapshot["tax_pct"],
+                snapshot["fx_rate"],
+                revenue["usd_net_low"],
+                revenue["usd_net_high"],
+                revenue["eur_net_low"],
+                revenue["eur_net_high"],
                 source,
                 ts,
             ),
