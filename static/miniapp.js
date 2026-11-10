@@ -488,10 +488,10 @@
         if (elements.liveBanner && elements.liveBannerText) {
             if (liveCount > 0) {
                 elements.liveBanner.className = "ma-live-banner";
-                elements.liveBannerText.textContent = `● ${liveCount} Streamer aktiv LIVE auf Sendung`;
+                elements.liveBannerText.textContent = `${liveCount} Streamer aktiv LIVE auf Sendung`;
             } else {
                 elements.liveBanner.className = "ma-live-banner no-active";
-                elements.liveBannerText.textContent = `○ Aktuell keine Streamer LIVE – Auto-Monitor aktiv`;
+                elements.liveBannerText.textContent = `Aktuell keine Streamer LIVE – Auto-Monitor aktiv`;
             }
         }
 
