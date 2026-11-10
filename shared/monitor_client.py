@@ -97,6 +97,12 @@ class MonitorClient:
 
         active_count = sum(1 for s in snapshots if s.get("is_running"))
         connected_count = sum(1 for s in snapshots if s.get("state") == "connected")
+        stalled_count = sum(
+            1
+            for s in snapshots
+            if s.get("state") == "connected"
+            and int(s.get("last_frame_age_seconds", -1) or -1) > config.tiktok_stall_timeout
+        )
 
         return {
             "tiktoklive_available": True,
@@ -104,6 +110,7 @@ class MonitorClient:
             "workers_total": len(snapshots),
             "workers_running": active_count,
             "workers_connected": connected_count,
+            "workers_stalled": stalled_count,
             "workers": snapshots,
         }
 

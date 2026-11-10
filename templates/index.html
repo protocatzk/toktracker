@@ -47,6 +47,9 @@
             <button type="button" class="tab-btn active" data-tab="tab-streamers">
                 Streamer &amp; Einnahmen <span class="tab-badge" id="badgeStreamers">0</span>
             </button>
+            <button type="button" class="tab-btn" data-tab="tab-workers">
+                Ingest &amp; Worker Health <span class="tab-badge" id="badgeWorkers">0</span>
+            </button>
             <button type="button" class="tab-btn" data-tab="tab-analytics" id="tabBtnAnalytics">
                 Graphen &amp; Analytics <span class="tab-badge" id="badgeAnalytics">Live</span>
             </button>
@@ -212,6 +215,84 @@
                         <div id="detailSessionsList" class="log-box mono" style="margin-top:6px; max-height:140px;"></div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- TAB: INGEST & WORKER HEALTH                                -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-workers">
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>🩺 Ingest &amp; Worker Health</h2>
+                    <div class="section-hint">
+                        Echtzeit-Zustand aller TikTokLive-Worker: Frame-Heartbeat, Reconnects, Stalls,
+                        Sign-API-Limits und letzte Trennungsgründe.
+                    </div>
+                </div>
+                <div class="inline-form">
+                    <input type="text" id="inputWorkerFilter" placeholder="Worker filtern..." style="width:190px;" />
+                    <button type="button" id="btnRefreshWorkers" class="sm primary">Aktualisieren</button>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; padding:0 16px 16px;">
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                    <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Worker gesamt</div>
+                    <div id="workerSummaryTotal" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
+                </div>
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                    <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Aktiv</div>
+                    <div id="workerSummaryRunning" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
+                </div>
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                    <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Verbunden</div>
+                    <div id="workerSummaryConnected" style="font-size:24px; font-weight:700; line-height:1.2; color:var(--tag-live-text);">0</div>
+                </div>
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                    <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Stalled</div>
+                    <div id="workerSummaryStalled" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
+                </div>
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                    <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Rate-Limits</div>
+                    <div id="workerSummaryRateLimited" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Streamer</th>
+                            <th>Status</th>
+                            <th class="num-col">Frame</th>
+                            <th class="num-col hide-sm">Verbunden</th>
+                            <th class="num-col hide-sm">Reconnects</th>
+                            <th class="num-col hide-sm">Stalls</th>
+                            <th class="num-col hide-sm">Rate-Limits</th>
+                            <th class="hide-md">Letzter Grund</th>
+                            <th class="hide-md">Nächster Versuch</th>
+                            <th class="hide-sm">Meldungen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workerHealthBody">
+                        <tr><td colspan="10" class="muted">Lade Worker-Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>📜 Worker-Ereignisprotokoll</h2>
+                    <div class="section-hint">Die letzten Meldungen aller Ingest-Worker, neueste zuerst.</div>
+                </div>
+            </div>
+            <div class="log-box mono" id="workerHealthLogBox" style="max-height:260px;">
+                Keine Worker-Logs vorhanden.
             </div>
         </div>
     </section>
@@ -1143,5 +1224,5 @@
 
 </footer>
 
-<script src="static/dashboard.js?v=2.9.0"></script>
+<script src="static/dashboard.js?v=2.11.0"></script>
 {% endblock %}

@@ -21,6 +21,7 @@ KEY_DIAG_BOT = "tt:diag:bot"                   # JSON
 PREFIX_HEARTBEAT_INGEST = "tt:hb:ingest:"      # tt:hb:ingest:<instance_id> -> ISO ts
 KEY_HEARTBEAT_BOT = "tt:hb:bot"
 KEY_HEARTBEAT_SCHEDULER = "tt:hb:scheduler"
+KEY_SIGN_RATE_LIMIT = "tt:ratelimit:sign"      # Unix-Timestamp, bis zu dem die Sign-API pausiert
 
 # Leader Locks
 LOCK_BOT = "tt:lock:bot:leader"
