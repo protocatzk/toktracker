@@ -60,7 +60,6 @@ gifts - Gift-Ticker der letzten Geschenke
 streamer - Einzelabfrage für einen Streamer (<username>)
 report - Gesamtbericht aller überwachten Streamer
 status - Laufzeit-Status der TikTokLive-Worker
-app - Mini-App: Live-Matches & Einnahmen
 id - Eigene Telegram-ID, Gruppen-ID & Berechtigung
 login - [Admin] Einmal-Code für das Web-Panel
 add - [Admin] Streamer anlegen & Live-Worker starten

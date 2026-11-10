@@ -1,3 +1,7 @@
+/*
+   FROZEN / LEGACY – keine neuen Features.
+   Die Mini-App ist eingefroren; Standard ist das responsive Web-Panel.
+*/
 /* =====================================================================
    TT-INTELLIGENCE Telegram Mini-App Client Logic v3.0.0
    Mobile-First Real-Time Feed, Public Analytics & Admin Control Panel

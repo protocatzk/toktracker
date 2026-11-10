@@ -48,9 +48,11 @@
                 <a class="btn primary" href="login">
                     Live-Panel öffnen <span class="arrow" aria-hidden="true">→</span>
                 </a>
+                {% if miniapp_enabled() %}
                 <a class="btn" href="miniapp">
                     Mini-App <span class="arrow" aria-hidden="true">↗</span>
                 </a>
+                {% endif %}
             </div>
             <ul class="pills">
                 <li>Self-hosted</li>
@@ -154,12 +156,13 @@
                         <span class="card-index">04</span>
                         <span class="card-lang"><span class="lang-dot" style="--dot: var(--accent)"></span> Automation</span>
                     </div>
-                    <h3 class="card-title">Telegram-Bot &amp; Mini-App</h3>
+                    <h3 class="card-title">Telegram-Bot{% if miniapp_enabled() %} &amp; Mini-App{% endif %}</h3>
                     <p class="card-desc">
-                        24h-Reports, Streamer-Statistiken, Live-Status und ein mobiles
-                        Mini-App-Dashboard – direkt aus Telegram heraus.
+                        24h-Reports, Streamer-Statistiken und Live-Status direkt aus
+                        Telegram heraus{% if miniapp_enabled() %} – inklusive mobilem
+                        Mini-App-Dashboard{% endif %}.
                     </p>
-                    <ul class="card-tags"><li>Telegram</li><li>Reports</li><li>Mini-App</li></ul>
+                    <ul class="card-tags"><li>Telegram</li><li>Reports</li>{% if miniapp_enabled() %}<li>Mini-App</li>{% endif %}</ul>
                 </article>
             </div>
         </div>
@@ -292,7 +295,7 @@
         <nav class="footer-links" aria-label="Footer-Links">
             <a href="login">Anmelden</a>
             <a href="public">Live-Panel</a>
-            <a href="miniapp">Mini-App</a>
+            {% if miniapp_enabled() %}<a href="miniapp">Mini-App</a>{% endif %}
             <a class="footer-top" href="#top">Nach oben ↑</a>
         </nav>
     </div>

@@ -22,7 +22,7 @@
 | :--- | :--- |
 | **Live-Tracking** | Geschenke (Coins/Diamonds) in Echtzeit, Combo-/Streak-Aggregation, Zuschauerzahlen, Stream-Sessions, Battle-Erkennung (1v1, 2v2, 1v1v1, 1v1v1v1) |
 | **Finanzen** | Brutto-Kaufwert (Zuschauer) und Netto-Auszahlung (Creator) in USD und EUR, konfigurierbare Kurse, Periodenfilter (today/24h/7d/30d/all) |
-| **Web-Oberfläche** | Öffentliche Infoseite (`/`), Öffentliches Read-Only-Panel (`/public`), Admin-Dashboard (`/admin`), Moderator-Statistiken (`/stats`), Analytics (`/site-analytics`), Spender-Radar (`/donor-radar`), Chat-Intelligence (`/chat-intelligence`), Telegram Mini-App (`/app`) |
+| **Web-Oberfläche** | Öffentliche Infoseite (`/`), Öffentliches Read-Only-Panel (`/public`), Admin-Dashboard (`/admin`), Moderator-Statistiken (`/stats`), Analytics (`/site-analytics`), Spender-Radar (`/donor-radar`), Chat-Intelligence (`/chat-intelligence`), Telegram Mini-App (`/app`, eingefroren/Legacy) |
 | **Telegram-Bot** | 24h-Reports, Streamer-Statistiken, Live-Status (`/live`), Live-Alerts für einzelne Streamer in Gruppen (`/alert`), Whitelist-Verwaltung, Login per Telegram-Widget/OTP |
 | **Sicherheit** | HMAC-signierte Sessions, Telegram-Signaturprüfung, Whitelist/Rollen, Rate-Limiting auf Auth-Endpunkten, Datenschutz-Maskierung auf öffentlichen Flächen |
 | **Betrieb** | Microservices mit Redis-Bus, horizontales Ingest-Sharding über Leases, Leader-Locks, Healthchecks, Docker-Compose mit Nginx + Let's Encrypt |
@@ -206,7 +206,7 @@ Events vor dem Cutoff bleiben als Legacy-Snapshots unverändert.
   Anwendung — inklusive `/`, `/public` und aller Daten-APIs — nur für per
   Telegram freigeschaltete Nutzer und API-Key-Inhaber erreichbar. Öffentlich
   bleiben ausschließlich `/login`, die Login-Endpunkte, statische Assets,
-  `/api/health` und die Mini-App-Seite (für den Telegram-Login).
+  `/api/health` und die Mini-App-Redirects (`/app`, `/miniapp`, `/webapp`).
   Nicht freigeschaltete Besucher werden auf `/login` umgeleitet, API-Aufrufe
   erhalten `401`. Zusätzlich sendet der Server `X-Robots-Tag: noindex` und
   `robots.txt` verbietet Crawler, solange die Sperre aktiv ist.

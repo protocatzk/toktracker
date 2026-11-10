@@ -142,6 +142,14 @@ class AppConfig:
     telegram_allowed_users_raw: str = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
     # Optionale externe WebApp / Mini-App URL für Telegram
     telegram_webapp_url: str = os.getenv("TELEGRAM_WEBAPP_URL", os.getenv("WEBAPP_URL", "")).strip()
+    # Mini-App ist eingefroren (Legacy). Bei 0 werden /miniapp, /app und /webapp
+    # auf das responsive Web-Panel umgeleitet und alle UI-/Bot-Einstiege ausgeblendet.
+    miniapp_enabled: bool = os.getenv("MINIAPP_ENABLED", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     # Wird in __post_init__ gesetzt: "env" | "derived" | "ephemeral"
     session_secret_source: str = ""
@@ -298,6 +306,7 @@ class AppConfig:
             "has_telegram_config": bool(self.telegram_bot_token),
             "telegram_access_mode": self.telegram_access_mode,
             "telegram_webapp_url": self.telegram_webapp_url,
+            "miniapp_enabled": self.miniapp_enabled,
         }
 
 

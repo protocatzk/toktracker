@@ -399,7 +399,7 @@
 
         tbody.innerHTML = sessions.map(s => {
             const isMiniApp = s.session_type === "miniapp";
-            const typeLabel = isMiniApp ? "📱 Telegram Mini-App" : "🔑 2FA Login-Challenge";
+            const typeLabel = isMiniApp ? "📱 Mini-App (Legacy)" : "🔑 2FA Login-Challenge";
             const userLabel = s.username ? `@${escapeHtml(s.username)}` : (s.first_name ? escapeHtml(s.first_name) : `ID: ${s.telegram_id || "-"}`);
             const statusClass = s.status === "admin" ? "status-badge-ok" : (s.status === "approved" ? "status-badge-ok" : "status-badge-redirect");
 

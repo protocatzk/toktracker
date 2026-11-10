@@ -125,7 +125,7 @@ Standard ist `ACCESS_GATE=whitelist`: Die Zugriffssperre in `app.py`
 (`access_gate_middleware`, Logik in `shared/access_gate.py`) lässt jede gültige,
 nicht gesperrte Session bzw. Inhaber des API-Keys durch. Öffentlich bleiben nur
 Login-Seite/Login-Endpunkte, `/static`, `/pictures`, `/api/health`, `/robots.txt`
-und die Mini-App-Seite. Abgewiesene Aufrufe erzeugen keine Analytics-Einträge
+sowie die Mini-App-Redirects (`/app`, `/miniapp`, `/webapp`). Abgewiesene Aufrufe erzeugen keine Analytics-Einträge
 (Gate liegt außerhalb der Analytics-Middleware) und tragen `X-Robots-Tag: noindex`.
 
 Die **feingranulare Rechte-Matrix** liegt in [`shared/permissions.py`](./shared/permissions.py):
@@ -218,7 +218,7 @@ Kurzregeln für neue Seiten:
 - Von [`templates/base.html`](./templates/base.html) erben; `brand.css` wird dort global geladen.
 - Header über `partials/app_header.html`, Footer über `partials/footer.html` einbinden – keinen eigenen Header-Markup duplizieren.
 - Nur Tokens/Komponenten aus [`static/brand.css`](./static/brand.css) verwenden. Keine Inline-Styles, Gradients, Glows oder hardcodierten Farben.
-- Dark **und** Light prüfen; die Mini-App bleibt dark-only.
+- Dark **und** Light prüfen; die Mini-App ist eingefroren (Legacy) und bleibt dark-only.
 - Sichtbare Marke ist `brand_name`/`brand_wordmark` (`TT-INTELLIGENCE`). Technische Identifier (`toktracker_session`, `toktracker_*`, Redis-/Docker-/DB-Namen) bleiben unverändert.
 - Bei CSS-/JS-Änderungen die `?v=`-Version in den Templates erhöhen.
 - [`tests/test_branding.py`](./tests/test_branding.py) und [`tests/test_frontend_assets.py`](./tests/test_frontend_assets.py) bei neuen Seiten/Assets mitpflegen.

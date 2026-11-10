@@ -262,6 +262,8 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Marken-Konstanten zentral in allen Templates verfügbar machen.
 templates.env.globals.update(brand_context())
+# Feature-Flags live aus der Config lesen (ermöglicht Tests/Umconfig ohne Neustart).
+templates.env.globals["miniapp_enabled"] = lambda: config.miniapp_enabled
 
 
 def _extract_client_ip(request: Request) -> str:
@@ -926,9 +928,16 @@ async def public_panel(request: Request):
 @app.get("/app", response_class=HTMLResponse, include_in_schema=False)
 async def miniapp_page(request: Request):
     """
-    Mobile-First Telegram Mini-App & WebApp (/miniapp):
-    Kompakte Übersicht über Live-Matches, Einnahmen, Streamer und Geschenke.
+    Mobile-First Telegram Mini-App & WebApp (/miniapp).
+
+    Die Mini-App ist eingefroren (Legacy). Bei ``MINIAPP_ENABLED=0`` (Default)
+    leiten alle Einstiegspfade auf das responsive Web-Panel um. Der alte
+    Telegram-WebApp-Link bleibt damit funktionsfähig, ohne die Mini-App weiter
+    als Standardoberfläche zu bewerben.
     """
+    if not config.miniapp_enabled:
+        return RedirectResponse(url=_login_url(next_url="/public"), status_code=302)
+
     tg_diag = telegram_bot_service.get_diagnostics()
     return templates.TemplateResponse(
         request=request,

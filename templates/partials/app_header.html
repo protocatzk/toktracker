@@ -43,7 +43,9 @@
         {% if show_access %}
         <a class="app-nav-link{{ ' active' if active == 'access' else '' }}" href="access">Zugriff</a>
         {% endif %}
+        {% if miniapp_enabled() %}
         <a class="app-nav-link" href="miniapp" target="_blank" rel="noopener">Mini-App ↗</a>
+        {% endif %}
         <button type="button" class="app-nav-link" data-theme-toggle>Theme: DARK</button>
         {% if role|default(none) or admin_sub|default(none) %}
         <a class="app-nav-link danger" href="logout">Abmelden</a>

@@ -451,14 +451,16 @@
         <div class="brand-banner-card">
             <img src="pictures/welcome_banner.jpg" alt="{{ brand_name }} Live Earnings Analytics" class="brand-banner-img" />
             <div>
-                <h2>{{ brand_name }} Telegram-Bot &amp; Mini-App</h2>
+                <h2>{{ brand_name }} Telegram-Bot{% if miniapp_enabled() %} &amp; Mini-App{% endif %}</h2>
                 <div class="section-hint" style="margin-bottom:12px;">
-                    Verfolge alle Live-Battles, Punktestände und Creator-Einnahmen direkt auf deinem Smartphone via <strong>Telegram Mini-App</strong> oder automatisiert per 24h-Report.
+                    Verfolge alle Live-Battles, Punktestände und Creator-Einnahmen direkt auf deinem Smartphone – automatisiert per 24h-Report{% if miniapp_enabled() %} oder über die <strong>Telegram Mini-App</strong>{% else %} im responsiven Web-Panel{% endif %}.
                 </div>
                 <div class="inline-form" style="display:flex; gap:10px; flex-wrap:wrap;">
+                    {% if miniapp_enabled() %}
                     <a class="btn-link primary" href="miniapp" target="_blank" rel="noopener">
                         📱 {{ brand_name }} Mini-App öffnen ↗
                     </a>
+                    {% endif %}
                     {% if telegram_bot_username %}
                     <a class="btn-link" href="https://t.me/{{ telegram_bot_username.lstrip('@') }}" target="_blank" rel="noopener">
                         Telegram-Bot ({{ telegram_bot_username }})
@@ -484,10 +486,12 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {% if miniapp_enabled() %}
                         <tr>
                             <td class="mono"><code>/app</code></td>
                             <td>📱 Startet die native {{ brand_name }} Telegram Mini-App</td>
                         </tr>
+                        {% endif %}
                         <tr>
                             <td class="mono"><code>/report</code></td>
                             <td>Kompletter 24h-Einnahmenbericht aller Streamer</td>
@@ -541,7 +545,7 @@
         <div>{{ brand_name }} · LIVE TIKTOK EARNINGS &amp; BATTLE TRACKER</div>
         <nav class="footer-links" aria-label="Footer">
             <a href="public">Public Panel</a>
-            <a href="miniapp">Mini-App</a>
+            {% if miniapp_enabled() %}<a href="miniapp">Mini-App</a>{% endif %}
             <a href="login">Admin Login</a>
         </nav>
     </div>

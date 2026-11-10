@@ -7,8 +7,8 @@ Solange `ACCESS_GATE=whitelist` gesetzt ist, sind nur folgende Flächen öffentl
   (sonst käme niemand mehr an eine Session),
 * statische Assets (`/static`, `/pictures`),
 * `/api/health` und `/robots.txt`,
-* die Mini-App-Seite (`/miniapp`, `/app`, `/webapp`), damit dort der
-  Telegram-`initData`-Login laufen kann.
+* die Mini-App-Redirects (`/miniapp`, `/app`, `/webapp`) und die
+  Legacy-Login-Endpunkte der eingefrorenen Mini-App.
 
 Alles andere — auch `/`, `/public` und sämtliche Daten-APIs — erfordert eine
 gültige Session (Rolle `admin` oder `is_allowed`) oder einen gültigen API-Key.

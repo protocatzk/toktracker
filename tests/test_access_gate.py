@@ -2,7 +2,7 @@
 Tests für die Zugriffssperre (ACCESS_GATE=whitelist).
 
 Die Sperre ist die äußerste Middleware: Nicht freigeschaltete Besucher sehen nur
-Login, statische Assets, /api/health und die Mini-App-Seite (für den Telegram-Login).
+Login, statische Assets, /api/health und die Mini-App-Redirects (Legacy).
 """
 
 try:  # Testumgebung (isolierte DB/Secrets) vor App-Imports setzen
@@ -23,7 +23,7 @@ from shared.config import config
 
 GATED_PAGES = ("/", "/public", "/panel", "/admin", "/stats", "/donor-radar", "/chat-intelligence", "/site-analytics")
 GATED_APIS = ("/api/overview", "/api/public/overview", "/api/analytics", "/api/battles", "/api/miniapp/data")
-PUBLIC_PATHS = ("/login", "/api/health", "/robots.txt", "/miniapp", "/static/style.css", "/pictures/bot_avatar.jpg")
+PUBLIC_PATHS = ("/login", "/api/health", "/robots.txt", "/static/style.css", "/pictures/bot_avatar.jpg")
 
 
 class GateTestCase(unittest.IsolatedAsyncioTestCase):
@@ -82,6 +82,11 @@ class TestGateBlocksAnonymous(GateTestCase):
             with self.subTest(path=path):
                 res = await self.client.get(path)
                 self.assertEqual(res.status_code, 200, f"{path} -> {res.status_code}")
+
+    async def test_frozen_miniapp_redirect_is_exempt(self):
+        res = await self.client.get("/miniapp")
+        self.assertEqual(res.status_code, 302)
+        self.assertIn("/login", res.headers["location"])
 
     async def test_robots_and_noindex_header(self):
         robots = await self.client.get("/robots.txt")

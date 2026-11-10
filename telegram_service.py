@@ -430,7 +430,6 @@ class TelegramBotService:
             BotCommand("streamer", "🔍 Einzelabfrage für einen Streamer (<username>)"),
             BotCommand("report", "📋 24h-Gesamtbericht aller überwachten Streamer"),
             BotCommand("status", "⚙️ Laufzeit-Status aller aktiven TikTokLive-Worker"),
-            BotCommand("app", "📱 Mini-App: Live-Matches & Einnahmen"),
             BotCommand("id", "📌 Eigene Telegram-ID, Gruppen-ID & Berechtigung"),
             BotCommand("login", "🔐 [Admin] Einmal-Code für das Web-Admin-Panel erzeugen"),
             BotCommand("add", "➕ [Admin] Streamer hinzufügen & Live-Worker starten"),
@@ -442,6 +441,8 @@ class TelegramBotService:
             BotCommand("mode", "🔐 [Admin] Zugriffsmodus wechseln (whitelist oder public)"),
             BotCommand("alert", "🔔 [Admin] Live-Alert für Streamer in diesem Chat verwalten"),
         ]
+        if config.miniapp_enabled:
+            commands.append(BotCommand("app", "📱 Mini-App: Live-Matches & Einnahmen"))
         try:
             await self._app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
             await self._app.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
@@ -1290,9 +1291,10 @@ class TelegramBotService:
             "▪ 📺 <code>/streamers</code> — Kanäle mit Live-Status &amp; Zuschauern",
             "▪ 🟢 <code>/live</code> — aktuell live Streamer anzeigen",
             "▪ 🎁 <code>/gifts [streamer]</code> — Gift-Ticker der letzten Geschenke",
-            "▪ 📱 <code>/app</code> — Mini-App öffnen",
             "▪ 📌 <code>/id</code> — eigene User- und Gruppen-ID prüfen",
         ]
+        if config.miniapp_enabled:
+            public_lines.insert(3, "▪ 📱 <code>/app</code> — Mini-App öffnen")
         sections.append(bf.eyebrow("🌐 01 / ÖFFENTLICH") + "\n" + "\n".join(public_lines))
 
         if PERM_BOT_ANALYTICS_VIEW in perms:
@@ -1348,7 +1350,7 @@ class TelegramBotService:
 
         buttons = []
         webapp_url = (config.telegram_webapp_url or "").strip()
-        if webapp_url:
+        if config.miniapp_enabled and webapp_url:
             if webapp_url.lower().startswith("https://"):
                 buttons.append([
                     InlineKeyboardButton(
@@ -1384,6 +1386,43 @@ class TelegramBotService:
 
         is_grp = self._is_group_chat(update)
         webapp_url = (config.telegram_webapp_url or "").strip()
+
+        if not config.miniapp_enabled:
+            buttons = []
+            if webapp_url:
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="🌐 WEB-PANEL ÖFFNEN",
+                        url=webapp_url,
+                    )
+                ])
+            text = (
+                bf.eyebrow("📱 MINI-APP")
+                + "\n<b>MINI-APP EINGEFROREN</b>\n\n"
+                "Die Telegram Mini-App wird nicht mehr weiterentwickelt.\n"
+                "Nutze das responsive TT-INTELLIGENCE Web-Panel im Browser.\n\n"
+                + bf.kv_table(
+                    [
+                        ("STATUS", "LEGACY / EINGEFROREN"),
+                        ("WEB-PANEL", "PUBLIC · STATS · RADAR"),
+                        ("MOBILE", "RESPONSIVE WEB-APP"),
+                    ]
+                )
+                + "\n"
+                + bf.rule()
+            )
+            if webapp_url:
+                text += f"\n<code>{html.escape(webapp_url)}</code>"
+            text += "\n" + bf.footer()
+            await self._send_with_optional_banner(
+                bot=context.bot,
+                chat_id=update.effective_chat.id,
+                html_text=text,
+                banner_path=WELCOME_BANNER_PATH,
+                reply_to_message_id=update.effective_message.message_id if is_grp else None,
+                reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+            )
+            return
 
         buttons = []
         if webapp_url:

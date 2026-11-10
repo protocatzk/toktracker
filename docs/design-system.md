@@ -148,8 +148,8 @@ existiert – den Logout-Link.
 ### Eigene Header vermeiden
 
 Neue Seiten bringen **keinen eigenen Header-Markup** mit. Ausnahmen sind nur
-bewusst eigenständige Oberflächen wie Landingpage, Mini-App oder eine
-Login-/Locked-Seite.
+bewusst eigenständige Oberflächen wie Landingpage oder eine Login-/Locked-Seite.
+Die Telegram Mini-App ist eingefroren (Legacy) und wird nicht weiterentwickelt.
 
 ---
 
@@ -256,7 +256,7 @@ Buttons sind eckig, Mono, uppercase. Keine Icons ohne Textlabel.
   Umschaltung, Label und `localStorage`.
 - Keine `prefers-color-scheme`-Sonderlogik in Seiten-CSS.
 - Jede neue Seite muss in beiden Modi geprüft werden.
-- Die Mini-App bleibt bewusst dark-only.
+- Die Mini-App ist eingefroren (Legacy) und bleibt bewusst dark-only.
 
 ---
 
