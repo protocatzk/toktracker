@@ -115,6 +115,18 @@ class AppConfig:
     tiktok_web_proxy: Optional[str] = os.getenv("TIKTOK_WEB_PROXY", "").strip() or None
     tiktok_ws_proxy: Optional[str] = os.getenv("TIKTOK_WS_PROXY", "").strip() or None
 
+    # Härtung des TikTokLive-Workers: Stall-Erkennung, Reconnect-Dämpfung & Sign-Cooldown
+    tiktok_stall_timeout: float = float(os.getenv("TIKTOK_STALL_TIMEOUT_SECONDS", "120"))
+    tiktok_reconnect_base: float = float(os.getenv("TIKTOK_RECONNECT_BASE_SECONDS", "5"))
+    tiktok_reconnect_max: float = float(os.getenv("TIKTOK_RECONNECT_MAX_SECONDS", "120"))
+    tiktok_reconnect_jitter: float = float(os.getenv("TIKTOK_RECONNECT_JITTER", "0.25"))
+    tiktok_stable_reset: float = float(os.getenv("TIKTOK_STABLE_RESET_SECONDS", "60"))
+    tiktok_ws_ping_interval: float = float(os.getenv("TIKTOK_WS_PING_INTERVAL", "20"))
+    tiktok_ws_ping_timeout: float = float(os.getenv("TIKTOK_WS_PING_TIMEOUT", "20"))
+    tiktok_sign_cooldown: int = int(os.getenv("TIKTOK_SIGN_COOLDOWN_SECONDS", "60"))
+    tiktok_gift_cache_ttl: int = int(os.getenv("TIKTOK_GIFT_CACHE_TTL_SECONDS", "21600"))
+    tiktok_session_grace: int = int(os.getenv("TIKTOK_SESSION_GRACE_SECONDS", "90"))
+
     # Telegram Bot Konfiguration & Zugriffskontrolle
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -210,6 +222,11 @@ class AppConfig:
         return bool(self.tiktok_sign_api_key)
 
     @property
+    def effective_ws_proxy(self) -> Optional[str]:
+        """WS-Proxy mit Fallback auf den HTTP-Proxy (falls nur einer konfiguriert ist)."""
+        return self.tiktok_ws_proxy or self.tiktok_web_proxy
+
+    @property
     def has_api_key(self) -> bool:
         return bool(self.api_key)
 
@@ -261,6 +278,16 @@ class AppConfig:
             "session_cookie_secure": self.session_cookie_secure,
             "trust_proxy_headers": self.trust_proxy_headers,
             "has_web_proxy": bool(self.tiktok_web_proxy),
+            "has_ws_proxy": bool(self.effective_ws_proxy),
+            "ws_proxy_source": (
+                "TIKTOK_WS_PROXY"
+                if self.tiktok_ws_proxy
+                else ("TIKTOK_WEB_PROXY" if self.tiktok_web_proxy else "")
+            ),
+            "tiktok_stall_timeout": self.tiktok_stall_timeout,
+            "tiktok_reconnect_base": self.tiktok_reconnect_base,
+            "tiktok_reconnect_max": self.tiktok_reconnect_max,
+            "tiktok_session_grace": self.tiktok_session_grace,
             "has_telegram_config": bool(self.telegram_bot_token),
             "telegram_access_mode": self.telegram_access_mode,
             "telegram_webapp_url": self.telegram_webapp_url,

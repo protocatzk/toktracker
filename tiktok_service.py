@@ -3,12 +3,15 @@ import hashlib
 import inspect
 import json
 import logging
+import random
 import re
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
+from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import httpx
@@ -29,7 +32,13 @@ def new_event_loop() -> asyncio.AbstractEventLoop:
 
 try:
     from TikTokLive import TikTokLiveClient
-    from TikTokLive.client.errors import AgeRestrictedError, UserOfflineError
+    from TikTokLive.client.errors import (
+        AgeRestrictedError,
+        SignAPIError,
+        SignatureRateLimitError,
+        UserNotFoundError,
+        UserOfflineError,
+    )
     from TikTokLive.client.web.web_settings import WebDefaults
     from TikTokLive.events import (
         CommentEvent,
@@ -40,6 +49,7 @@ try:
         LinkMicBattleEvent,
         LiveEndEvent,
         RoomUserSeqEvent,
+        WebsocketResponseEvent,
     )
     TIKTOKLIVE_AVAILABLE = True
 
@@ -83,10 +93,14 @@ except ImportError:
     TIKTOKLIVE_AVAILABLE = False
     AgeRestrictedError = Exception  # type: ignore
     UserOfflineError = Exception  # type: ignore
+    UserNotFoundError = Exception  # type: ignore
+    SignAPIError = Exception  # type: ignore
+    SignatureRateLimitError = Exception  # type: ignore
     WebDefaults = None  # type: ignore
     LinkMicBattleEvent = None  # type: ignore
     LinkMicArmiesEvent = None  # type: ignore
     CommentEvent = None  # type: ignore
+    WebsocketResponseEvent = None  # type: ignore
 
 
 def is_streamer_offline_error(exc: Exception) -> bool:
@@ -98,7 +112,7 @@ def is_streamer_offline_error(exc: Exception) -> bool:
     - FailedParseRoomIdError: SIGI_STATE HTML-Tag fehlt, weil kein aktiver Stream existiert.
     - UserNotFoundError: Streamer existiert nicht oder hat keinen aktiven Live-Stream.
     """
-    if isinstance(exc, UserOfflineError):
+    if TIKTOKLIVE_AVAILABLE and isinstance(exc, (UserOfflineError, UserNotFoundError)):
         return True
     err_str = str(exc)
     err_cls = type(exc).__name__
@@ -107,6 +121,100 @@ def is_streamer_offline_error(exc: Exception) -> bool:
     if "JSONDecodeError" in err_cls or ("Expecting value" in err_str and "column 1" in err_str):
         return True
     return err_cls in ("FailedParseRoomIdError", "UserNotFoundError")
+
+
+class DisconnectReason(str, Enum):
+    """Klassifizierte Ursache eines Verbindungsabbruchs."""
+
+    OFFLINE = "offline"
+    STREAM_END = "stream_end"
+    STALL = "stall"
+    RATE_LIMIT = "rate_limit"
+    AUTH = "auth"
+    SIGN_ERROR = "sign_error"
+    NETWORK = "network"
+    STOPPED = "stopped"
+    UNKNOWN = "unknown"
+
+
+def classify_disconnect(exc: BaseException) -> DisconnectReason:
+    """Ordnet eine Exception einer stabilen Reconnect-Kategorie zu."""
+    if is_streamer_offline_error(exc):  # type: ignore[arg-type]
+        return DisconnectReason.OFFLINE
+
+    name = type(exc).__name__
+    if (
+        name == "SignatureRateLimitError"
+        or (TIKTOKLIVE_AVAILABLE and isinstance(exc, SignatureRateLimitError))
+        or ("ratelimit" in name.lower() and (hasattr(exc, "reset_time") or hasattr(exc, "retry_after")))
+    ):
+        return DisconnectReason.RATE_LIMIT
+
+    if name in (
+        "SignAPIError",
+        "UnexpectedSignatureError",
+        "SignatureMissingTokensError",
+        "PremiumEndpointError",
+        "AuthenticatedWebSocketConnectionError",
+    ) or (hasattr(exc, "reason") and hasattr(exc, "response")):
+        reason_text = str(getattr(exc, "reason", "")).upper()
+        status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)
+        if status_code in (401, 403) or "AUTH" in reason_text:
+            return DisconnectReason.AUTH
+        return DisconnectReason.SIGN_ERROR
+
+    if hasattr(exc, "reason") and "AUTH" in str(getattr(exc, "reason", "")).upper():
+        return DisconnectReason.AUTH
+
+    if name in (
+        "ConnectionClosed",
+        "ConnectionClosedError",
+        "ConnectionClosedOK",
+        "WebSocketException",
+        "InvalidStatusCode",
+        "InvalidStatus",
+    ):
+        return DisconnectReason.NETWORK
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, OSError, httpx.HTTPError)):
+        return DisconnectReason.NETWORK
+
+    return DisconnectReason.UNKNOWN
+
+
+def sign_cooldown_seconds(exc: BaseException, default: int = 60) -> int:
+    """Ermittelt aus einer RateLimit-Exception eine sinnvolle globale Pause."""
+    now = int(time.time())
+    candidates: List[int] = [max(15, int(default))]
+    retry_after = int(getattr(exc, "retry_after", 0) or 0)
+    reset_time = int(getattr(exc, "reset_time", 0) or 0)
+    if retry_after > 0:
+        candidates.append(retry_after)
+    if reset_time > now:
+        candidates.append(reset_time - now)
+    return max(15, min(3600, max(candidates)))
+
+
+@dataclass(frozen=True)
+class ReconnectPolicy:
+    """Dämpft Reconnect-Versuche mit exponentiellem Backoff und Jitter."""
+
+    base_seconds: float = 5.0
+    max_seconds: float = 120.0
+    factor: float = 1.8
+    jitter: float = 0.25
+    stable_reset_seconds: float = 60.0
+
+    def delay(self, failures: int) -> float:
+        attempt = max(1, int(failures))
+        raw = min(self.max_seconds, self.base_seconds * (self.factor ** (attempt - 1)))
+        if self.jitter <= 0:
+            return max(1.0, raw)
+        low = max(0.0, 1.0 - self.jitter)
+        high = 1.0 + self.jitter
+        return max(1.0, raw * random.uniform(low, high))
+
+    def is_stable(self, connected_seconds: float) -> bool:
+        return connected_seconds >= self.stable_reset_seconds
 
 
 from config import config  # noqa: E402
@@ -128,7 +236,7 @@ from database import (  # noqa: E402
     update_streamer_runtime_state,
 )
 from shared.bus import get_bus  # noqa: E402
-from shared.contracts import CHANNEL_LIVE_STATUS, EVENT_LIVE_STATUS  # noqa: E402
+from shared.contracts import CHANNEL_LIVE_STATUS, EVENT_LIVE_STATUS, KEY_SIGN_RATE_LIMIT  # noqa: E402
 
 logger = logging.getLogger("tiktok_service")
 if not logger.handlers:
@@ -327,6 +435,16 @@ class WorkerDiagnostics:
     peak_viewers: int = 0
     room_fan_tickets: int = 0
     reconnect_attempts: int = 0
+    stall_reconnects: int = 0
+    sign_rate_limited: int = 0
+    transport: str = "tiktoklive"
+    connected_for_seconds: int = 0
+    last_frame_at: Optional[str] = None
+    last_frame_age_seconds: int = -1
+    last_disconnect_reason: str = ""
+    close_code: int = 0
+    backoff_seconds: float = 0.0
+    next_retry_at: Optional[str] = None
     gifts_received_session: int = 0
     coins_received_session: int = 0
 
@@ -366,6 +484,64 @@ def refresh_donor_tier_cache() -> None:
         logger.debug("Fehler beim Aktualisieren des Spender-Tier-Caches: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# Prozessweiter Gift-Katalog-Cache (vermeidet einen Gift-Fetch pro Reconnect)
+# ---------------------------------------------------------------------------
+_GLOBAL_GIFT_CATALOG: Dict[int, Tuple[str, int, str]] = {}
+_GLOBAL_GIFT_CATALOG_LOCK = threading.Lock()
+_GLOBAL_GIFT_CATALOG_LOADED_AT: float = 0.0
+
+
+def _gift_catalog_is_fresh() -> bool:
+    with _GLOBAL_GIFT_CATALOG_LOCK:
+        if not _GLOBAL_GIFT_CATALOG or _GLOBAL_GIFT_CATALOG_LOADED_AT <= 0:
+            return False
+        return (time.monotonic() - _GLOBAL_GIFT_CATALOG_LOADED_AT) < config.tiktok_gift_cache_ttl
+
+
+def _global_gift_catalog_snapshot() -> Dict[int, Tuple[str, int, str]]:
+    with _GLOBAL_GIFT_CATALOG_LOCK:
+        return dict(_GLOBAL_GIFT_CATALOG)
+
+
+def _update_global_gift_catalog(items: Dict[int, Tuple[str, int, str]]) -> None:
+    if not items:
+        return
+    global _GLOBAL_GIFT_CATALOG_LOADED_AT
+    with _GLOBAL_GIFT_CATALOG_LOCK:
+        _GLOBAL_GIFT_CATALOG.update(items)
+        _GLOBAL_GIFT_CATALOG_LOADED_AT = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# Globaler Sign-API-Cooldown (Redis, damit nicht alle Worker gleichzeitig retryen)
+# ---------------------------------------------------------------------------
+def _sign_cooldown_remaining() -> int:
+    if not config.has_redis:
+        return 0
+    try:
+        raw = get_bus().get_kv_sync(KEY_SIGN_RATE_LIMIT)
+        if not raw:
+            return 0
+        return max(0, int(raw) - int(time.time()))
+    except Exception:
+        return 0
+
+
+def _set_sign_cooldown(seconds: int) -> None:
+    if not config.has_redis:
+        return
+    seconds = max(15, min(3600, int(seconds)))
+    try:
+        get_bus().set_kv_sync(
+            KEY_SIGN_RATE_LIMIT,
+            str(int(time.time()) + seconds),
+            ttl=seconds + 5,
+        )
+    except Exception as exc:
+        logger.debug("Sign-Cooldown konnte nicht gesetzt werden: %s", exc)
+
+
 class StreamerWorker:
     STREAK_TIMEOUT_SECONDS = 12.0
 
@@ -389,7 +565,7 @@ class StreamerWorker:
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._client: Optional[Any] = None
-        self._gift_catalog_cache: Dict[int, Tuple[str, int, str]] = {}
+        self._gift_catalog_cache: Dict[int, Tuple[str, int, str]] = _global_gift_catalog_snapshot()
         self._pending_streaks: Dict[str, PendingStreak] = {}
         self._active_battle: Optional[Dict[str, Any]] = None
         self._owner_user_id: str = ""
@@ -401,6 +577,16 @@ class StreamerWorker:
         self._last_viewer_db_update = 0.0
         self._last_saved_viewers = 0
 
+        # Resilienz / Verbindungszustand
+        self._last_frame_mono: float = 0.0
+        self._connected_at_mono: float = 0.0
+        self._stall_detected: bool = False
+        self._live_ended: bool = False
+        self._offline_checks: int = 0
+        self._recent_chat_ids: "OrderedDict[str, None]" = OrderedDict()
+        self._cleanup_lock = threading.Lock()
+        self._cleanup_done = False
+
     def _log(self, level: str, message: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
         with self._lock:
@@ -410,6 +596,8 @@ class StreamerWorker:
             )
         if level == "ERROR":
             logger.error("[@%s] %s", self.username, message)
+        elif level == "WARNING":
+            logger.warning("[@%s] %s", self.username, message)
         else:
             logger.info("[@%s] %s", self.username, message)
 
@@ -417,7 +605,16 @@ class StreamerWorker:
         return bool(self._thread and self._thread.is_alive() and not self._stop_event.is_set())
 
     def get_snapshot(self) -> Dict[str, Any]:
+        now_mono = time.monotonic()
         with self._lock:
+            frame_age = -1
+            frame_at: Optional[str] = None
+            if self._last_frame_mono > 0:
+                frame_age = max(0, int(now_mono - self._last_frame_mono))
+                frame_at = (datetime.now() - timedelta(seconds=frame_age)).isoformat(timespec="seconds")
+            connected_for = 0
+            if self._connected_at_mono > 0 and self.diag.state == "connected":
+                connected_for = max(0, int(now_mono - self._connected_at_mono))
             return {
                 "streamer_id": self.diag.streamer_id,
                 "username": self.diag.username,
@@ -428,13 +625,23 @@ class StreamerWorker:
                 "room_id": self.diag.room_id,
                 "session_id": self.diag.session_id,
                 "connected_since": self.diag.connected_since,
+                "connected_for_seconds": connected_for,
                 "last_event_at": self.diag.last_event_at,
+                "last_frame_at": frame_at,
+                "last_frame_age_seconds": frame_age,
                 "last_message": self.diag.last_message,
                 "last_error": self.diag.last_error,
+                "last_disconnect_reason": self.diag.last_disconnect_reason,
+                "close_code": self.diag.close_code,
+                "backoff_seconds": self.diag.backoff_seconds,
+                "next_retry_at": self.diag.next_retry_at,
                 "current_viewers": self.diag.current_viewers,
                 "peak_viewers": self.diag.peak_viewers,
                 "room_fan_tickets": self.diag.room_fan_tickets,
                 "reconnect_attempts": self.diag.reconnect_attempts,
+                "stall_reconnects": self.diag.stall_reconnects,
+                "sign_rate_limited": self.diag.sign_rate_limited,
+                "transport": self.diag.transport,
                 "gifts_received_session": self.diag.gifts_received_session,
                 "coins_received_session": self.diag.coins_received_session,
                 "active_battle": dict(self._active_battle) if self._active_battle else None,
@@ -449,6 +656,11 @@ class StreamerWorker:
             if self.is_alive():
                 return
             self._preserve_db_state = False
+            self._cleanup_done = False
+            self._offline_checks = 0
+            self._stall_detected = False
+            self._live_ended = False
+            self._recent_chat_ids.clear()
             self._stop_event.clear()
             self._thread = threading.Thread(
                 target=self._thread_main,
@@ -470,6 +682,7 @@ class StreamerWorker:
             self.diag.state = "stopped"
             client = self._client
             loop = self._loop
+            thread = self._thread
 
         if client is not None and loop is not None and loop.is_running():
             try:
@@ -477,12 +690,12 @@ class StreamerWorker:
             except Exception as exc:
                 logger.debug("Disconnect-Signal Fehler für @%s: %s", self.username, exc)
 
-        self._finish_active_battle_if_any()
-        self._flush_all_pending_streaks()
-        self._flush_chat_buffer()
-        if self.diag.session_id:
-            end_stream_session(self.streamer_id, self.diag.session_id)
-            self.diag.session_id = None
+        # Dem Worker-Thread die Chance geben, selbst sauber aufzuräumen. Das
+        # verhindert Races mit laufenden Handlern (Streaks/Chat/Session).
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=15.0)
+
+        self._cleanup_runtime_state()
 
         if preserve_db_state:
             update_streamer_runtime_state(
@@ -501,6 +714,28 @@ class StreamerWorker:
             )
             self._log("INFO", "Worker manuell gestoppt (Auto-Start deaktiviert).")
 
+    def _end_active_session(self) -> None:
+        """Beendet die aktive Stream-Session, falls vorhanden (idempotent)."""
+        with self._lock:
+            session_id = self.diag.session_id
+            self.diag.session_id = None
+        if session_id:
+            try:
+                end_stream_session(self.streamer_id, session_id)
+            except Exception as exc:
+                logger.debug("[@%s] Session-Ende fehlgeschlagen: %s", self.username, exc)
+
+    def _cleanup_runtime_state(self) -> None:
+        """Finales Aufräumen – genau einmal pro Worker-Laufzeit."""
+        with self._cleanup_lock:
+            if self._cleanup_done:
+                return
+            self._cleanup_done = True
+        self._finish_active_battle_if_any()
+        self._flush_all_pending_streaks()
+        self._flush_chat_buffer()
+        self._end_active_session()
+
     def _thread_main(self) -> None:
         loop = new_event_loop()
         asyncio.set_event_loop(loop)
@@ -512,12 +747,7 @@ class StreamerWorker:
         except Exception as exc:
             self._log("ERROR", f"Unerwarteter Worker-Abbruch: {exc}")
         finally:
-            self._finish_active_battle_if_any()
-            self._flush_all_pending_streaks()
-            self._flush_chat_buffer()
-            if self.diag.session_id:
-                end_stream_session(self.streamer_id, self.diag.session_id)
-                self.diag.session_id = None
+            self._cleanup_runtime_state()
 
             if self._preserve_db_state:
                 update_streamer_runtime_state(
@@ -550,10 +780,29 @@ class StreamerWorker:
         TikTok-Nachrichten (wie WebcastLinkLayerMessage / HashtagNamespace).
         """
         web_proxy = httpx.Proxy(config.tiktok_web_proxy) if config.tiktok_web_proxy else None
+        ws_proxy_url = config.effective_ws_proxy
+        ws_proxy = httpx.Proxy(ws_proxy_url) if ws_proxy_url else None
+        ws_kwargs: Dict[str, Any] = {
+            "close_timeout": 10,
+        }
+        if config.tiktok_ws_ping_interval > 0:
+            ws_kwargs["ping_interval"] = config.tiktok_ws_ping_interval
+        if config.tiktok_ws_ping_timeout > 0:
+            ws_kwargs["ping_timeout"] = config.tiktok_ws_ping_timeout
+
         client = TikTokLiveClient(
             unique_id=f"@{self.username}",
             web_proxy=web_proxy,
+            ws_proxy=ws_proxy,
+            ws_kwargs=ws_kwargs,
         )
+        with self._lock:
+            self.diag.transport = "tiktoklive"
+        if ws_proxy_url:
+            self._log(
+                "INFO",
+                f"WebSocket-Proxy aktiv ({'TIKTOK_WS_PROXY' if config.tiktok_ws_proxy else 'Fallback TIKTOK_WEB_PROXY'}).",
+            )
         # Verhindert laute Stacktraces bei kaputten/unbekannten TikTok-Protobuf-Payloads
         client.ignore_broken_payload = True
         if hasattr(client, "parse_error_ignorelist") and isinstance(client.parse_error_ignorelist, list):
@@ -580,12 +829,13 @@ class StreamerWorker:
           fällt der Worker automatisch auf `fetch_room_info=False` zurück.
         """
         use_room_info = bool(config.has_tiktok_session)
+        fetch_gifts = not _gift_catalog_is_fresh()
         try:
             return await client.start(
                 process_connect_events=True,
                 compress_ws_events=True,
                 fetch_room_info=use_room_info,
-                fetch_gift_info=True,
+                fetch_gift_info=fetch_gifts,
                 fetch_live_check=True,
             )
         except AgeRestrictedError:
@@ -604,11 +854,23 @@ class StreamerWorker:
             )
 
     async def _supervisor_loop(self) -> None:
-        backoff = 5.0
+        policy = ReconnectPolicy(
+            base_seconds=config.tiktok_reconnect_base,
+            max_seconds=config.tiktok_reconnect_max,
+            jitter=config.tiktok_reconnect_jitter,
+            stable_reset_seconds=config.tiktok_stable_reset,
+        )
+        failures = 0
 
         while not self._stop_event.is_set():
+            await self._wait_for_sign_cooldown()
+            if self._stop_event.is_set():
+                break
+
             with self._lock:
                 self.diag.state = "connecting"
+                self.diag.backoff_seconds = 0.0
+                self.diag.next_retry_at = None
 
             auth_hint = " (mit Session-Cookie)" if config.has_tiktok_session else " (anonym / 18+ Bypass aktiv)"
             self._log("INFO", f"Prüfe Live-Status & verbinde mit TikTok Webcast{auth_hint}...")
@@ -622,59 +884,172 @@ class StreamerWorker:
             client = self._create_configured_client()
             with self._lock:
                 self._client = client
+                self._stall_detected = False
+                self._live_ended = False
+                self._last_frame_mono = 0.0
+                self._connected_at_mono = 0.0
 
             self._register_handlers(client)
 
+            ws_task: Optional[asyncio.Task] = None
+            streak_watchdog: Optional[asyncio.Task] = None
+            stall_watchdog: Optional[asyncio.Task] = None
+            connected_at = 0.0
+            connection_failed = False
+            offline_poll = False
+            next_delay: Optional[float] = None
+
             try:
                 ws_task = await self._start_client_with_age_bypass(client)
-                backoff = 5.0
-                self.diag.reconnect_attempts = 0
+                with self._lock:
+                    if self._connected_at_mono <= 0:
+                        self._connected_at_mono = time.monotonic()
+                    if self._last_frame_mono <= 0:
+                        self._last_frame_mono = time.monotonic()
+                    if self.diag.state != "connected":
+                        # Falls der Connect-Event-Handler (noch) nicht lief.
+                        self.diag.state = "connected"
+                    connected_at = self._connected_at_mono
+                    self._offline_checks = 0
+                    self.diag.reconnect_attempts = failures
+                    self.diag.last_disconnect_reason = ""
 
                 streak_watchdog = asyncio.create_task(self._streak_watchdog_loop())
+                stall_watchdog = asyncio.create_task(self._connection_watchdog(client, ws_task))
                 try:
                     await ws_task
+                except asyncio.CancelledError:
+                    if not self._stop_event.is_set() and not self._stall_detected:
+                        raise
                 finally:
-                    streak_watchdog.cancel()
+                    for task in (stall_watchdog, streak_watchdog):
+                        if task is not None:
+                            task.cancel()
+                    for task in (stall_watchdog, streak_watchdog):
+                        if task is not None:
+                            with suppress(asyncio.CancelledError):
+                                await task
                     self._flush_all_pending_streaks()
+                    self._flush_chat_buffer()
 
-            except Exception as exc:
-                if is_streamer_offline_error(exc):
+                if self._stop_event.is_set():
+                    break
+
+                if self._stall_detected:
+                    connection_failed = True
+                    failures += 1
+                    with self._lock:
+                        self.diag.last_disconnect_reason = DisconnectReason.STALL.value
+                        self.diag.reconnect_attempts = failures
+                    self._log("WARNING", "Stalled WebSocket erkannt – Verbindung wird neu aufgebaut.")
+                    next_delay = policy.delay(failures)
+                elif self._live_ended:
+                    self._end_active_session()
+                    update_streamer_runtime_state(
+                        self.username, is_live=False, current_viewers=0
+                    )
                     with self._lock:
                         self.diag.state = "polling_offline"
-                        self.diag.current_viewers = 0
-                        self.diag.last_error = ""
-                    if self.diag.session_id:
-                        end_stream_session(self.streamer_id, self.diag.session_id)
-                        self.diag.session_id = None
-
-                    update_streamer_runtime_state(
-                        self.username,
-                        is_live=False,
-                        is_tracking=self.diag.auto_reconnect,
-                        current_viewers=0,
-                        last_error="",
-                    )
-
-                    if not self.diag.auto_reconnect or self._stop_event.is_set():
-                        self._log("INFO", "Streamer ist offline (Einmal-Check beendet).")
+                        self.diag.last_disconnect_reason = DisconnectReason.STREAM_END.value
+                        self.diag.reconnect_attempts = 0
+                    if not self.diag.auto_reconnect:
                         break
+                    failures = 0
+                    offline_poll = True
+                    next_delay = self._offline_poll_seconds()
+                else:
+                    connection_failed = True
+                    failures += 1
+                    with self._lock:
+                        self.diag.last_disconnect_reason = DisconnectReason.NETWORK.value
+                        self.diag.reconnect_attempts = failures
+                    self._log("WARNING", "WebSocket unerwartet beendet – Reconnect wird geplant.")
+                    next_delay = policy.delay(failures)
 
-                    poll_sec = max(15, int(get_settings().get("poll_interval_seconds", 45)))
-                    self._log(
-                        "INFO",
-                        f"Streamer aktuell offline – nächster Live-Check in {poll_sec}s.",
-                    )
-                    await self._interruptible_sleep(float(poll_sec))
-                    continue
-
+            except Exception as exc:
+                connection_failed = True
+                reason = classify_disconnect(exc)
                 err_name = type(exc).__name__
                 err_text = f"{err_name}: {exc}"
+                status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)
+                close_code = int(getattr(exc, "code", 0) or status_code or 0)
                 with self._lock:
                     self.diag.last_error = err_text
-                    self.diag.reconnect_attempts += 1
-                    self.diag.state = "backoff" if self.diag.auto_reconnect else "error"
+                    self.diag.last_disconnect_reason = reason.value
+                    if close_code:
+                        self.diag.close_code = close_code
 
-                self._log("ERROR", f"Webcast-Fehler ({err_name}): {exc}")
+                if reason == DisconnectReason.OFFLINE:
+                    with self._lock:
+                        had_session = bool(self.diag.session_id)
+                        recently_connected = (
+                            self._connected_at_mono > 0
+                            and (time.monotonic() - self._connected_at_mono) < config.tiktok_session_grace
+                        )
+                        self._offline_checks += 1
+                        offline_checks = self._offline_checks
+                    if had_session and recently_connected and offline_checks <= 3:
+                        with self._lock:
+                            self.diag.state = "reconnecting"
+                            self.diag.last_disconnect_reason = "offline_grace"
+                            self.diag.current_viewers = 0
+                            self.diag.last_error = ""
+                        self._log(
+                            "INFO",
+                            "Live-Check meldet kurzzeitig offline – Session bleibt für Grace-Period aktiv.",
+                        )
+                        next_delay = 10.0
+                    else:
+                        self._end_active_session()
+                        with self._lock:
+                            self.diag.state = "polling_offline"
+                            self.diag.current_viewers = 0
+                            self.diag.last_error = ""
+                            self.diag.reconnect_attempts = 0
+                        update_streamer_runtime_state(
+                            self.username,
+                            is_live=False,
+                            is_tracking=self.diag.auto_reconnect,
+                            current_viewers=0,
+                            last_error="",
+                        )
+                        if not self.diag.auto_reconnect or self._stop_event.is_set():
+                            self._log("INFO", "Streamer ist offline (Einmal-Check beendet).")
+                            break
+                        failures = 0
+                        offline_poll = True
+                        next_delay = self._offline_poll_seconds()
+
+                elif reason == DisconnectReason.RATE_LIMIT:
+                    cooldown = sign_cooldown_seconds(exc, config.tiktok_sign_cooldown)
+                    _set_sign_cooldown(cooldown)
+                    failures += 1
+                    with self._lock:
+                        self.diag.sign_rate_limited += 1
+                        self.diag.reconnect_attempts = failures
+                        self.diag.state = "backoff"
+                    self._log("ERROR", f"Sign-API-Rate-Limit – globaler Cooldown {cooldown}s.")
+                    next_delay = max(float(cooldown), policy.delay(failures))
+
+                elif reason == DisconnectReason.AUTH:
+                    failures += 1
+                    with self._lock:
+                        self.diag.state = "error"
+                        self.diag.reconnect_attempts = failures
+                    self._log(
+                        "ERROR",
+                        f"Sign-API-Authentifizierung fehlgeschlagen ({err_text[:160]}).",
+                    )
+                    next_delay = max(120.0, policy.delay(failures))
+
+                else:
+                    failures += 1
+                    with self._lock:
+                        self.diag.state = "backoff" if self.diag.auto_reconnect else "error"
+                        self.diag.reconnect_attempts = failures
+                    self._log("ERROR", f"Webcast-Fehler ({reason.value}/{err_name}): {exc}")
+                    next_delay = policy.delay(failures)
+
                 update_streamer_runtime_state(
                     self.username,
                     is_live=False,
@@ -685,30 +1060,104 @@ class StreamerWorker:
                 if not self.diag.auto_reconnect or self._stop_event.is_set():
                     break
 
-                wait_s = min(120.0, backoff)
-                self._log("INFO", f"Reconnect-Versuch in {int(wait_s)}s...")
-                await self._interruptible_sleep(wait_s)
-                backoff = min(120.0, backoff * 1.8)
-                continue
-
             finally:
-                try:
-                    if client is not None:
-                        await client.disconnect(close_client=False)
-                        if hasattr(client, "_web") and hasattr(client._web, "close"):
-                            res = client._web.close()
-                            if inspect.isawaitable(res):
-                                await res
-                except Exception:
-                    pass
+                await self._close_client(client)
                 with self._lock:
                     self._client = None
+                    self._last_frame_mono = 0.0
+                if (
+                    not connection_failed
+                    and connected_at > 0
+                    and policy.is_stable(time.monotonic() - connected_at)
+                ):
+                    failures = 0
+                    with self._lock:
+                        self.diag.reconnect_attempts = 0
+                        self.diag.last_error = ""
 
-            if not self.diag.auto_reconnect or self._stop_event.is_set():
+            if self._stop_event.is_set() or not self.diag.auto_reconnect:
                 break
 
-            poll_sec = max(15, int(get_settings().get("poll_interval_seconds", 45)))
-            await self._interruptible_sleep(float(poll_sec))
+            if next_delay is None:
+                next_delay = self._offline_poll_seconds() if offline_poll else policy.delay(max(1, failures))
+            self._schedule_retry(next_delay, state="polling_offline" if offline_poll else "backoff")
+            self._log(
+                "INFO",
+                f"Nächster Verbindungsversuch in {int(next_delay)}s "
+                f"(Fehlversuche: {failures}, Grund: {self.diag.last_disconnect_reason or 'unbekannt'}).",
+            )
+            await self._interruptible_sleep(next_delay)
+
+    async def _wait_for_sign_cooldown(self) -> None:
+        logged = False
+        while not self._stop_event.is_set():
+            remaining = await asyncio.to_thread(_sign_cooldown_remaining)
+            if remaining <= 0:
+                return
+            if not logged:
+                self._log("INFO", f"Sign-API-Cooldown aktiv – warte {remaining}s...")
+                logged = True
+            await self._interruptible_sleep(min(float(remaining), 15.0))
+
+    def _offline_poll_seconds(self) -> float:
+        base = max(15.0, float(get_settings().get("poll_interval_seconds", 45)))
+        return base * random.uniform(0.9, 1.1)
+
+    def _schedule_retry(self, delay: float, state: str = "backoff") -> None:
+        delay = max(0.0, float(delay))
+        with self._lock:
+            self.diag.state = state
+            self.diag.backoff_seconds = round(delay, 1)
+            self.diag.next_retry_at = (
+                datetime.now() + timedelta(seconds=delay)
+            ).isoformat(timespec="seconds")
+
+    async def _connection_watchdog(self, client: Any, ws_task: asyncio.Task) -> None:
+        """Erzwingt einen Reconnect, wenn trotz offener Verbindung keine Frames mehr kommen."""
+        timeout = max(30.0, float(config.tiktok_stall_timeout))
+        while not self._stop_event.is_set():
+            await asyncio.sleep(5.0)
+            with self._lock:
+                state = self.diag.state
+                last_frame = self._last_frame_mono
+            if state != "connected" or last_frame <= 0:
+                continue
+            age = time.monotonic() - last_frame
+            if age < timeout:
+                continue
+            with self._lock:
+                self._stall_detected = True
+                self.diag.stall_reconnects += 1
+                self.diag.last_disconnect_reason = DisconnectReason.STALL.value
+                self.diag.last_error = f"Keine WebSocket-Frames seit {int(age)}s"
+            self._log("ERROR", f"Stall erkannt: seit {int(age)}s keine Frames – erzwinge Reconnect.")
+            await self._force_disconnect(client, ws_task)
+            return
+
+    async def _force_disconnect(self, client: Any, ws_task: Optional[asyncio.Task] = None) -> None:
+        try:
+            await asyncio.wait_for(client.disconnect(close_client=False), timeout=10.0)
+        except Exception:
+            pass
+        if ws_task is not None and not ws_task.done():
+            ws_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await ws_task
+
+    async def _close_client(self, client: Any) -> None:
+        try:
+            if client is not None:
+                await asyncio.wait_for(client.disconnect(close_client=False), timeout=8.0)
+        except Exception:
+            pass
+        try:
+            web = getattr(client, "_web", None) if client is not None else None
+            if web is not None and hasattr(web, "close"):
+                res = web.close()
+                if inspect.isawaitable(res):
+                    await res
+        except Exception:
+            pass
 
     async def _interruptible_sleep(self, seconds: float) -> None:
         end_time = time.monotonic() + seconds
@@ -758,14 +1207,27 @@ class StreamerWorker:
         except Exception as exc:
             self._log("ERROR", f"Live-Status-Event konnte nicht veröffentlicht werden: {exc}")
 
+    def _mark_frame(self) -> None:
+        """Aktualisiert den Frame-Heartbeat für die Stall-Erkennung."""
+        with self._lock:
+            self._last_frame_mono = time.monotonic()
+
     def _register_handlers(self, client: Any) -> None:
+        if TIKTOKLIVE_AVAILABLE and WebsocketResponseEvent is not None:
+            @client.on(WebsocketResponseEvent)
+            async def on_websocket_response(event: WebsocketResponseEvent) -> None:
+                self._mark_frame()
+
         @client.on(ConnectEvent)
         async def on_connect(event: ConnectEvent) -> None:
+            self._mark_frame()
             room_id = str(getattr(client, "room_id", "") or "")
             room_info = getattr(client, "room_info", None) or {}
             gift_info = getattr(client, "gift_info", None)
 
             self._cache_gift_catalog(gift_info)
+            if not self._gift_catalog_cache:
+                self._gift_catalog_cache.update(_global_gift_catalog_snapshot())
 
             title = ""
             display_name = None
@@ -799,10 +1261,20 @@ class StreamerWorker:
                 self.diag.room_id = room_id
                 self.diag.session_id = session_id
                 self.diag.connected_since = now_iso
+                self.diag.connected_for_seconds = 0
                 self.diag.last_event_at = now_iso
                 self.diag.last_error = ""
-                self.diag.gifts_received_session = 0
-                self.diag.coins_received_session = 0
+                self.diag.last_disconnect_reason = ""
+                self.diag.close_code = 0
+                self.diag.backoff_seconds = 0.0
+                self.diag.next_retry_at = None
+                self._connected_at_mono = time.monotonic()
+                self._offline_checks = 0
+                self._stall_detected = False
+                self._live_ended = False
+                if is_new_session:
+                    self.diag.gifts_received_session = 0
+                    self.diag.coins_received_session = 0
 
             update_streamer_runtime_state(
                 self.username,
@@ -827,6 +1299,7 @@ class StreamerWorker:
 
         @client.on(RoomUserSeqEvent)
         async def on_room_user_seq(event: RoomUserSeqEvent) -> None:
+            self._mark_frame()
             viewers = int(getattr(event, "total", 0) or 0)
             now_iso = datetime.now().isoformat(timespec="seconds")
             with self._lock:
@@ -849,15 +1322,16 @@ class StreamerWorker:
 
         @client.on(LiveEndEvent)
         async def on_live_end(event: LiveEndEvent) -> None:
+            self._mark_frame()
+            with self._lock:
+                self._live_ended = True
             self._finish_active_battle_if_any()
             self._flush_all_pending_streaks()
             self._flush_chat_buffer()
+            self._end_active_session()
             with self._lock:
-                sess_id = self.diag.session_id
-                self.diag.session_id = None
                 self.diag.current_viewers = 0
-            if sess_id:
-                end_stream_session(self.streamer_id, sess_id)
+                self.diag.last_disconnect_reason = DisconnectReason.STREAM_END.value
             update_streamer_runtime_state(
                 self.username, is_live=False, current_viewers=0
             )
@@ -870,6 +1344,8 @@ class StreamerWorker:
             self._flush_chat_buffer()
             with self._lock:
                 self.diag.current_viewers = 0
+                if not self.diag.last_disconnect_reason:
+                    self.diag.last_disconnect_reason = "disconnect_event"
             update_streamer_runtime_state(
                 self.username, is_live=False, current_viewers=0
             )
@@ -877,6 +1353,7 @@ class StreamerWorker:
 
         @client.on(GiftEvent)
         async def on_gift(event: GiftEvent) -> None:
+            self._mark_frame()
             try:
                 self._process_gift_event(event)
             except Exception as exc:
@@ -885,6 +1362,7 @@ class StreamerWorker:
         if TIKTOKLIVE_AVAILABLE and CommentEvent is not None:
             @client.on(CommentEvent)
             async def on_comment(event: CommentEvent) -> None:
+                self._mark_frame()
                 try:
                     self._process_comment_event(event)
                 except Exception:
@@ -894,6 +1372,7 @@ class StreamerWorker:
         if TIKTOKLIVE_AVAILABLE and LinkMicBattleEvent is not None:
             @client.on(LinkMicBattleEvent)
             async def on_battle(event: LinkMicBattleEvent) -> None:
+                self._mark_frame()
                 try:
                     self._handle_battle_event(event)
                 except Exception as exc:
@@ -902,6 +1381,7 @@ class StreamerWorker:
         if TIKTOKLIVE_AVAILABLE and LinkMicArmiesEvent is not None:
             @client.on(LinkMicArmiesEvent)
             async def on_armies(event: LinkMicArmiesEvent) -> None:
+                self._mark_frame()
                 try:
                     self._handle_armies_event(event)
                 except Exception as exc:
@@ -1726,6 +2206,7 @@ class StreamerWorker:
         gifts = gift_info.get("gifts") or gift_info.get("data", {}).get("gifts") or []
         if not isinstance(gifts, list):
             return
+        parsed: Dict[int, Tuple[str, int, str]] = {}
         for g in gifts:
             if not isinstance(g, dict):
                 continue
@@ -1740,7 +2221,10 @@ class StreamerWorker:
                 urls = icon_obj.get("url_list") or []
                 if urls:
                     icon_url = str(urls[0])
-            self._gift_catalog_cache[gid] = (gname, diamonds, icon_url)
+            parsed[gid] = (gname, diamonds, icon_url)
+        if parsed:
+            self._gift_catalog_cache.update(parsed)
+            _update_global_gift_catalog(parsed)
 
     def _extract_gift_metadata(self, event: Any) -> Dict[str, Any]:
         gift = getattr(event, "gift", None)
@@ -2006,6 +2490,17 @@ class StreamerWorker:
         if not comment_text:
             return
 
+        # Reconnect-Replays von TikTok enthalten oft die letzten Chat-Nachrichten
+        # erneut. Eine kleine LRU sorgt dafür, dass sie nicht doppelt in der DB landen.
+        common = getattr(event, "common", None)
+        msg_id = str(getattr(common, "msg_id", "") or getattr(event, "msg_id", "") or "")
+        if msg_id:
+            if msg_id in self._recent_chat_ids:
+                return
+            self._recent_chat_ids[msg_id] = None
+            while len(self._recent_chat_ids) > 2000:
+                self._recent_chat_ids.popitem(last=False)
+
         tier = get_cached_donor_tier(username)
         is_whale = bool(tier)
 
@@ -2076,12 +2571,19 @@ class StreamerMonitorManager:
             snapshots = [w.get_snapshot() for w in self._workers.values()]
         active_count = sum(1 for s in snapshots if s["is_running"])
         connected_count = sum(1 for s in snapshots if s["state"] == "connected")
+        stalled_count = sum(
+            1
+            for s in snapshots
+            if s.get("state") == "connected"
+            and int(s.get("last_frame_age_seconds", -1) or -1) > config.tiktok_stall_timeout
+        )
         return {
             "tiktoklive_available": TIKTOKLIVE_AVAILABLE,
             "env_config": config.public_summary(),
             "workers_total": len(snapshots),
             "workers_running": active_count,
             "workers_connected": connected_count,
+            "workers_stalled": stalled_count,
             "workers": snapshots,
         }
 

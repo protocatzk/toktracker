@@ -99,6 +99,10 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Zwei Instanzen: begrenzt den Blast-Radius bei einem hängenden Worker und
+    # nutzt die bestehende Redis-Lease-Verteilung aus services/ingest/coordinator.py.
+    deploy:
+      replicas: 2
     command: ["python", "-m", "services.ingest.main"]
     env_file:
       - .env

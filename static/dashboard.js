@@ -102,8 +102,10 @@ async function loadOverview() {
         document.getElementById("badgeTgUsers").textContent = fmtNum((data.telegram_users || []).length);
 
         if (data.system) {
+            const stalledCount = Number(data.system.workers_stalled || 0);
             document.getElementById("sysWorkerInfo").textContent =
-                `${data.system.workers_running} aktiv (${data.system.workers_connected} verbunden)`;
+                `${data.system.workers_running} aktiv (${data.system.workers_connected} verbunden` +
+                `${stalledCount > 0 ? `, ${stalledCount} stalled` : ""})`;
 
             const tg = data.system.telegram_bot;
             if (tg) {
@@ -218,6 +220,26 @@ function updateAdminBannerPreview() {
     }
 }
 
+function renderWorkerHealth(diag) {
+    if (!diag) return "";
+    const parts = [];
+    const frameAge = Number(diag.last_frame_age_seconds);
+    if (Number.isFinite(frameAge) && frameAge >= 0) {
+        const stale = diag.state === "connected" && frameAge > 60;
+        parts.push(`<span class="${stale ? "err-text" : ""}">Frame ${frameAge}s</span>`);
+    }
+    const reconnects = Number(diag.reconnect_attempts || 0);
+    if (reconnects > 0) parts.push(`Reconnects ${reconnects}`);
+    const stalls = Number(diag.stall_reconnects || 0);
+    if (stalls > 0) parts.push(`Stalls ${stalls}`);
+    const rateLimited = Number(diag.sign_rate_limited || 0);
+    if (rateLimited > 0) parts.push(`Rate-Limits ${rateLimited}`);
+    if (diag.last_disconnect_reason) parts.push(String(diag.last_disconnect_reason));
+    if (diag.next_retry_at) parts.push(`Retry ${String(diag.next_retry_at).slice(11, 19)}`);
+    if (parts.length === 0) return "";
+    return `<div class="mono muted" style="margin-top:2px; font-size:11px;">${parts.join(" · ")}</div>`;
+}
+
 function renderStreamerTable() {
     const tbody = document.getElementById("streamerTableBody");
     const filterVal = (document.getElementById("inputStreamerFilter")?.value || "").trim().toLowerCase();
@@ -272,6 +294,7 @@ function renderStreamerTable() {
                             ${autoBadge}
                         </div>
                         <div class="mono muted" style="margin-top:3px;">${s.monitor_status || ""}</div>
+                        ${renderWorkerHealth(diag)}
                         ${s.last_error ? `<div class="mono err-text">${s.last_error}</div>` : ""}
                     </td>
                     <td class="num-col hide-md">

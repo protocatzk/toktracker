@@ -108,6 +108,12 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `ACCESS_GATE` | `whitelist` (Default): nur per Telegram freigeschaltete Nutzer/API-Key kommen an die App, alle anderen landen auf `/login`. `off` = öffentlicher Betrieb |
 | `LANDING_PAGE_ENABLED` | `1` (Default): `/` zeigt die öffentliche Infoseite. `0`: `/` zeigt wieder das öffentliche Live-Panel (und unterliegt dem Gate) |
 | `APP_BASE_PATH` | Optionaler URL-Prefix, z.B. `/track` für `https://domain/track`. Leer = Root-Betrieb. Setzt einen passenden Proxy mit `X-Forwarded-Prefix` voraus |
+| `TIKTOK_SIGN_API_KEY` | Euler-Stream-Sign-Key; hebt das Sign-API-Rate-Limit und aktiviert den globalen Cooldown |
+| `TIKTOK_WS_PROXY` | Optionaler Proxy nur für die TikTok-WebSocket-Verbindung. Leer = Fallback auf `TIKTOK_WEB_PROXY` |
+| `TIKTOK_STALL_TIMEOUT_SECONDS` | Zeit ohne WebSocket-Frame, nach der der Worker die Verbindung zwangsweise neu aufbaut (Default: `120`) |
+| `TIKTOK_RECONNECT_*` | Basis, Maximum und Jitter des Reconnect-Backoffs (`5`, `120`, `0.25`) |
+| `TIKTOK_SIGN_COOLDOWN_SECONDS` | Mindest-Cooldown nach einem Sign-API-429, global über Redis (Default: `60`) |
+| `TIKTOK_SESSION_GRACE_SECONDS` | Kurze Offline-Meldungen beenden die Stream-Session erst nach dieser Grace-Period (Default: `90`) |
 
 ### Betrieb unter einem Unterpfad
 
@@ -120,6 +126,39 @@ alle Routen unverändert funktionieren. Voraussetzung:
 - `APP_BASE_PATH=/track` in der App-Umgebung
 - DNS von `positronium.dev` zeigt auf den Server
 - Ports 80/443 sind für Let's Encrypt erreichbar
+
+### Ingest-Robustheit & Runbook
+
+Der Ingest-Worker erkennt drei Fehlerklassen selbstständig:
+
+1. **Stall:** `state=connected`, aber seit `TIKTOK_STALL_TIMEOUT_SECONDS` kein
+   WebSocket-Frame. Der Worker trennt die Verbindung, zählt
+   `stall_reconnects` hoch und verbindet mit Backoff neu.
+2. **Offline / Stream-Ende:** `state=polling_offline`. Kurze Offline-Meldungen
+   behalten die Session für `TIKTOK_SESSION_GRACE_SECONDS` aktiv, damit ein
+   TikTok-Aussetzer keinen neuen Stream anlegt.
+3. **Sign-API-Rate-Limit:** Der Worker setzt einen globalen Redis-Cooldown
+   (`tt:ratelimit:sign`). Alle Ingest-Instanzen warten, statt die Quote weiter
+   zu belasten.
+
+Sichtbare Diagnose pro Streamer im Dashboard und unter `/api/system`:
+
+- `Frame Xs` – Alter des letzten WebSocket-Frames
+- `Reconnects`, `Stalls`, `Rate-Limits`
+- `last_disconnect_reason`, `close_code`
+- `Retry HH:MM:SS` – nächster geplanter Verbindungsversuch
+
+**Wenn alle verbundenen Worker im Stack keine Frames mehr liefern**, meldet der
+Docker-Healthcheck den Ingest unhealthy. Docker Compose startet unhealthy
+Container nicht automatisch neu; dann `docker compose restart ingest` ausführen.
+Mit den zwei Compose-Replicas übernimmt die andere Instanz die Leases nach
+spätestens 30 Sekunden.
+
+**Wenn ein einzelner Streamer hängt:** zuerst `Frame`-Alter und
+`last_disconnect_reason` prüfen. Der Watchdog sollte innerhalb von
+`TIKTOK_STALL_TIMEOUT_SECONDS` selbst neu verbinden. Bleibt der Worker trotzdem
+stehen, den Worker über das Dashboard stoppen/starten oder den Ingest-Container
+neu starten.
 
 ---
 
