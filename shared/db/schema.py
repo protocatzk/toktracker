@@ -340,6 +340,24 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(
             conn,
             "gift_events",
+            "idx_gift_events_created_streamer_sender",
+            "created_at, streamer_id, sender_username, total_coins",
+        )
+        _ensure_index_mysql(
+            conn,
+            "gift_events",
+            "idx_gift_events_created_streamer_counts",
+            "created_at, streamer_id, repeat_count",
+        )
+        _ensure_index_mysql(
+            conn,
+            "gift_events",
+            "idx_gift_events_created_streamer_gift",
+            "created_at, streamer_id, gift_name, total_coins, repeat_count",
+        )
+        _ensure_index_mysql(
+            conn,
+            "gift_events",
             "idx_gift_events_revenue_cover",
             "streamer_id, created_at, total_coins, usd_net, eur_net, usd_gross, eur_gross, "
             "usd_net_low, usd_net_high, eur_net_low, eur_net_high",
@@ -707,6 +725,12 @@ def _init_sqlite_schema() -> None:
                 ON gift_events(streamer_id, sender_username, total_coins);
             CREATE INDEX IF NOT EXISTS idx_gift_events_created
                 ON gift_events(created_at);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_created_streamer_sender
+                ON gift_events(created_at, streamer_id, sender_username, total_coins);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_created_streamer_counts
+                ON gift_events(created_at, streamer_id, repeat_count);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_created_streamer_gift
+                ON gift_events(created_at, streamer_id, gift_name, total_coins, repeat_count);
             CREATE INDEX IF NOT EXISTS idx_gift_events_revenue_cover
                 ON gift_events(
                     streamer_id, created_at, total_coins, usd_net, eur_net,

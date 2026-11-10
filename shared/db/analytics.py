@@ -37,10 +37,12 @@ def invalidate_overview_cache() -> None:
 
 def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> Dict[str, Any]:
     now = time.monotonic()
+    # 7d/30d sind teure Aggregationen und ändern sich langsam; seltener cachen.
+    cache_ttl = 60.0 if period in ("7d", "30d") else _OVERVIEW_CACHE_TTL
     if not force_refresh:
         with _overview_cache_lock:
             cached = _overview_cache.get(period)
-            if cached and (now - cached[0]) < _OVERVIEW_CACHE_TTL:
+            if cached and (now - cached[0]) < cache_ttl:
                 return cached[1].copy()
 
     cutoff = _get_period_cutoff(period)
