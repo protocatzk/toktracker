@@ -140,6 +140,7 @@ services:
       - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
+      - INTERNAL_API_URL=http://app:5000
       - DOCKER_PROXY_URL=http://docker-socket-proxy:2375
     depends_on:
       db:

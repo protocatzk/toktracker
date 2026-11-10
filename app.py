@@ -40,6 +40,7 @@ from database import (
     get_db,
     get_donor_details,
     get_donor_radar_data,
+    get_live_streamers,
     get_network_loyalty_and_overlap,
     get_recent_whale_gifts,
     get_settings,
@@ -2449,6 +2450,32 @@ async def api_v1_streamer_single_report(
 # =====================================================================
 # 3. ADMIN BACKEND- & MANAGEMENT-ENDPOINTS (GESCHÜTZT)
 # =====================================================================
+
+@app.get(
+    "/api/live",
+    tags=["Dashboard & Data"],
+    dependencies=[Depends(require_permission(PERM_PUBLIC_VIEW))],
+)
+@app.get(
+    "/api/v1/live",
+    tags=["Telegram Bot API"],
+    dependencies=[Depends(require_permission(PERM_PUBLIC_VIEW))],
+)
+async def api_live_streamers():
+    """
+    Aktuell live befindliche Streamer.
+
+    Wird vom Telegram-Bot für ``/live`` genutzt. Der Bot fällt bei nicht
+    erreichbarer API auf die lokale Datenbank zurück.
+    """
+    init_db()
+    streamers = await asyncio.to_thread(get_live_streamers)
+    return {
+        "count": len(streamers),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "streamers": streamers,
+    }
+
 
 @app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])

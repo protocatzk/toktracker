@@ -7,6 +7,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
+import httpx
 from telegram.request import HTTPXRequest
 
 try:
@@ -48,6 +49,7 @@ from database import (
     get_db,
     get_donor_details,
     get_donor_radar_data,
+    get_live_streamers,
     get_network_loyalty_and_overlap,
     get_recent_whale_gifts,
     get_settings,
@@ -316,6 +318,7 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler(["vip", "vips"], self._cmd_vip))
             self._app.add_handler(CommandHandler(["loyalty", "switchers", "frontenwechsler"], self._cmd_loyalty))
             self._app.add_handler(CommandHandler(["streamers", "channels", "liste"], self._cmd_streamers))
+            self._app.add_handler(CommandHandler("live", self._cmd_live))
             self._app.add_handler(CommandHandler(["gifts", "geschenke", "ticker"], self._cmd_gifts))
             self._app.add_handler(CommandHandler("report", self._cmd_report))
             self._app.add_handler(CommandHandler(["streamer", "stats"], self._cmd_streamer))
@@ -340,7 +343,7 @@ class TelegramBotService:
             self._app.add_handler(
                 CallbackQueryHandler(
                     self._on_interactive_callback,
-                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|overview_streamer):"
+                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
                 )
             )
 
@@ -420,6 +423,7 @@ class TelegramBotService:
             BotCommand("vip", "⭐ VIP-Watchlist anzeigen oder Spender markieren"),
             BotCommand("loyalty", "🔀 Frontenwechsler & Streamer-Überschneidungen"),
             BotCommand("streamers", "📺 Alle Kanäle mit Live-Status & Zuschauern"),
+            BotCommand("live", "🟢 Aktuell live Streamer anzeigen"),
             BotCommand("gifts", "🎁 Live Gift-Ticker der letzten Geschenke"),
             BotCommand("streamer", "🔍 Einzelabfrage für einen Streamer (<username>)"),
             BotCommand("report", "📋 24h-Gesamtbericht aller überwachten Streamer"),
@@ -1232,6 +1236,7 @@ class TelegramBotService:
 
         public_lines = [
             "▪ 📺 <code>/streamers</code> — Kanäle mit Live-Status &amp; Zuschauern",
+            "▪ 🟢 <code>/live</code> — aktuell live Streamer anzeigen",
             "▪ 🎁 <code>/gifts [streamer]</code> — Gift-Ticker der letzten Geschenke",
             "▪ 📱 <code>/app</code> — Mini-App öffnen",
             "▪ 📌 <code>/id</code> — eigene User- und Gruppen-ID prüfen",
@@ -2050,6 +2055,84 @@ class TelegramBotService:
         )
 
     # -----------------------------------------------------------------
+    # LIVE JETZT (/live)
+    # -----------------------------------------------------------------
+    async def _fetch_live_streamers(self) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        Holt die Live-Liste bevorzugt aus der App-API.
+        Ist die API nicht erreichbar, wird direkt aus der DB gelesen.
+        """
+        base = (config.internal_api_url or "").strip().rstrip("/")
+        if base:
+            headers = {"Accept": "application/json"}
+            if config.api_key:
+                headers["X-API-Key"] = config.api_key
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    res = await client.get(f"{base}/api/v1/live", headers=headers)
+                    res.raise_for_status()
+                    payload = res.json()
+                    rows = payload.get("streamers") or []
+                    return [dict(row) for row in rows], "API"
+            except Exception as exc:
+                logger.warning(
+                    "Live-API unter %s nicht erreichbar (%s) – nutze DB-Fallback.",
+                    base,
+                    exc,
+                )
+
+        rows = await asyncio.to_thread(get_live_streamers)
+        return list(rows), "DB"
+
+    async def _format_live_view(self) -> Tuple[str, InlineKeyboardMarkup]:
+        streamers, source = await self._fetch_live_streamers()
+        lines = [
+            bf.header(10, "LIVE JETZT"),
+            bf.kv_table(
+                [
+                    ("LIVE", str(len(streamers))),
+                    ("QUELLE", source),
+                    ("STAND", datetime.now().strftime("%d.%m.%Y %H:%M")),
+                ]
+            ),
+            bf.rule(),
+        ]
+
+        if not streamers:
+            lines.append("⚪ <i>Aktuell ist kein überwachter Streamer live.</i>")
+        else:
+            for streamer in streamers:
+                uname = str(streamer.get("username") or "")
+                display = str(streamer.get("display_name") or uname)
+                viewers = int(streamer.get("current_viewers") or 0)
+                safe_uname = html.escape(uname, quote=True)
+                lines.append(
+                    f"{bf.LIVE} · <b>{html.escape(display)}</b> (@{html.escape(uname)})\n"
+                    f"    👀 <code>{viewers:,}</code> Viewer · "
+                    f'<a href="https://www.tiktok.com/@{safe_uname}/live">Stream öffnen →</a>'
+                )
+
+        lines.append("\n" + bf.footer())
+        buttons = [
+            [InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data="live_refresh:")]
+        ]
+        return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+    async def _cmd_live(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_permission=PERM_BOT_PUBLIC_VIEW):
+            return
+
+        text, markup = await self._format_live_view()
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
     # STREAMER-MONITOR & LISTE (/streamers)
     # -----------------------------------------------------------------
     def _format_streamers_view(self) -> Tuple[str, InlineKeyboardMarkup]:
@@ -2251,6 +2334,9 @@ class TelegramBotService:
             await query.answer("Aktualisiert")
             ident = None if val == "all" else val
             text, markup = await asyncio.to_thread(self._format_gifts_view, ident)
+        elif action == "live_refresh":
+            await query.answer("Aktualisiert")
+            text, markup = await self._format_live_view()
 
         if text and markup:
             try:

@@ -86,6 +86,19 @@ class TestApiEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertIn("telegram_users", data)
         self.assertIn("settings", data)
 
+    async def test_live_endpoint_for_bot(self):
+        res_unauth = await self.client.get("/api/v1/live")
+        self.assertEqual(res_unauth.status_code, 401)
+
+        res = await self.client.get(
+            "/api/v1/live",
+            cookies={admin_auth_manager.COOKIE_NAME: self.admin_token},
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["count"], len(data["streamers"]))
+        self.assertIn("generated_at", data)
+
     async def test_system_status_endpoint(self):
         res = await self.client.get(
             "/api/system/status",

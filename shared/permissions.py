@@ -182,6 +182,7 @@ BOT_COMMAND_PERMISSIONS: Dict[str, Optional[str]] = {
     "miniapp": PERM_BOT_PUBLIC_VIEW,
     "whoami": None,  # Zeigt nur den eigenen Status und bleibt immer erreichbar.
     "streamers": PERM_BOT_PUBLIC_VIEW,
+    "live": PERM_BOT_PUBLIC_VIEW,
     "gifts": PERM_BOT_PUBLIC_VIEW,
     "overview": PERM_BOT_ANALYTICS_VIEW,
     "report": PERM_BOT_ANALYTICS_VIEW,
@@ -229,6 +230,7 @@ BOT_COMMAND_ALIASES: Dict[str, str] = {
     "streamers": "streamers",
     "channels": "streamers",
     "liste": "streamers",
+    "live": "live",
     "gifts": "gifts",
     "geschenke": "gifts",
     "ticker": "gifts",
@@ -257,6 +259,7 @@ BOT_COMMAND_LABELS: Dict[str, str] = {
     "miniapp": "/app, /miniapp",
     "whoami": "/id, /whoami",
     "streamers": "/streamers, /channels, /liste",
+    "live": "/live",
     "gifts": "/gifts, /geschenke, /ticker",
     "overview": "/overview, /dashboard, /finanzen",
     "report": "/report",

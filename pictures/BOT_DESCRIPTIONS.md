@@ -55,6 +55,7 @@ donor - Spender-Dossier & Stammkanal (<username>)
 vip - VIP-Watchlist anzeigen oder Spender markieren
 loyalty - Frontenwechsler & Streamer-Überschneidungen
 streamers - Alle Kanäle mit Live-Status
+live - Aktuell live Streamer anzeigen
 gifts - Gift-Ticker der letzten Geschenke
 streamer - Einzelabfrage für einen Streamer (<username>)
 report - Gesamtbericht aller überwachten Streamer

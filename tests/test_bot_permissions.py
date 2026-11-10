@@ -183,6 +183,7 @@ class TestBotRoleMatrix(unittest.TestCase):
         commands = set(bot_commands_for(ROLE_VIEWER))
         self.assertIn("help", commands)
         self.assertIn("streamers", commands)
+        self.assertIn("live", commands)
         self.assertIn("gifts", commands)
         self.assertNotIn("overview", commands)
         self.assertNotIn("radar", commands)

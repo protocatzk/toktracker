@@ -23,7 +23,7 @@
 | **Live-Tracking** | Geschenke (Coins/Diamonds) in Echtzeit, Combo-/Streak-Aggregation, Zuschauerzahlen, Stream-Sessions, Battle-Erkennung (1v1, 2v2, 1v1v1, 1v1v1v1) |
 | **Finanzen** | Brutto-Kaufwert (Zuschauer) und Netto-Auszahlung (Creator) in USD und EUR, konfigurierbare Kurse, Periodenfilter (today/24h/7d/30d/all) |
 | **Web-Oberfläche** | Öffentliche Infoseite (`/`), Öffentliches Read-Only-Panel (`/public`), Admin-Dashboard (`/admin`), Moderator-Statistiken (`/stats`), Analytics (`/site-analytics`), Spender-Radar (`/donor-radar`), Chat-Intelligence (`/chat-intelligence`), Telegram Mini-App (`/app`) |
-| **Telegram-Bot** | 24h-Reports, Streamer-Statistiken, Live-Status, Live-Alerts für einzelne Streamer in Gruppen (`/alert`), Whitelist-Verwaltung, Login per Telegram-Widget/OTP |
+| **Telegram-Bot** | 24h-Reports, Streamer-Statistiken, Live-Status (`/live`), Live-Alerts für einzelne Streamer in Gruppen (`/alert`), Whitelist-Verwaltung, Login per Telegram-Widget/OTP |
 | **Sicherheit** | HMAC-signierte Sessions, Telegram-Signaturprüfung, Whitelist/Rollen, Rate-Limiting auf Auth-Endpunkten, Datenschutz-Maskierung auf öffentlichen Flächen |
 | **Betrieb** | Microservices mit Redis-Bus, horizontales Ingest-Sharding über Leases, Leader-Locks, Healthchecks, Docker-Compose mit Nginx + Let's Encrypt |
 
