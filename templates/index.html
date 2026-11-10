@@ -290,7 +290,7 @@
                 </div>
                 <div class="inline-form">
                     <label for="selectAnalyticsStreamer" class="mono muted">Streamer:</label>
-                    <select id="selectAnalyticsStreamer" style="min-width:240px;">
+                    <select id="selectAnalyticsStreamer">
                         <option value="all">Alle überwachten Streamer (Vergleich &amp; Gesamt)</option>
                     </select>
                     <label for="selectAnalyticsPeriod" class="mono muted">Zeitraum:</label>
@@ -705,10 +705,10 @@
                 </div>
             </div>
             <form id="formSimulateGift" class="inline-form">
-                <select id="simStreamerSelect" required style="min-width:170px;">
+                <select id="simStreamerSelect" required>
                     <option value="">Streamer wählen</option>
                 </select>
-                <select id="simGiftSelect" style="min-width:190px;">
+                <select id="simGiftSelect">
                     {% for g in gift_catalog %}
                     <option value="{{ g.name }}" data-diamonds="{{ g.diamonds }}">
                         {{ g.name }} ({{ g.diamonds }} Coins)
@@ -1052,7 +1052,7 @@
                     </div>
                 </div>
                 <div class="inline-form">
-                    <select id="selectRevenueProfile" style="min-width:220px;"></select>
+                    <select id="selectRevenueProfile"></select>
                     <button type="button" id="btnSaveRevenueProfile" class="sm primary">Profil speichern</button>
                 </div>
             </div>

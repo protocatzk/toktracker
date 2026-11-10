@@ -268,6 +268,9 @@ body {
     border-top: 2px solid var(--border-strong);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    overflow-x: clip;
+    overflow-wrap: break-word;
 }
 
 a {
@@ -281,6 +284,46 @@ a:hover {
 
 img {
     max-width: 100%;
+}
+
+/* Objekte grundsätzlich an die Viewport-/Elternbreite binden. */
+img,
+svg,
+video,
+canvas,
+iframe,
+object,
+embed {
+    max-width: 100%;
+}
+
+input,
+select,
+textarea,
+button,
+.btn,
+.btn-link,
+.app-nav-link {
+    max-width: 100%;
+}
+
+.table-wrap,
+.table-responsive {
+    width: 100%;
+    max-width: 100%;
+}
+
+.app-header,
+.nav-bar,
+.header-inner,
+.nav-inner,
+.header-side,
+.status-strip,
+.app-nav,
+.tab-list,
+.toolbar-controls {
+    max-width: 100%;
+    min-width: 0;
 }
 
 code,

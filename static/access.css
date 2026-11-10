@@ -13,7 +13,8 @@
 }
 
 .access-mode-row select {
-    min-width: 320px;
+    min-width: min(320px, 100%);
+    max-width: 100%;
 }
 
 .access-summary {
@@ -29,11 +30,13 @@
 
 .access-add-form input {
     flex: 1 1 220px;
-    min-width: 220px;
+    min-width: min(220px, 100%);
+    max-width: 100%;
 }
 
 .access-add-form select {
     flex: 1 1 320px;
+    max-width: 100%;
 }
 
 .access-matrix-grid {

@@ -153,6 +153,24 @@ code {
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Eindeutige Admin-Selects: Desktop-Mindestbreite, aber nie über die Elternbreite. */
+#selectAnalyticsStreamer { min-width: 240px; max-width: 100%; }
+#simStreamerSelect { min-width: 170px; max-width: 100%; }
+#simGiftSelect { min-width: 190px; max-width: 100%; }
+#selectRevenueProfile { min-width: 220px; max-width: 100%; }
+
+@media (max-width: 768px) {
+    #selectAnalyticsStreamer,
+    #simStreamerSelect,
+    #simGiftSelect,
+    #selectRevenueProfile {
+        width: 100%;
+        min-width: 0;
+    }
 }
 
 .form-grid {
@@ -721,7 +739,8 @@ tbody tr:hover {
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    min-width: 180px;
+    min-width: min(180px, 100%);
+    max-width: 100%;
 }
 
 .vs-badge {
@@ -1040,7 +1059,8 @@ tbody tr:hover {
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    min-width: 200px;
+    min-width: min(200px, 100%);
+    max-width: 100%;
 }
 
 .stylized-vs-symbol {
@@ -1518,9 +1538,9 @@ tbody tr:hover {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    min-width: 140px;
+    min-width: min(140px, 100%);
     flex: 1;
-    max-width: 190px;
+    max-width: min(190px, 100%);
 }
 
 .stylized-ffa-slot.is-first {
@@ -2222,7 +2242,8 @@ div.hide-md, span.hide-md, a.hide-md {
 
 .announcement-content {
     flex: 1;
-    min-width: 250px;
+    min-width: min(250px, 100%);
+    max-width: 100%;
 }
 
 .announcement-title {

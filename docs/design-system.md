@@ -104,6 +104,14 @@ für Canvas-/Chart-Fallbacks, die keine CSS-Variablen auflösen können.
 Mobile Tabellen immer in `.table-wrap` oder `.table-responsive` kapseln, damit
 horizontal gescrollt werden kann.
 
+**Viewport-Begrenzung:** Jedes Objekt bleibt innerhalb der Elternbreite.
+Selects, Inputs, Buttons, Bilder, Canvas und Tabellen bekommen
+`max-width: 100%`; in Flex-Kontexten zusätzlich `min-width: 0`. Feste
+Mindestbreiten nur über `min(<px>, 100%)` oder mit mobilem Reset auf
+`width: 100%; min-width: 0`. Lange Texte werden umgebrochen, gekürzt
+(`text-overflow: ellipsis`) oder in einem eigenen Scroll-Container gescrollt –
+niemals durch horizontales Überlaufen der ganzen Seite.
+
 ---
 
 ## 5. Shell: Header, Navigation, Footer

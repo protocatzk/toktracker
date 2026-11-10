@@ -16,6 +16,9 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: var(--space-4);
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     margin-bottom: var(--space-4);
     padding: var(--space-3) var(--space-4);
     border: var(--line);
@@ -28,6 +31,30 @@
     flex-wrap: wrap;
     align-items: flex-end;
     gap: var(--space-3);
+    min-width: 0;
+    max-width: 100%;
+}
+
+.ci-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.ci-filter-field-narrow {
+    flex: 0 0 auto;
+}
+
+.ci-filter-actions {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .ci-filter-label {
@@ -42,6 +69,9 @@
 .ci-select,
 .ci-select-sm,
 .ci-search-input {
+    width: auto;
+    max-width: 100%;
+    min-width: 0;
     min-height: 32px;
     padding: 6px 9px;
     border: 1px solid var(--border-input);
@@ -50,6 +80,18 @@
     color: var(--text);
     font-family: var(--sans);
     font-size: 12.5px;
+}
+
+.ci-select-streamer {
+    width: 170px;
+}
+
+.ci-select-wide {
+    width: min(380px, 100%);
+}
+
+.ci-select-narrow {
+    width: 80px;
 }
 
 .ci-select:focus,
@@ -65,7 +107,10 @@
 
 .ci-period-pills {
     display: inline-flex;
+    flex-wrap: wrap;
     gap: 2px;
+    max-width: 100%;
+    min-width: 0;
     padding: 2px;
     border: var(--line);
     background: var(--surface-2);
@@ -113,7 +158,18 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     cursor: pointer;
+    max-width: 100%;
+    min-width: 0;
     white-space: nowrap;
+}
+
+.btn-export span,
+.btn-ci-tool span,
+.ci-view-btn span,
+.ci-pag-btn span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .btn-export:hover,
@@ -412,6 +468,9 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: var(--space-3);
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: var(--space-3) var(--space-4);
     border-bottom: var(--line);
     background: var(--surface-2);
@@ -423,11 +482,24 @@
     align-items: center;
     gap: var(--space-2);
     flex: 1 1 320px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.ci-viewer-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .ci-search-input {
     flex: 1 1 260px;
-    min-width: 220px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .active-filter-pill,
@@ -844,6 +916,31 @@
     }
 
     .ci-filter-group {
+        width: 100%;
+    }
+
+    .ci-filter-field,
+    .ci-filter-field-narrow,
+    .ci-filter-actions,
+    .ci-viewer-tools {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .ci-filter-field .ci-select,
+    .ci-filter-field .ci-select-streamer,
+    .ci-filter-field .ci-select-wide,
+    .ci-filter-field .ci-select-narrow,
+    .ci-viewer-tools .ci-select-sm {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .ci-filter-actions .btn-export {
+        flex: 1 1 160px;
+    }
+
+    .ci-period-pills {
         width: 100%;
     }
 }

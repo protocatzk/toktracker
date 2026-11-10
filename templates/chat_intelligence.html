@@ -4,7 +4,7 @@
 {% block title %}{{ brand_name }} – Chat Intelligence, Wortwolke &amp; Stream-Log Viewer{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="static/chat_intelligence.css?v=2.0.0" />
+    <link rel="stylesheet" href="static/chat_intelligence.css?v=2.1.0" />
     
 {% endblock %}
 
@@ -19,21 +19,21 @@
         <section class="ci-filter-bar">
             <!-- Streamer & Session Selectors -->
             <div class="ci-filter-group">
-                <div style="display:flex; flex-direction:column; gap:4px;">
+                <div class="ci-filter-field">
                     <span class="ci-filter-label">Streamer</span>
-                    <select id="selectStreamer" class="ci-select" style="min-width: 170px;">
+                    <select id="selectStreamer" class="ci-select ci-select-streamer">
                         <option value="">Alle Streamer</option>
                     </select>
                 </div>
 
-                <div style="display:flex; flex-direction:column; gap:4px;">
+                <div class="ci-filter-field">
                     <span class="ci-filter-label">Stream-Session (Live oder Archiv)</span>
-                    <select id="selectSession" class="ci-select" style="min-width: 280px; max-width: 380px;">
+                    <select id="selectSession" class="ci-select ci-select-wide">
                         <option value="">Alle Streams des Zeitraums</option>
                     </select>
                 </div>
 
-                <div style="display:flex; flex-direction:column; gap:4px;">
+                <div class="ci-filter-field">
                     <span class="ci-filter-label">Zeitraum</span>
                     <div class="ci-period-pills" id="periodPills">
                         <button type="button" class="ci-period-btn" data-period="today">Heute</button>
@@ -47,9 +47,9 @@
 
             <!-- Additional Controls (Min Length, Live Toggle, Exports) -->
             <div class="ci-filter-group">
-                <div style="display:flex; flex-direction:column; gap:4px;">
+                <div class="ci-filter-field ci-filter-field-narrow">
                     <span class="ci-filter-label">Min. Wortlänge</span>
-                    <select id="selectMinWordLen" class="ci-select" style="width: 80px;">
+                    <select id="selectMinWordLen" class="ci-select ci-select-narrow">
                         <option value="2">2</option>
                         <option value="3" selected>3</option>
                         <option value="4">4</option>
@@ -57,16 +57,14 @@
                     </select>
                 </div>
 
-                <div style="display:flex; align-items:flex-end; gap:8px;">
+                <div class="ci-filter-actions">
                     <button type="button" id="btnRefreshAnalysis" class="btn-export" title="Analyse neu laden">
                         <span>🔄 Aktualisieren</span>
                     </button>
 
-                    <div style="position:relative; display:inline-block;">
-                        <button type="button" id="btnExportMenu" class="btn-export" style="background:var(--accent); color:#fff; border-color:var(--accent);">
-                            <span>📥 Chat Exportieren</span>
-                        </button>
-                    </div>
+                    <button type="button" id="btnExportMenu" class="btn-export primary" title="Gefilterte Chatdaten exportieren">
+                        <span>📥 Chat Exportieren</span>
+                    </button>
                 </div>
             </div>
         </section>
@@ -174,7 +172,7 @@
                     </div>
                 </div>
 
-                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <div class="ci-viewer-tools">
                     <!-- View Mode Switcher -->
                     <div class="ci-view-switcher" role="group" aria-label="Ansicht umschalten">
                         <button type="button" id="btnViewModeTable" class="ci-view-btn active" title="Tabellarische Datenbank-Ansicht">
