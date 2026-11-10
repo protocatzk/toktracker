@@ -2387,13 +2387,13 @@ async function openBattleGraphicModal(battleId) {
         const isFfa = bMode === "1v1v1" || bMode === "1v1v1v1";
         const is2v2 = bMode === "2v2" || !!b.teammate_username;
 
-        let brandTitle = "⚔️ TIKTOK LIVE MATCHUP · TOKTRACKER";
+        let brandTitle = "⚔️ TIKTOK LIVE MATCHUP · TT-INTELLIGENCE";
         if (bMode === "2v2") {
-            brandTitle = "⚔️ TIKTOK 2 VS 2 TEAM BATTLE · TOKTRACKER";
+            brandTitle = "⚔️ TIKTOK 2 VS 2 TEAM BATTLE · TT-INTELLIGENCE";
         } else if (bMode === "1v1v1") {
-            brandTitle = "⚔️ TIKTOK 1 VS 1 VS 1 (3ER-MATCH) · TOKTRACKER";
+            brandTitle = "⚔️ TIKTOK 1 VS 1 VS 1 (3ER-MATCH) · TT-INTELLIGENCE";
         } else if (bMode === "1v1v1v1") {
-            brandTitle = "⚔️ TIKTOK 4ER-EINZELMATCH (1V1V1V1) · TOKTRACKER";
+            brandTitle = "⚔️ TIKTOK 4ER-EINZELMATCH (1V1V1V1) · TT-INTELLIGENCE";
         }
 
         let arenaHtml = "";
@@ -2681,13 +2681,13 @@ function downloadBattleGraphicPng() {
     const is2v2 = bMode === "2v2" || !!b.teammate_username;
 
     // Top Header Banner
-    let bannerTitle = "TOKTRACKER // TIKTOK LIVE BATTLE MATCHUP";
+    let bannerTitle = "TT-INTELLIGENCE // TIKTOK LIVE BATTLE MATCHUP";
     if (bMode === "2v2") {
-        bannerTitle = "TOKTRACKER // 2 VS 2 TEAM BATTLE MATCHUP";
+        bannerTitle = "TT-INTELLIGENCE // 2 VS 2 TEAM BATTLE MATCHUP";
     } else if (bMode === "1v1v1") {
-        bannerTitle = "TOKTRACKER // 1 VS 1 VS 1 (3ER-MATCH) FFA LEADERBOARD";
+        bannerTitle = "TT-INTELLIGENCE // 1 VS 1 VS 1 (3ER-MATCH) FFA LEADERBOARD";
     } else if (bMode === "1v1v1v1") {
-        bannerTitle = "TOKTRACKER // 4ER-EINZELMATCH (1V1V1V1) FFA LEADERBOARD";
+        bannerTitle = "TT-INTELLIGENCE // 4ER-EINZELMATCH (1V1V1V1) FFA LEADERBOARD";
     }
 
     ctx.fillStyle = "#94a3b8";
@@ -3683,7 +3683,7 @@ function renderSystemHealth(health) {
         if (!docker.available) {
             elTbody.innerHTML = `<tr><td colspan="7" class="muted">Docker-API (Socket-Proxy) ist nicht erreichbar (${escapeHtml(docker.error || 'Host-Fallback aktiv')}).</td></tr>`;
         } else if (containers.length === 0) {
-            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Keine überwachten TokTracker-Container gefunden.</td></tr>`;
+            elTbody.innerHTML = `<tr><td colspan="7" class="muted">Keine überwachten TT-INTELLIGENCE-Container gefunden.</td></tr>`;
         } else {
             elTbody.innerHTML = containers.map(c => {
                 const isRunning = c.state === "running";

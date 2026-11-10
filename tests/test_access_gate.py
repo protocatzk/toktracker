@@ -185,7 +185,7 @@ class TestGateLandingPage(unittest.IsolatedAsyncioTestCase):
     async def test_landing_page_is_public(self):
         res = await self.client.get("/")
         self.assertEqual(res.status_code, 200)
-        self.assertIn("TokTracker", res.text)
+        self.assertIn("TT-INTELLIGENCE", res.text)
         self.assertIn("LIVE EARNINGS", res.text)
 
     async def test_public_panel_stays_gated(self):

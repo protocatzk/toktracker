@@ -42,8 +42,10 @@ class TestBrandingConstants(unittest.TestCase):
 
 class TestMiniAppBranding(unittest.TestCase):
     def test_miniapp_uses_shared_tokens(self):
+        base = _read("templates", "base.html")
+        self.assertIn("static/brand.css", base)
         template = _read("templates", "miniapp.html")
-        self.assertIn("static/brand.css", template)
+        self.assertIn('{% extends "base.html" %}', template)
         self.assertIn("brand_wordmark", template)
         self.assertIn("brand_tagline", template)
         self.assertNotIn("toktracker Mini-App", template)
@@ -55,6 +57,48 @@ class TestMiniAppBranding(unittest.TestCase):
     def test_miniapp_is_dark_only(self):
         styles = _read("static", "miniapp.css")
         self.assertNotIn('[data-theme="light"]', styles)
+
+
+class TestGlobalDesignSystem(unittest.TestCase):
+    def test_base_loads_brand_css_before_page_styles(self):
+        base = _read("templates", "base.html")
+        self.assertIn("static/brand.css", base)
+        self.assertIn("static/common.js", base)
+        self.assertLess(base.index("brand.css"), base.index("common.js"))
+
+    def test_brand_css_defines_light_theme_and_fonts(self):
+        styles = _read("static", "brand.css")
+        self.assertIn('[data-theme="light"]', styles)
+        self.assertIn("@font-face", styles)
+        self.assertIn("fonts/inter-latin-var.woff2", styles)
+        self.assertIn("fonts/jetbrains-mono-latin-var.woff2", styles)
+
+    def test_visible_legacy_name_is_gone_from_templates(self):
+        import re
+        offenders = []
+        for name in os.listdir(os.path.join(ROOT, "templates")):
+            if not name.endswith(".html"):
+                continue
+            source = _read("templates", name)
+            if re.search(r"toktracker(?!_)", source, re.IGNORECASE):
+                offenders.append(name)
+        self.assertEqual(offenders, [], "Sichtbarer Legacy-Name: " + ", ".join(offenders))
+
+    def test_shared_app_header_is_used_by_internal_pages(self):
+        for name in (
+            "index.html",
+            "public.html",
+            "stats.html",
+            "access.html",
+            "donor_radar.html",
+            "chat_intelligence.html",
+            "site_analytics.html",
+        ):
+            with self.subTest(template=name):
+                source = _read("templates", name)
+                self.assertIn("partials/app_header.html", source)
+                self.assertIn("app_header(", source)
+
 
 
 class TestBotFormatting(unittest.TestCase):

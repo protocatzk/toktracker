@@ -6,7 +6,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 ## 1. Zweck des Projekts
 
-**TokTracker (TikTok Live Earnings Tracker)** ist eine asynchrone Python-Anwendung (FastAPI), die TikTok-Livestreams in Echtzeit überwacht.
+**TT-INTELLIGENCE (TikTok Live Earnings Tracker)** ist eine asynchrone Python-Anwendung (FastAPI), die TikTok-Livestreams in Echtzeit überwacht.
 
 ### Kernaufgaben
 - **Live-Event-Tracking**: Erfassen von Geschenken (Coins, Diamonds), Zuschauerzahlen und Stream-Status via `TikTokLive`.
@@ -68,7 +68,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | [`shared/bot_format.py`](./shared/bot_format.py) | **Bot-Textsystem**. Einheitliche Eyebrows, `<pre>`-Kennzahlen, Status-Glyphen und Message-Chunking im Industrial-Stil. |
 | [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `docker-socket-proxy` (nur lesende Docker-API) sowie `nginx-proxy` und `acme-companion` (SSL). |
 | [`templates/`](./templates) | **Jinja2-HTML-Templates**: `landing.html` (öffentliche Infoseite unter `/`), `index.html` (Admin-Dashboard), `stats.html` (read-only Moderator-Statistiken), `access.html` (Whitelist, Anfragen & Rollen), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
-| [`static/`](./static) | **Frontend-Assets**: `landing.css` (öffentliche Infoseite), `dashboard.js` (Dashboard-Logik, Polling, Charts), `stats.js` (read-only Statistik-Seite), `access.js`/`access.css` (Zugriffsverwaltung), `public.js` (öffentliche Tabelle), `style.css` (Dark-Mode Styling). |
+| [`static/`](./static) | **Frontend-Assets**: `brand.css` (Industrial-Design-System, Tokens, Dark/Light, lokale Fonts unter `static/fonts/`), `style.css` (gemeinsame App-Komponenten), `landing.css` (öffentliche Infoseite), `dashboard.js` (Dashboard-Logik, Polling, Charts), `stats.js` (read-only Statistik-Seite), `access.js`/`access.css` (Zugriffsverwaltung), `public.js` (öffentliche Tabelle). |
 
 ---
 

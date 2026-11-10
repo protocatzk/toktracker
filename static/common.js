@@ -1,5 +1,5 @@
 /*!
- * TokTracker - gemeinsame Frontend-Helfer.
+ * TT-INTELLIGENCE - gemeinsame Frontend-Helfer.
  *
  * Wird in allen Seiten im <head> geladen und stellt die Funktionen global bereit,
  * damit die bestehenden Seiten-Skripte (Vanilla JS, kein Build-Step) sie nutzen
@@ -90,18 +90,36 @@
         return "login?next=" + encodeURIComponent(nextPath || currentAppPath());
     }
 
-    /** Setzt das Theme und aktualisiert einen vorhandenen Theme-Button. */
+    /** Setzt das Theme und aktualisiert vorhandene Theme-Schalter. */
     function applyTheme(theme) {
         var normalized = theme === "light" ? "light" : "dark";
         document.documentElement.setAttribute("data-theme", normalized);
         try {
             localStorage.setItem("toktracker_theme", normalized);
         } catch (e) {}
+        var label = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
         var btn = document.getElementById("btnThemeToggle");
-        if (btn) {
-            btn.textContent = normalized === "dark" ? "Theme: DARK" : "Theme: LIGHT";
+        if (btn) btn.textContent = label;
+        var toggles = document.querySelectorAll("[data-theme-toggle]");
+        for (var i = 0; i < toggles.length; i += 1) {
+            toggles[i].textContent = label;
         }
+        var meta = document.getElementById("metaThemeColor");
+        if (meta) meta.setAttribute("content", normalized === "light" ? "#f2f5f8" : "#0b0e13");
     }
+
+    /** Einheitlicher Theme-Schalter für alle Seiten (data-theme-toggle). */
+    document.addEventListener("click", function (event) {
+        var target = event.target.closest ? event.target.closest("[data-theme-toggle]") : null;
+        if (!target) return;
+        var current = document.documentElement.getAttribute("data-theme") || "dark";
+        applyTheme(current === "dark" ? "light" : "dark");
+    });
+
+    document.addEventListener("DOMContentLoaded", function () {
+        var current = document.documentElement.getAttribute("data-theme") || "dark";
+        applyTheme(current);
+    });
 
     global.escapeHtml = escapeHtml;
     global.fmtEUR = fmtEUR;

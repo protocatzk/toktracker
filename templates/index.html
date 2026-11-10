@@ -1,6 +1,7 @@
 {% extends "base.html" %}
+{% from "partials/app_header.html" import app_header with context %}
 
-{% block title %}toktracker – Admin Console · Live Earnings &amp; Analytics{% endblock %}
+{% block title %}{{ brand_name }} – Admin Console · Live Earnings &amp; Analytics{% endblock %}
 
 {% block head %}
     <script src="static/chart.umd.min.js"></script>
@@ -8,37 +9,15 @@
 {% endblock %}
 
 {% block content %}
-<!-- Kopfbereich: toktracker Brand & Systemstatus-Pills -->
-<header class="app-header">
-    <div class="header-inner">
-        <a href="admin" class="brand-block">
-            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
-            <div class="brand-text">
-                <div class="brand-title-row">
-                    <h1 class="brand-title">toktracker</h1>
-                    <span class="brand-mode-tag">ADMIN CONSOLE</span>
-                </div>
-                <span class="brand-subtitle">LIVE EARNINGS · ANALYTICS · BOT BACKEND</span>
-            </div>
-        </a>
-        <div class="status-strip">
-            <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
-            <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
-            <span class="pill">Session: <strong>{{ env_summary.tiktok_target_idc | upper if env_summary.has_tiktok_session else "ANONYM" }}</strong></span>
-            <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
-            <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
-            <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
-            <a class="btn-link sm" href="donor-radar" style="color: #38bdf8; font-weight: 700;">🐋 Spender-Radar</a>
-            <a class="btn-link sm" href="chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>
-            <a class="btn-link sm" href="site-analytics">📊 Web-Analysen</a>
-            <a class="btn-link sm" href="stats">📈 Statistiken</a>
-            <a class="btn-link sm" href="access" style="color: #22d3ee; font-weight: 700;">🔐 Zugriff &amp; Rollen</a>
-            <a class="btn-link primary sm" href="public">Öffentliches User-Panel →</a>
-            <a class="btn-link sm" href="logout">Abmelden</a>
-
-        </div>
-    </div>
-</header>
+<!-- Kopfbereich: Brand & Systemstatus-Pills -->
+{% call app_header('ADMIN CONSOLE', 'LIVE EARNINGS · ANALYTICS · BOT BACKEND', 'default', 'admin', 'admin') %}
+    <span class="pill">Admin: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+    <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
+    <span class="pill">Session: <strong>{{ env_summary.tiktok_target_idc | upper if env_summary.has_tiktok_session else "ANONYM" }}</strong></span>
+    <span class="pill">Worker: <strong id="sysWorkerInfo">0 aktiv</strong></span>
+    <span class="pill">Telegram-Bot: <strong id="sysTelegramInfo">{{ telegram_diag.state | upper }}</strong></span>
+    <span class="pill">Bot-Zugriff: <strong id="sysTelegramMode">{{ (telegram_diag.access_mode or "whitelist") | upper }}</strong></span>
+{% endcall %}
 
 <!-- Navigationsleiste & Globale Zeitraum-Steuerung -->
 <nav class="nav-bar">
@@ -240,23 +219,23 @@
             </div>
 
             <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; padding:0 16px 16px;">
-                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius: 0;">
                     <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Worker gesamt</div>
                     <div id="workerSummaryTotal" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
                 </div>
-                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius: 0;">
                     <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Aktiv</div>
                     <div id="workerSummaryRunning" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
                 </div>
-                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius: 0;">
                     <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Verbunden</div>
                     <div id="workerSummaryConnected" style="font-size:24px; font-weight:700; line-height:1.2; color:var(--tag-live-text);">0</div>
                 </div>
-                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius: 0;">
                     <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Stalled</div>
                     <div id="workerSummaryStalled" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
                 </div>
-                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius:4px;">
+                <div class="health-card" style="background:var(--bg-surface); border:1px solid var(--border-color); padding:12px; border-radius: 0;">
                     <div class="mono muted" style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">Rate-Limits</div>
                     <div id="workerSummaryRateLimited" style="font-size:24px; font-weight:700; line-height:1.2;">0</div>
                 </div>
@@ -776,7 +755,7 @@
     <!-- ========================================================= -->
     <section class="tab-panel" id="tab-telegram">
         <div class="brand-banner-card">
-            <img src="pictures/daily_report_banner.jpg" alt="toktracker 24h Report" class="brand-banner-img" />
+            <img src="pictures/daily_report_banner.jpg" alt="{{ brand_name }} 24h Report" class="brand-banner-img" />
             <div>
                 <h2>Telegram-Bot Steuerung &amp; Zugriffsmodus</h2>
                 <div class="section-hint" style="margin-bottom:10px;">
@@ -807,7 +786,7 @@
                     <h2>Berechtigte Personen &amp; Offene Zugriffsanfragen</h2>
                     <div class="section-hint">
                         <strong>Gast / Zuschauer</strong> sieht nur öffentliche Seiten. <strong>Nutzer / Mitglied</strong> erhält zusätzlich Spender-Radar &amp; Chat-Intelligence. <strong>Moderatoren</strong> sehen das read-only Statistik-Dashboard (<code>/stats</code>), dürfen aber nichts löschen, buchen oder verwalten. Nur <strong>Administratoren</strong> haben Vollzugriff und Web-Admin-Login (<code>/admin</code>).<br/>
-                        <span style="display:inline-block; margin-top:4px; color:#c084fc; font-weight:600;">🔒 Whitelist-Vorteil:</span>
+                        <span style="display:inline-block; margin-top:4px; color:var(--module-chat); font-weight:600;">🔒 Whitelist-Vorteil:</span>
                         Freigeschaltete Nutzer (Rolle <em>Nutzer</em> oder höher) erhalten exklusiven Zugriff auf geschützte Web-Module wie <strong>💬 Chat-Intelligence &amp; Wortwolken</strong> (<code>/chat-intelligence</code>) und <strong>🐋 Spender-Radar</strong> (<code>/donor-radar</code>). Nicht freigeschaltete Besucher werden gesperrt.
                     </div>
                 </div>
@@ -867,13 +846,13 @@
             <!-- Host Resource Gauges (3 Spalten) -->
             <div class="health-gauges-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--border-color);">
                 <!-- Disk Gauge -->
-                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px;">
+                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span style="font-weight: 600; font-size: 13px;">💾 Festplatte (Host)</span>
                         <span id="gaugeDiskPercent" class="mono" style="font-weight: bold; font-size: 13px;">0%</span>
                     </div>
-                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 5px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
-                        <div id="gaugeDiskBar" style="width: 0%; height: 100%; background: #10b981; transition: width 0.4s ease, background 0.4s ease;"></div>
+                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 0; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
+                        <div id="gaugeDiskBar" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.4s ease, background 0.4s ease;"></div>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 11px;" class="mono muted">
                         <span>Belegt: <span id="gaugeDiskUsed" class="text-main">--</span></span>
@@ -883,13 +862,13 @@
                 </div>
 
                 <!-- RAM Gauge -->
-                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px;">
+                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span style="font-weight: 600; font-size: 13px;">🧠 Arbeitsspeicher (RAM)</span>
                         <span id="gaugeRamPercent" class="mono" style="font-weight: bold; font-size: 13px;">0%</span>
                     </div>
-                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 5px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
-                        <div id="gaugeRamBar" style="width: 0%; height: 100%; background: #3b82f6; transition: width 0.4s ease;"></div>
+                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 0; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
+                        <div id="gaugeRamBar" style="width: 0%; height: 100%; background: var(--info); transition: width 0.4s ease;"></div>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 11px;" class="mono muted">
                         <span>Belegt: <span id="gaugeRamUsed" class="text-main">--</span></span>
@@ -899,13 +878,13 @@
                 </div>
 
                 <!-- CPU / Load Gauge -->
-                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 4px;">
+                <div class="health-card" style="background: var(--bg-surface); border: 1px solid var(--border-color); padding: 12px; border-radius: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <span style="font-weight: 600; font-size: 13px;">⚡ CPU &amp; System-Load</span>
                         <span id="gaugeCpuPercent" class="mono" style="font-weight: bold; font-size: 13px;">0%</span>
                     </div>
-                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 5px; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
-                        <div id="gaugeCpuBar" style="width: 0%; height: 100%; background: #8b5cf6; transition: width 0.4s ease;"></div>
+                    <div class="health-progress-track" style="height: 10px; background: var(--bg-subtle); border-radius: 0; overflow: hidden; margin-bottom: 8px; border: 1px solid var(--border-subtle);">
+                        <div id="gaugeCpuBar" style="width: 0%; height: 100%; background: var(--module-chat); transition: width 0.4s ease;"></div>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 11px;" class="mono muted">
                         <span>Load (1m/5m/15m): <span id="gaugeCpuLoad" class="text-main">--</span></span>
@@ -943,7 +922,7 @@
                 <!-- Volumes & DB Storage Overview (2-Spaltig) -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
                     <!-- Volumes Box -->
-                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px;">
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 0; padding: 12px;">
                         <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-strong);">📦 Docker Volumes</h4>
                         <div id="listVolumesContainer" style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
                             <span class="muted">Keine Volumes gefunden.</span>
@@ -951,7 +930,7 @@
                     </div>
 
                     <!-- DB Storage Box -->
-                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; padding: 12px;">
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 0; padding: 12px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                             <h4 style="font-size: 12px; margin: 0; color: var(--text-strong);">🗄️ Datenbank-Tabellenspeicher</h4>
                             <span id="dbTotalSizeBadge" class="mono muted" style="font-size: 11px;">0 MB</span>
@@ -1032,7 +1011,7 @@
 
                         <div class="inline-form" style="gap: 10px; align-items: center;">
                             <button type="submit" class="primary" id="btnSaveBanner">💾 Banner speichern &amp; veröffentlichen</button>
-                            <span id="bannerSaveFeedback" class="mono" style="font-size: 12px; display: none; color: #10b981; font-weight: 600;"></span>
+                            <span id="bannerSaveFeedback" class="mono" style="font-size: 12px; display: none; color: var(--accent); font-weight: 600;"></span>
                         </div>
                     </form>
                 </div>
@@ -1195,7 +1174,7 @@
             <div class="box">
                 <div class="box-header">
                     <div>
-                        <h2>REST-API Endpoints (toktracker v1)</h2>
+                        <h2>REST-API Endpoints ({{ brand_name }} v1)</h2>
                         <div class="section-hint">Direkte JSON-Schnittstellen für externe Services &amp; Automationen.</div>
                     </div>
                 </div>
@@ -1280,9 +1259,9 @@
                 </div>
 
                 <!-- Analyse- & Status-Ausgabe -->
-                <div id="sqliteInspectBox" style="display: none; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                <div id="sqliteInspectBox" style="display: none; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 0; padding: 12px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <strong style="color: var(--color-brand, #38bdf8);">📊 Analyse der SQLite-Quelle</strong>
+                        <strong style="color: var(--color-brand, var(--info));">📊 Analyse der SQLite-Quelle</strong>
                         <span id="sqliteInspectMeta" class="mono muted">0 MB</span>
                     </div>
                     <div id="sqliteInspectSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px;"></div>
@@ -1290,7 +1269,7 @@
                 </div>
 
                 <!-- Import-Ergebnis Logbox -->
-                <div id="sqliteImportResultBox" style="display: none; padding: 10px 12px; border-radius: 8px; font-size: 13px;"></div>
+                <div id="sqliteImportResultBox" style="display: none; padding: 10px 12px; border-radius: 0; font-size: 13px;"></div>
             </div>
         </div>
 
@@ -1316,12 +1295,18 @@
 </main>
 
 <footer class="app-footer">
-    <div>toktracker · LIVE EARNINGS · ANALYTICS</div>
-    <div>
-        <a href="donor-radar">🐋 Spender-Radar</a> · <a href="chat-intelligence">💬 Chat-Intelligence &amp; Wortwolke</a> · <a href="site-analytics">📊 Web- &amp; Bot-Analysen</a> · <a href="public">Öffentliches User-Panel</a>{% if docs_enabled %} · <a href="docs" target="_blank">API Dokumentation</a>{% endif %} · <a href="logout">Abmelden</a>
+    <div class="footer-inner">
+        <div>{{ brand_name }} · {{ brand_tagline }}</div>
+        <nav class="footer-links" aria-label="Footer">
+            <a href="donor-radar">🐋 Spender-Radar</a>
+            <a href="chat-intelligence">💬 Chat-Intelligence</a>
+            <a href="site-analytics">📊 Web-Analysen</a>
+            <a href="public">Public Panel</a>
+            {% if docs_enabled %}<a href="docs" target="_blank">API-Doku</a>{% endif %}
+            <a href="logout">Abmelden</a>
+        </nav>
     </div>
-
 </footer>
 
-<script src="static/dashboard.js?v=2.12.0"></script>
+<script src="static/dashboard.js?v=2.13.0"></script>
 {% endblock %}

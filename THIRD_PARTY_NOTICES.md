@@ -84,6 +84,17 @@ Die Lizenzangaben gelten für den jeweiligen Container.
 | `nginxproxy/acme-companion:latest` | MIT | |
 | `tecnativa/docker-socket-proxy:0.2` | Apache-2.0 | nur lesende Docker-API |
 
+## 4b. Schriftarten (lokal ausgeliefert)
+
+| Schrift | Datei | Lizenz |
+| :--- | :--- | :--- |
+| Inter | `static/fonts/inter-latin-var.woff2` | SIL Open Font License 1.1 (`static/fonts/OFL-Inter.txt`) |
+| JetBrains Mono | `static/fonts/jetbrains-mono-latin-var.woff2` | SIL Open Font License 1.1 (`static/fonts/OFL-JetBrains-Mono.txt`) |
+
+Beide Schriften werden lokal ausgeliefert; es gibt keine Requests an Google
+Fonts oder andere Drittanbieter. Die OFL erlaubt die Einbettung und
+Weitergabe, solange die Lizenzhinweise erhalten bleiben.
+
 ## 5. Marken und Inhalte
 
 - Die MIT-Lizenz gewährt **keine Rechte an Namen oder Logos** („TokTracker",

@@ -35,7 +35,7 @@ In einer Gruppe kann ein Admin Live-Benachrichtigungen für einzelne Streamer ab
 - `/alert off @streamer` – Alert deaktivieren
 - `/alert list` – aktive Alerts anzeigen
 
-Der Streamer muss für das Auto-Monitoring markiert sein (z.B. per `/track @streamer`), damit TokTracker den Live-Gang erkennt. Der Bot verschickt den Alert an alle abonnierten Chats.
+Der Streamer muss für das Auto-Monitoring markiert sein (z.B. per `/track @streamer`), damit TT-INTELLIGENCE den Live-Gang erkennt. Der Bot verschickt den Alert an alle abonnierten Chats.
 
 ---
 

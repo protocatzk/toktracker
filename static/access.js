@@ -1,5 +1,5 @@
 /*
- * TokTracker – Zugriff, Whitelist & Rollen (/access).
+ * TT-INTELLIGENCE – Zugriff, Whitelist & Rollen (/access).
  *
  * Die Seite nutzt ausschliesslich die bestehenden, serverseitig durch
  * users.manage geschuetzten API-Endpunkte. Die Rechte-Matrix selbst ist

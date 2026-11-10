@@ -1,35 +1,18 @@
 {% extends "base.html" %}
+{% from "partials/app_header.html" import app_header with context %}
 
-{% block title %}toktracker – Zugriff, Whitelist &amp; Rollen{% endblock %}
+{% block title %}{{ brand_name }} – Zugriff, Whitelist &amp; Rollen{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="static/access.css?v=1.0.1" />
+    <link rel="stylesheet" href="static/access.css?v=2.0.0" />
 {% endblock %}
 
 {% block content %}
-<header class="app-header">
-    <div class="header-inner">
-        <a href="access" class="brand-block">
-            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
-            <div class="brand-text">
-                <div class="brand-title-row">
-                    <h1 class="brand-title">toktracker</h1>
-                    <span class="brand-mode-tag">ZUGRIFF &amp; ROLLEN</span>
-                </div>
-                <span class="brand-subtitle">WHITELIST · ANFRAGEN · BOT-RECHTE</span>
-            </div>
-        </a>
-        <div class="status-strip">
-            <span class="pill">Rolle: <strong>{{ role_label }}</strong></span>
-            <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
-            <span class="pill">Modus: <strong id="accessModePill">{{ access_mode | upper }}</strong></span>
-            {% if is_admin %}<a class="btn-link sm" href="admin">← Admin-Dashboard</a>{% endif %}
-            <a class="btn-link sm" href="stats">📈 Statistiken</a>
-            <a class="btn-link primary sm" href="public">Öffentliches Panel →</a>
-            <a class="btn-link sm" href="logout">Abmelden</a>
-        </div>
-    </div>
-</header>
+{% call app_header('ZUGRIFF & ROLLEN', 'WHITELIST · ANFRAGEN · BOT-RECHTE', 'access', 'access', 'access') %}
+    <span class="pill">Rolle: <strong>{{ role_label }}</strong></span>
+    <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+    <span class="pill">Modus: <strong id="accessModePill">{{ access_mode | upper }}</strong></span>
+{% endcall %}
 
 <nav class="nav-bar">
     <div class="nav-inner">
@@ -317,8 +300,10 @@
         </div>
     </section>
 </main>
+
+{% include "partials/footer.html" %}
 {% endblock %}
 
 {% block scripts %}
-<script src="static/access.js?v=1.0.0"></script>
+<script src="static/access.js?v=2.0.0"></script>
 {% endblock %}

@@ -1,5 +1,5 @@
 /**
- * TokTracker – Chat Intelligence, Wortwolke & Stream-Log Viewer
+ * TT-INTELLIGENCE – Chat Intelligence, Wortwolke & Stream-Log Viewer
  * Frontend Controller (Vanilla JavaScript)
  * Modern Database Table Grid & Stream Log Inspector
  */

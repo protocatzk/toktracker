@@ -1,41 +1,22 @@
 {% extends "base.html" %}
+{% from "partials/app_header.html" import app_header with context %}
 
-{% block title %}toktracker – Spender-Radar &amp; Chatlog Übersicht{% endblock %}
+{% block title %}{{ brand_name }} – Spender-Radar &amp; Chatlog Übersicht{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="static/donor_radar.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/donor_radar.css?v=2.0.0" />
     
 {% endblock %}
 
 {% block content %}
 <div id="radarPermissions" data-can-edit-crm="{{ '1' if can_edit_crm else '0' }}" hidden></div>
 <!-- Header -->
-<header class="app-header">
-    <div class="header-inner">
-        <a href="{% if is_admin %}admin{% elif 'analytics.view' in permissions %}stats{% else %}public{% endif %}" class="brand-block">
-            <img src="pictures/bot_avatar.jpg" alt="toktracker" class="brand-logo" />
-            <div class="brand-text">
-                <div class="brand-title-row">
-                    <h1 class="brand-title">toktracker</h1>
-                    <span class="brand-mode-tag" style="background: linear-gradient(135deg, #9333ea 0%, #3b82f6 100%); color:#fff;">SPENDER-RADAR &amp; CHATLOGS</span>
-                </div>
-                <span class="brand-subtitle">WHALE DETECTION · CROSS-STREAMER RECON · CHAT INTELLIGENCE</span>
-            </div>
-        </a>
-        <div class="status-strip">
-            <span class="pill">Rolle: <strong>{{ role }}</strong></span>
-            <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
-            <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
-            <span class="pill hide-sm">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
-            {% if is_admin %}<a class="btn-link sm" href="admin">← Admin-Dashboard</a>{% endif %}
-            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="stats">📈 Statistiken</a>{% endif %}
-            {% if 'chatintel.view' in permissions %}<a class="btn-link sm" href="chat-intelligence" style="color: #a855f7; font-weight: 700;">💬 Chat-Intelligence</a>{% endif %}
-            {% if 'analytics.view' in permissions %}<a class="btn-link sm" href="site-analytics">📊 Web-Analysen</a>{% endif %}
-            <a class="btn-link primary sm" href="public">Öffentliches Panel →</a>
-            <a class="btn-link sm" href="logout">Abmelden</a>
-        </div>
-    </div>
-</header>
+{% call app_header('SPENDER-RADAR & CHATLOGS', 'WHALE DETECTION · CROSS-STREAMER RECON · CHAT INTELLIGENCE', 'radar', ('admin' if is_admin else ('stats' if 'analytics.view' in permissions else 'public')), 'radar') %}
+    <span class="pill">Rolle: <strong>{{ role }}</strong></span>
+    <span class="pill hide-sm">Nutzer: <strong>{{ admin_sub or "TELEGRAM" }}</strong></span>
+    <span class="pill">TikTokLive: <strong>{{ "AKTIV" if tiktoklive_available else "INAKTIV" }}</strong></span>
+    <span class="pill hide-sm">Telegram-Bot: <strong>{{ telegram_diag.state | upper }}</strong></span>
+{% endcall %}
 
 <!-- Controls & Period Navigation -->
 <nav class="nav-bar">
@@ -51,13 +32,13 @@
         <div style="display: flex; align-items: center; gap: 14px;">
             <div style="display: flex; align-items: center; gap: 6px;">
                 <label for="filterStreamer" class="mono muted" style="font-size: 11.5px;">Streamer:</label>
-                <select id="filterStreamer" style="padding: 4px 8px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <select id="filterStreamer" style="padding: 4px 8px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0;">
                     <option value="">Alle Streamer</option>
                 </select>
             </div>
 
             <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
-                <input type="checkbox" id="chkAutoRefresh" checked style="accent-color: #a855f7;" />
+                <input type="checkbox" id="chkAutoRefresh" checked style="accent-color: var(--module-chat);" />
                 <span>Live-Sync (3s)</span>
             </label>
         </div>
@@ -80,7 +61,7 @@
             <span class="mono muted" style="font-size: 11.5px; padding: 0 10px;">Lade Live-Großspenden (&ge; <span id="tickerMinCoinsLabel">1.000</span> Coins)...</span>
         </div>
         <div class="whale-ticker-controls">
-            <select id="selWhaleThreshold" style="padding: 3px 6px; font-size: 11px; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+            <select id="selWhaleThreshold" style="padding: 3px 6px; font-size: 11px; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0;">
                 <option value="500">&ge; 500 Coins</option>
                 <option value="1000" selected>&ge; 1.000 Coins</option>
                 <option value="2500">&ge; 2.500 Coins (Shark)</option>
@@ -95,11 +76,11 @@
     <!-- KPI Summary Row -->
     <div class="radar-hero">
         <!-- Whales Card -->
-        <div class="radar-kpi-card" style="border-left: 3px solid #a855f7;">
+        <div class="radar-kpi-card" style="border-left: 3px solid var(--module-chat);">
             <div>
                 <div class="radar-kpi-header">
                     <span>🐋 Whales (&gt;= 10.000 Coins)</span>
-                    <span class="mono" style="color: #d8b4fe;">~50€+ Netto</span>
+                    <span class="mono" style="color: var(--module-chat);">~50€+ Netto</span>
                 </div>
                 <div class="radar-kpi-val" id="kpiWhalesCount">-</div>
             </div>
@@ -109,11 +90,11 @@
         </div>
 
         <!-- Sharks Card -->
-        <div class="radar-kpi-card" style="border-left: 3px solid #38bdf8;">
+        <div class="radar-kpi-card" style="border-left: 3px solid var(--info);">
             <div>
                 <div class="radar-kpi-header">
                     <span>🦈 Sharks (&gt;= 2.500 Coins)</span>
-                    <span class="mono" style="color: #7dd3fc;">~12.50€+ Netto</span>
+                    <span class="mono" style="color: var(--info);">~12.50€+ Netto</span>
                 </div>
                 <div class="radar-kpi-val" id="kpiSharksCount">-</div>
             </div>
@@ -123,11 +104,11 @@
         </div>
 
         <!-- Dolphins Card -->
-        <div class="radar-kpi-card" style="border-left: 3px solid #34d399;">
+        <div class="radar-kpi-card" style="border-left: 3px solid var(--accent);">
             <div>
                 <div class="radar-kpi-header">
                     <span>🐬 Dolphins (&gt;= 500 Coins)</span>
-                    <span class="mono" style="color: #6ee7b7;">~2.50€+ Netto</span>
+                    <span class="mono" style="color: var(--accent);">~2.50€+ Netto</span>
                 </div>
                 <div class="radar-kpi-val" id="kpiDolphinsCount">-</div>
             </div>
@@ -137,11 +118,11 @@
         </div>
 
         <!-- Cross-Streamer Whales Card -->
-        <div class="radar-kpi-card" style="border-left: 3px solid #f59e0b;">
+        <div class="radar-kpi-card" style="border-left: 3px solid var(--warn);">
             <div>
                 <div class="radar-kpi-header">
                     <span>⚡ Cross-Streamer Spender</span>
-                    <span class="mono" style="color: #fbbf24;">&ge; 2 Kanäle</span>
+                    <span class="mono" style="color: var(--warn);">&ge; 2 Kanäle</span>
                 </div>
                 <div class="radar-kpi-val" id="kpiCrossCount">-</div>
             </div>
@@ -151,13 +132,13 @@
         </div>
 
         <!-- VIP Watchlist Card -->
-        <div class="radar-kpi-card" style="border-left: 3px solid #eab308; cursor: pointer;" id="cardKpiVip" title="Klicken, um VIP-Filter umzuschalten">
+        <div class="radar-kpi-card" style="border-left: 3px solid var(--warn); cursor: pointer;" id="cardKpiVip" title="Klicken, um VIP-Filter umzuschalten">
             <div>
                 <div class="radar-kpi-header">
                     <span>⭐ VIP-Watchlist</span>
-                    <span class="mono" style="color: #fde047;">Fokus</span>
+                    <span class="mono" style="color: var(--warn);">Fokus</span>
                 </div>
-                <div class="radar-kpi-val" id="kpiVipCount" style="color: #fbbf24;">-</div>
+                <div class="radar-kpi-val" id="kpiVipCount" style="color: var(--warn);">-</div>
             </div>
             <div class="radar-kpi-sub">
                 <span>Beobachtete Großspender</span>
@@ -165,11 +146,11 @@
         </div>
 
         <!-- Chatlogs Recorded Card -->
-        <div class="radar-kpi-card" style="border-left: 3px solid #ec4899;">
+        <div class="radar-kpi-card" style="border-left: 3px solid var(--module-chat);">
             <div>
                 <div class="radar-kpi-header">
                     <span>💬 Erfasste Chatlogs</span>
-                    <span class="mono" style="color: #f472b6;">7 Tage Retention</span>
+                    <span class="mono" style="color: var(--module-chat);">7 Tage Retention</span>
                 </div>
                 <div class="radar-kpi-val" id="kpiChatCount">-</div>
             </div>
@@ -191,7 +172,7 @@
         </div>
         <div id="loyaltyHubControls" style="display: none; align-items: center; gap: 10px;">
             <span class="mono muted" style="font-size: 11.5px;">Zeitraum für Loyalitäts-Wechsel:</span>
-            <select id="selLoyaltyDays" style="padding: 4px 8px; font-size: 11.5px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+            <select id="selLoyaltyDays" style="padding: 4px 8px; font-size: 11.5px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0;">
                 <option value="1">Letzte 24 Stunden</option>
                 <option value="3">Letzte 3 Tage</option>
                 <option value="7">Letzte 7 Tage</option>
@@ -218,10 +199,10 @@
                 <!-- Sub-Filters for Donors -->
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <div style="position: relative;">
-                        <input type="text" id="donorSearchInput" placeholder="Spender suchen..." style="padding: 5px 10px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px; width: 140px;" />
+                        <input type="text" id="donorSearchInput" placeholder="Spender suchen..." style="padding: 5px 10px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0; width: 140px;" />
                     </div>
 
-                    <select id="donorTierFilter" style="padding: 5px 8px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                    <select id="donorTierFilter" style="padding: 5px 8px; font-size: 12px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0;">
                         <option value="">Alle Tiers (&ge; 500)</option>
                         <option value="whale">🐋 Nur Whales (&ge; 10k)</option>
                         <option value="shark">🦈 Sharks+ (&ge; 2.5k)</option>
@@ -229,12 +210,12 @@
                     </select>
 
                     <label style="font-size: 11.5px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
-                        <input type="checkbox" id="chkCrossOnly" style="accent-color: #f59e0b;" />
+                        <input type="checkbox" id="chkCrossOnly" style="accent-color: var(--warn);" />
                         <span>⚡ Cross-Streamer</span>
                     </label>
 
-                    <label style="font-size: 11.5px; color: #fbbf24; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 700;">
-                        <input type="checkbox" id="chkVipOnly" style="accent-color: #eab308;" />
+                    <label style="font-size: 11.5px; color: var(--warn); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 700;">
+                        <input type="checkbox" id="chkVipOnly" style="accent-color: var(--warn);" />
                         <span>⭐ VIP-Watchlist</span>
                     </label>
                 </div>
@@ -276,11 +257,11 @@
 
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <label style="font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
-                        <input type="checkbox" id="chkWhaleOnlyChat" style="accent-color: #a855f7;" />
+                        <input type="checkbox" id="chkWhaleOnlyChat" style="accent-color: var(--module-chat);" />
                         <span>Nur Spender</span>
                     </label>
 
-                    <input type="text" id="chatSearchInput" placeholder="Chat filtern..." style="padding: 4px 8px; font-size: 11px; width: 110px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;" />
+                    <input type="text" id="chatSearchInput" placeholder="Chat filtern..." style="padding: 4px 8px; font-size: 11px; width: 110px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0;" />
 
                     <button type="button" id="btnToggleChatPause" class="btn-link sm" style="padding: 3px 8px; font-size: 11px;">
                         ⏸ Pause
@@ -355,7 +336,7 @@
                 <div>
                     <h2 style="display: flex; align-items: center; gap: 8px;">
                         <span>⚡ Streamer-Überschneidungs-Matrix</span>
-                        <span id="overlapPairsBadge" class="mono muted" style="font-size: 11px; background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-subtle);">0 Kanal-Paare</span>
+                        <span id="overlapPairsBadge" class="mono muted" style="font-size: 11px; background: var(--bg-subtle); padding: 2px 8px; border-radius: 0; border: 1px solid var(--border-subtle);">0 Kanal-Paare</span>
                     </h2>
                     <div class="section-hint">Überwachte Streamer, die sich signifikante Spender und Coins teilen (Netzwerk-Synergien oder Spender-Wettstreit).</div>
                 </div>
@@ -407,24 +388,7 @@
 </div>
 
 <!-- Footer -->
-<footer class="app-footer">
-    <div class="footer-inner">
-        <div>
-            <span>toktracker v2.5.2 &copy; 2026</span>
-            <span class="sep">·</span>
-            <span>Spender-Radar &amp; Chatlog Intelligence</span>
-        </div>
-        <div>
-            <a href="admin">Admin-Dashboard</a>
-            <span class="sep">·</span>
-            <a href="chat-intelligence">Chat Intelligence &amp; Wortwolke</a>
-            <span class="sep">·</span>
-            <a href="site-analytics">Website &amp; Bot Analysen</a>
-            <span class="sep">·</span>
-            <a href="public">Öffentliche Ansicht</a>
-        </div>
-    </div>
-</footer>
+{% include "partials/footer.html" %}
 
 <script src="static/donor_radar.js?v=2.5.4"></script>
 {% endblock %}

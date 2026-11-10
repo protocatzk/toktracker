@@ -1,17 +1,15 @@
-/* ========================================================= */
-/* ZUGRIFF & ROLLEN (/access)                                */
-/* ========================================================= */
+/* TT-INTELLIGENCE – Zugriff, Whitelist & Rollen (/access) */
 
 .access-hero {
-    border-top: 2px solid var(--border-strong);
+    border-top: 2px solid var(--module-access);
 }
 
 .access-mode-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 10px;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
 }
 
 .access-mode-row select {
@@ -19,19 +17,19 @@
 }
 
 .access-summary {
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
 }
 
 .access-add-form {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
 }
 
 .access-add-form input {
-    min-width: 220px;
     flex: 1 1 220px;
+    min-width: 220px;
 }
 
 .access-add-form select {
@@ -41,33 +39,35 @@
 .access-matrix-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 18px;
+    gap: var(--space-5);
 }
 
 .access-subtitle {
-    margin: 0 0 8px 0;
-    font-size: 12px;
-    letter-spacing: 0.6px;
+    margin: 0 0 var(--space-2);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-muted);
-    font-family: "JetBrains Mono", Consolas, Monaco, monospace;
 }
 
 .access-matrix th,
 .access-matrix td {
     padding: 7px 9px;
-    font-size: 12.5px;
+    font-size: 12px;
 }
 
 .access-matrix td.num-col {
-    text-align: center;
+    color: var(--text-strong);
     font-weight: 700;
+    text-align: center;
 }
 
 .access-perm-key {
     display: block;
-    font-size: 10.5px;
     margin-top: 2px;
+    font-size: 10px;
 }
 
 .access-toast {
@@ -75,14 +75,15 @@
     position: fixed;
     right: 20px;
     bottom: 20px;
-    z-index: 50;
+    z-index: 80;
     max-width: 380px;
-    padding: 11px 14px;
+    padding: 10px 14px;
     border: 1px solid var(--border-strong);
-    background: var(--bg-surface);
-    color: var(--text-main);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-    font-size: 13px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+    color: var(--text);
+    font-size: 12.5px;
 }
 
 .access-toast.show {
@@ -90,19 +91,13 @@
 }
 
 .access-toast.error {
-    border-color: var(--tag-danger-border);
-    color: var(--tag-danger-text);
+    border-left-color: var(--danger);
+    color: var(--danger);
 }
 
 .access-empty {
-    color: var(--text-muted);
+    color: var(--muted);
     font-size: 12.5px;
-}
-
-.status-tag.live {
-    background: var(--tag-live-bg);
-    border-color: var(--tag-live-border);
-    color: var(--tag-live-text);
 }
 
 @media (max-width: 700px) {
@@ -114,5 +109,6 @@
     .access-add-form input,
     .access-add-form select {
         flex: 1 1 100%;
+        min-width: 0;
     }
 }

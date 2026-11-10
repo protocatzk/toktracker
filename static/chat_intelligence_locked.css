@@ -1,94 +1,120 @@
-/* TokTracker - Seiten-Styles (aus dem Template ausgelagert) */
-/* Wird nur auf der jeweiligen Seite geladen; Reihenfolge nach style.css bleibt erhalten. */
+/* TT-INTELLIGENCE – Whitelist-Lock (Chat Intelligence) */
 
-body {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            background: var(--bg-body, #0a0e17);
-            padding: 20px;
-        }
-        .lock-card {
-            background: var(--bg-surface, #121721);
-            border: 1px solid var(--border-color, #232c3d);
-            border-radius: 12px;
-            max-width: 520px;
-            width: 100%;
-            padding: 32px 28px;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-            position: relative;
-            overflow: hidden;
-        }
-        .lock-card::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #a855f7, #6366f1, #38bdf8);
-        }
-        .lock-icon-wrap {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 16px;
-            border-radius: 50%;
-            background: rgba(168, 85, 247, 0.12);
-            border: 1px solid rgba(168, 85, 247, 0.3);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 30px;
-            color: #c084fc;
-        }
-        .lock-title {
-            font-size: 20px;
-            font-weight: 800;
-            color: var(--text-strong, #f8fafc);
-            margin-bottom: 6px;
-        }
-        .lock-badge {
-            display: inline-block;
-            background: rgba(168, 85, 247, 0.15);
-            color: #c084fc;
-            border: 1px solid rgba(168, 85, 247, 0.35);
-            font-size: 11px;
-            font-weight: 700;
-            padding: 3px 10px;
-            border-radius: 20px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 18px;
-        }
-        .lock-desc {
-            font-size: 13.5px;
-            color: var(--text-muted, #94a3b8);
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-        .user-info-box {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--border-subtle, #1e2638);
-            border-radius: 8px;
-            padding: 14px 16px;
-            margin-bottom: 24px;
-            text-align: left;
-            font-size: 12.5px;
-        }
-        .user-info-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-        }
-        .user-info-row:last-child {
-            margin-bottom: 0;
-        }
-        .actions-row {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
+.lock-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 160px);
+    padding: var(--space-6) var(--space-4);
+}
+
+.lock-card {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+    padding: 32px 28px;
+    border: var(--line);
+    border-top: 2px solid var(--module-chat);
+    background: var(--surface);
+    text-align: left;
+    box-shadow: var(--shadow-md);
+}
+
+.lock-card .eyebrow {
+    margin-bottom: var(--space-5);
+}
+
+.lock-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    margin-bottom: var(--space-4);
+    border: 1px solid var(--module-chat);
+    background: var(--module-chat-soft);
+    color: var(--module-chat);
+    font-size: 26px;
+}
+
+.lock-title {
+    margin-bottom: 6px;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-strong);
+}
+
+.lock-badge {
+    display: inline-block;
+    margin-bottom: 20px;
+    padding: 3px 8px;
+    border: 1px solid var(--module-chat);
+    background: var(--module-chat-soft);
+    color: var(--module-chat);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.lock-desc {
+    margin-bottom: var(--space-5);
+    color: var(--muted);
+    font-size: 13.5px;
+    line-height: 1.6;
+}
+
+.user-info-box {
+    margin-bottom: var(--space-5);
+    padding: 14px 16px;
+    border: var(--line-subtle);
+    background: var(--surface-2);
+}
+
+.user-info-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 7px 0;
+    border-bottom: var(--line-subtle);
+    font-size: 12.5px;
+}
+
+.user-info-row:last-child {
+    border-bottom: 0;
+}
+
+.accent-text {
+    color: var(--info);
+}
+
+.warn-text {
+    color: var(--warn);
+    font-weight: 700;
+}
+
+.lock-hint {
+    margin-bottom: var(--space-5);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+@media (max-width: 560px) {
+    .lock-card {
+        padding: 24px 18px;
+    }
+
+    .actions-row .btn {
+        width: 100%;
+    }
+}

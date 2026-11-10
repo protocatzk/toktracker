@@ -1,43 +1,19 @@
 {% extends "base.html" %}
+{% from "partials/app_header.html" import app_header with context %}
 
-{% block title %}toktracker – Chat Intelligence, Wortwolke & Stream-Log Viewer{% endblock %}
+{% block title %}{{ brand_name }} – Chat Intelligence, Wortwolke &amp; Stream-Log Viewer{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="static/chat_intelligence.css?v=1.0.0" />
+    <link rel="stylesheet" href="static/chat_intelligence.css?v=2.0.0" />
     
 {% endblock %}
 
 {% block content %}
-    <div class="ci-container">
-        <!-- 1. Header & Navigation -->
-        <header class="ci-header-box">
-            <div class="ci-brand">
-                <img src="pictures/bot_avatar.jpg" alt="TokTracker" class="ci-brand-logo" />
-                <div>
-                    <div class="ci-brand-title">
-                        <span>TokTracker</span>
-                        <span class="ci-badge ci-badge-purple">CHAT INTELLIGENCE</span>
-                        <span class="ci-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35);">🔒 WHITELIST EXKLUSIV</span>
-                    </div>
-                    <div class="muted" style="font-size: 11.5px; margin-top: 2px;">
-                        Wortwolke · Häufige Phrasen &amp; Emojis · Stream-Chat Log-Viewer
-                    </div>
-                </div>
-            </div>
+{% call app_header('CHAT INTELLIGENCE', 'WORTWOLKE · PHRASEN · STREAM-CHAT LOG-VIEWER', 'chat', 'chat-intelligence', 'chat') %}
+    <span class="pill">Freigabe: <strong>{{ "👑 ADMIN" if is_admin else ("🛡️ MODERATOR" if 'analytics.view' in permissions else "🔒 WHITELIST") }}</strong> ({{ admin_sub }})</span>
+{% endcall %}
 
-            <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-                <span class="pill" style="font-size: 11px; background: rgba(255,255,255,0.05); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-color);">
-                    Freigabe: <strong style="color: #38bdf8;">{{ "👑 ADMIN" if is_admin else ("🛡️ MODERATOR" if 'analytics.view' in permissions else "🔒 WHITELIST") }}</strong> ({{ admin_sub }})
-                </span>
-                <nav class="ci-nav-links">
-                    {% if is_admin %}<a href="admin">← Admin-Dashboard</a>{% endif %}
-                    {% if 'analytics.view' in permissions %}<a href="stats">📈 Statistiken</a>{% endif %}
-                    <a href="donor-radar">🐋 Spender-Radar</a>
-                    {% if 'analytics.view' in permissions %}<a href="site-analytics">📊 Web-Analysen</a>{% endif %}
-                    <a href="logout" style="color:#ef4444;">Abmelden</a>
-                </nav>
-            </div>
-        </header>
+    <div class="ci-container">
 
         <!-- 2. Controls & Dropdowns Bar -->
         <section class="ci-filter-bar">
@@ -87,7 +63,7 @@
                     </button>
 
                     <div style="position:relative; display:inline-block;">
-                        <button type="button" id="btnExportMenu" class="btn-export" style="background:#10b981; color:#fff; border-color:#10b981;">
+                        <button type="button" id="btnExportMenu" class="btn-export" style="background:var(--accent); color:#fff; border-color:var(--accent);">
                             <span>📥 Chat Exportieren</span>
                         </button>
                     </div>
@@ -120,7 +96,7 @@
                     <span>Spender- &amp; VIP-Nachrichten</span>
                     <span>🐋</span>
                 </div>
-                <div class="ci-kpi-val" id="kpiWhaleMsgs" style="color: #a855f7;">-</div>
+                <div class="ci-kpi-val" id="kpiWhaleMsgs" style="color: var(--module-chat);">-</div>
                 <div class="ci-kpi-sub" id="kpiWhaleShare">- % aller Nachrichten</div>
             </div>
 
@@ -141,7 +117,7 @@
                 <div class="ci-box-header">
                     <div class="ci-box-title">
                         <span>🔥 Interaktive Wortwolke</span>
-                        <span id="wordCloudCountBadge" class="ci-badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">0 Wörter</span>
+                        <span id="wordCloudCountBadge" class="ci-badge" style="background: rgba(168, 85, 247, 0.15); color: var(--module-chat);">0 Wörter</span>
                     </div>
                     <div style="font-size: 11px; color: var(--text-muted);">
                         Klicke auf ein Wort zum Filtern
@@ -225,7 +201,7 @@
 
                     <!-- Live Tail Toggle -->
                     <button type="button" id="btnToggleLiveTail" class="btn-ci-tool sm" title="Live-Polling pausieren/starten">
-                        <span id="liveTailDot" style="width:8px; height:8px; border-radius:50%; background:#10b981; display:inline-block;"></span>
+                        <span id="liveTailDot" style="width:8px; height:8px; border-radius:50%; background:var(--accent); display:inline-block;"></span>
                         <span id="liveTailText">Live: An</span>
                     </button>
 
@@ -305,16 +281,9 @@
         </section>
 
         <!-- 6. Footer Navigation -->
-        <footer class="ci-footer-nav">
-            {% if is_admin %}<a href="admin">Admin-Dashboard</a> ·{% endif %}
-            {% if 'analytics.view' in permissions %}<a href="stats">📈 Statistiken</a> ·{% endif %}
-            <a href="donor-radar">🐋 Spender-Radar &amp; Chatlogs</a> ·
-            <a href="chat-intelligence">💬 Chat Intelligence &amp; Wortwolke</a> ·
-            <a href="public">Öffentliches User-Portal</a> ·
-            {% if 'analytics.view' in permissions %}<a href="site-analytics">Web- &amp; Bot-Analysen</a> ·{% endif %}
-            <a href="logout">Abmelden</a>
-        </footer>
     </div>
+
+    {% include "partials/footer.html" %}
 
     <!-- Datensatz-Inspektor Modal Dialog -->
     <div class="insp-modal" id="recordInspectorModal" role="dialog" aria-modal="true" aria-labelledby="inspModalTitle">
@@ -381,7 +350,7 @@
             </div>
 
             <div class="insp-footer">
-                <button type="button" id="btnFilterByThisUser" class="btn-ci-tool" style="background:#8b5cf6; color:#fff; border-color:#8b5cf6;">
+                <button type="button" id="btnFilterByThisUser" class="btn-ci-tool" style="background:var(--module-chat); color:#fff; border-color:var(--module-chat);">
                     <span>👤 Nach diesem Nutzer filtern</span>
                 </button>
                 <a href="#" target="_blank" rel="noopener noreferrer" id="btnOpenTikTokProfile" class="btn-ci-tool">
@@ -396,7 +365,7 @@
 
     <!-- Export Modal Dialog -->
     <div id="exportModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
-        <div style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:10px; width:90%; max-width:440px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+        <div style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius: 0; width:90%; max-width:440px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                 <h3 style="margin:0; font-size:16px;">📥 Chatdaten Exportieren</h3>
                 <button type="button" id="btnCloseExportModal" style="background:transparent; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">&times;</button>
@@ -405,10 +374,10 @@
                 Wähle das gewünschte Format für den Export der gefilterten Chatnachrichten:
             </p>
             <div style="display:flex; flex-direction:column; gap:10px;">
-                <button type="button" id="btnDownloadCsv" class="btn-export" style="justify-content:center; padding:10px; background:#10b981; color:#fff; border-color:#10b981;">
+                <button type="button" id="btnDownloadCsv" class="btn-export" style="justify-content:center; padding:10px; background:var(--accent); color:#fff; border-color:var(--accent);">
                     📊 Als CSV-Datei herunterladen (Excel / Sheets)
                 </button>
-                <button type="button" id="btnDownloadJson" class="btn-export" style="justify-content:center; padding:10px; background:rgba(139, 92, 246, 0.2); border-color:#8b5cf6; color:#c084fc;">
+                <button type="button" id="btnDownloadJson" class="btn-export" style="justify-content:center; padding:10px; background:rgba(139, 92, 246, 0.2); border-color:var(--module-chat); color:var(--module-chat);">
                     📦 Als strukturierte JSON-Datei herunterladen (.json)
                 </button>
                 <button type="button" id="btnDownloadTxt" class="btn-export" style="justify-content:center; padding:10px;">

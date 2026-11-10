@@ -1,0 +1,73 @@
+{#
+  Gemeinsame App-Shell für alle geschützten/öffentlichen App-Seiten.
+
+  Verwendung:
+  {% from "partials/app_header.html" import app_header %}
+  {% call app_header('ADMIN CONSOLE', 'LIVE EARNINGS · ANALYTICS', 'default', 'admin', 'admin') %}
+      <span class="pill">...</span>
+  {% endcall %}
+
+  Parameter:
+  - mode:     Text im Brand-Mode-Tag (z. B. ADMIN CONSOLE)
+  - subtitle: Mono-Unterzeile
+  - module:   default | public | radar | chat | analytics | access
+  - href:     Ziel des Brand-Links
+  - active:   aktiver Navigationspunkt (admin/public/stats/radar/chat/analytics/access)
+#}
+
+{% macro app_nav(active) %}
+    {% set perms = permissions|default([]) %}
+    {% set admin = is_admin|default(false) %}
+    {% set show_stats = admin or can_view_stats|default(false) or ('analytics.view' in perms) %}
+    {% set show_radar = admin or can_view_radar|default(false) or ('radar.view' in perms) %}
+    {% set show_chat = admin or can_view_chatintel|default(false) or ('chatintel.view' in perms) %}
+    {% set show_analytics = admin or ('analytics.view' in perms) %}
+    {% set show_access = admin or can_manage_users|default(false) or ('users.manage' in perms) %}
+    <nav class="app-nav" aria-label="Hauptnavigation">
+        {% if admin %}
+        <a class="app-nav-link{{ ' active' if active == 'admin' else '' }}" href="admin">Admin</a>
+        {% endif %}
+        <a class="app-nav-link{{ ' active' if active == 'public' else '' }}" href="public">Public</a>
+        {% if show_stats %}
+        <a class="app-nav-link{{ ' active' if active == 'stats' else '' }}" href="stats">Statistiken</a>
+        {% endif %}
+        {% if show_radar %}
+        <a class="app-nav-link{{ ' active' if active == 'radar' else '' }}" href="donor-radar">Spender-Radar</a>
+        {% endif %}
+        {% if show_chat %}
+        <a class="app-nav-link{{ ' active' if active == 'chat' else '' }}" href="chat-intelligence">Chat-Intel</a>
+        {% endif %}
+        {% if show_analytics %}
+        <a class="app-nav-link{{ ' active' if active == 'analytics' else '' }}" href="site-analytics">Web-Analysen</a>
+        {% endif %}
+        {% if show_access %}
+        <a class="app-nav-link{{ ' active' if active == 'access' else '' }}" href="access">Zugriff</a>
+        {% endif %}
+        <a class="app-nav-link" href="miniapp" target="_blank" rel="noopener">Mini-App ↗</a>
+        <button type="button" class="app-nav-link" data-theme-toggle>Theme: DARK</button>
+        {% if role|default(none) or admin_sub|default(none) %}
+        <a class="app-nav-link danger" href="logout">Abmelden</a>
+        {% endif %}
+    </nav>
+{% endmacro %}
+
+{% macro app_header(mode, subtitle, module='default', href='admin', active='') %}
+<header class="app-header">
+    <div class="header-inner">
+        <a href="{{ href }}" class="brand-block">
+            <img src="pictures/bot_avatar.jpg" alt="{{ brand_name }}" class="brand-logo" />
+            <span class="brand-text">
+                <span class="brand-title-row">
+                    <span class="brand-title">{{ brand_wordmark }}</span>
+                    {% if mode %}<span class="brand-mode-tag {{ module }}">{{ mode }}</span>{% endif %}
+                </span>
+                <span class="brand-subtitle">{{ subtitle or brand_tagline }}</span>
+            </span>
+        </a>
+        <div class="header-side">
+            <div class="status-strip">{{ caller() if caller is defined else '' }}</div>
+            {{ app_nav(active) }}
+        </div>
+    </div>
+</header>
+{% endmacro %}

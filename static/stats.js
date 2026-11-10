@@ -1,5 +1,5 @@
 /*
- * TokTracker – Read-only Statistik-Dashboard.
+ * TT-INTELLIGENCE – Read-only Statistik-Dashboard.
  *
  * Bewusst ohne Verwaltungs-, Loesch- oder Buchungsfunktionen. Alle Schreib-
  * operationen bleiben dem Admin-Panel vorbehalten und werden serverseitig

@@ -1,0 +1,12 @@
+<footer class="app-footer">
+    <div class="footer-inner">
+        <div>{{ brand_name }} · {{ brand_tagline }}</div>
+        <nav class="footer-links" aria-label="Footer">
+            <a href="public">Public Panel</a>
+            <a href="miniapp" target="_blank" rel="noopener">Mini-App ↗</a>
+            {% if is_admin|default(false) %}<a href="admin">Admin</a>{% endif %}
+            {% if can_view_stats|default(false) or ('analytics.view' in permissions|default([])) %}<a href="stats">Statistiken</a>{% endif %}
+            {% if role|default(none) or admin_sub|default(none) %}<a href="logout">Abmelden</a>{% endif %}
+        </nav>
+    </div>
+</footer>

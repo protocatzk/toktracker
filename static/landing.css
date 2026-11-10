@@ -1,22 +1,9 @@
 /*
- * TokTracker – öffentliche Infoseite.
- * Stil angelehnt an proto.heliac.dev: dunkles, technisches Layout mit
- * monospaced Eyebrows, dünnen Borders und klaren Karten.
+ * TT-INTELLIGENCE – öffentliche Infoseite.
+ * Tokens/Typografie kommen aus brand.css; hier nur das Marketing-Layout.
  */
 
 :root {
-    --bg: #0d1117;
-    --surface: #12171f;
-    --surface-2: #161b22;
-    --border: #2a313c;
-    --border-subtle: #1e242d;
-    --border-strong: #f0f6fc;
-    --text: #e6edf3;
-    --text-strong: #f0f6fc;
-    --muted: #8b949e;
-    --accent: #3fb950;
-    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
     --wrap: 1080px;
 }
 
@@ -29,14 +16,11 @@
 html {
     scroll-behavior: smooth;
     background: var(--bg);
-    color-scheme: dark;
 }
 
 body {
     border-top: 2px solid var(--border-strong);
-    background:
-        radial-gradient(900px 380px at 50% -60px, #f0f6fc0f, transparent 70%),
-        var(--bg);
+    background: var(--bg);
     color: var(--text);
     font-family: var(--sans);
     -webkit-font-smoothing: antialiased;
@@ -91,8 +75,7 @@ img {
 
 .site-header {
     border-bottom: 1px solid var(--border);
-    background: #0d1117eb;
-    backdrop-filter: blur(8px);
+    background: var(--surface);
 }
 
 .header-inner {
@@ -131,7 +114,7 @@ img {
 
 .brand-title {
     letter-spacing: -0.4px;
-    text-transform: lowercase;
+    text-transform: uppercase;
     color: var(--text-strong);
     font-size: 17px;
     font-weight: 800;
@@ -244,7 +227,7 @@ img {
 
 .btn:hover {
     border-color: var(--text-strong);
-    background: #21262d;
+    background: var(--surface-hover);
     text-decoration: none;
 }
 
@@ -255,7 +238,7 @@ img {
 }
 
 .btn.primary:hover {
-    background: #fff;
+    background: var(--surface);
 }
 
 .btn.small {
@@ -461,7 +444,7 @@ img {
 }
 
 .project-card.flagship {
-    background: linear-gradient(135deg, #f0f6fc0d, transparent 60%), var(--surface);
+    background: var(--surface);
     grid-column: 1 / -1;
     padding: clamp(24px, 4vw, 36px);
 }

@@ -1,5 +1,5 @@
 /**
- * toktracker – Spender-Radar & Chatlog Controller
+ * TT-INTELLIGENCE – Spender-Radar & Chatlog Controller
  * Handles real-time polling, whale detection, filtering, and dossier inspection.
  */
 
