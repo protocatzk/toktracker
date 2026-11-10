@@ -6,7 +6,9 @@ Telegram erlaubt kein CSS. „Design“ entsteht hier deshalb über:
 - Mono-Eyebrows in ``<code>`` (// TT-INTELLIGENCE · 01 / TITEL)
 - ausgerichtete Kennzahlen in ``<pre>``-Blöcken
 - ``<blockquote>`` als linke Führungslinie
-- ein reduziertes Glyphensystem (● ○ ◆ ▸ ✓ →) statt Emoji-Ketten
+- Emojis als Kategorie-Icons in Menüs und Buttons
+- einfarbige Unicode-Glyphen (● ○ ✓ ✕ ▸) für Status, weil Telegram
+  keine eigene monochrome Status-Icon-Bibliothek für Bot-Nachrichten hat
 """
 
 import html
