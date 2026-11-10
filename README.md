@@ -114,6 +114,7 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `TIKTOK_RECONNECT_*` | Basis, Maximum und Jitter des Reconnect-Backoffs (`5`, `120`, `0.25`) |
 | `TIKTOK_SIGN_COOLDOWN_SECONDS` | Mindest-Cooldown nach einem Sign-API-429, global über Redis (Default: `60`) |
 | `TIKTOK_SESSION_GRACE_SECONDS` | Kurze Offline-Meldungen beenden die Stream-Session erst nach dieser Grace-Period (Default: `90`) |
+| `LIVE_ALERT_MIN_OFFLINE_MINUTES` | Mindest-Offline-Zeit, bevor ein neuer Stream einen Telegram-Live-Alert auslöst (Default: `30`) |
 
 ### Betrieb unter einem Unterpfad
 
@@ -140,6 +141,12 @@ Der Ingest-Worker erkennt drei Fehlerklassen selbstständig:
 3. **Sign-API-Rate-Limit:** Der Worker setzt einen globalen Redis-Cooldown
    (`tt:ratelimit:sign`). Alle Ingest-Instanzen warten, statt die Quote weiter
    zu belasten.
+
+**Live-Alerts:** Ein neuer Stream löst nur dann einen Telegram-Alert aus, wenn
+der Streamer zuvor mindestens `LIVE_ALERT_MIN_OFFLINE_MINUTES` (Default: 30)
+offline war. Kurze Stream-Neustarts und Reconnects werden übersprungen. Bei
+einem geordneten Ingest-Stopp bleibt die aktive Session offen und wird beim
+nächsten Start wiederverwendet.
 
 Sichtbare Diagnose pro Streamer im Dashboard und unter `/api/system`:
 

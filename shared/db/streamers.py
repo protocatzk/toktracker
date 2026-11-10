@@ -193,6 +193,38 @@ def get_active_stream_session(streamer_id: int) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
+def get_previous_stream_session(
+    streamer_id: int,
+    current_session_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Liefert die letzte beendete Session eines Streamers.
+
+    `current_session_id` wird ausgeschlossen, damit der Bot für ein
+    Live-Event die davorliegende Session zur Berechnung der Offline-Zeit
+    verwenden kann.
+    """
+    params: List[Any] = [int(streamer_id)]
+    id_filter = ""
+    if current_session_id is not None:
+        id_filter = "AND id < ?"
+        params.append(int(current_session_id))
+
+    with get_db() as conn:
+        row = conn.execute(
+            f"""
+            SELECT * FROM stream_sessions
+            WHERE streamer_id = ?
+              AND status != 'active'
+              AND ended_at IS NOT NULL
+              {id_filter}
+            ORDER BY id DESC LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def start_stream_session(
     streamer_id: int, room_id: str = "", title: str = ""
 ) -> int:
