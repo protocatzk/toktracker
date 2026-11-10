@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from config import config
 from database import (
+    assign_streamer_revenue_profile,
     build_streamer_bot_report,
     check_telegram_user_access,
     clear_demo_data,
@@ -43,6 +44,7 @@ from database import (
     get_live_streamers,
     get_network_loyalty_and_overlap,
     get_recent_whale_gifts,
+    get_revenue_profile,
     get_settings,
     get_site_analytics_overview,
     get_stream_sessions,
@@ -52,14 +54,17 @@ from database import (
     import_from_sqlite_database,
     init_db,
     inspect_sqlite_database,
+    list_revenue_profiles,
     list_telegram_users,
     record_api_call,
     record_bot_session,
     record_gift_event,
     record_page_view,
+    revenue_profile_summary,
     save_donor_crm,
     seed_demo_data,
     toggle_donor_vip,
+    update_revenue_profile,
     update_settings,
     upsert_streamer,
     upsert_telegram_user_permission,
@@ -2491,6 +2496,9 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
     sys_diag["telegram_bot"] = telegram_bot_service.get_diagnostics()
     data["system"] = sys_diag
     data["gift_catalog"] = TIKTOK_GIFT_CATALOG
+    data["revenue_profiles"] = [
+        revenue_profile_summary(p) for p in list_revenue_profiles()
+    ]
     return data
 
 
@@ -3380,6 +3388,75 @@ async def api_update_settings(payload: SettingsUpdateRequest):
         except Exception:
             pass
     return {"ok": True, "settings": updated}
+
+
+@app.get(
+    "/api/revenue/profiles",
+    tags=["Revenue"],
+    dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))],
+)
+async def api_revenue_profiles():
+    init_db()
+    with get_db() as conn:
+        streamer_rows = conn.execute(
+            """
+            SELECT id, username, display_name, revenue_profile_id
+            FROM streamers
+            ORDER BY username ASC
+            """
+        ).fetchall()
+    return {
+        "profiles": [revenue_profile_summary(p) for p in list_revenue_profiles()],
+        "streamers": [
+            {
+                "id": int(s["id"]),
+                "username": s["username"],
+                "display_name": s.get("display_name") or s["username"],
+                "revenue_profile_id": s.get("revenue_profile_id"),
+            }
+            for s in streamer_rows
+        ],
+    }
+
+
+@app.post(
+    "/api/revenue/profiles/{profile_id}",
+    tags=["Revenue"],
+    dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))],
+)
+async def api_update_revenue_profile(
+    profile_id: int,
+    payload: Dict[str, Any] = Body(...),
+):
+    init_db()
+    updated = update_revenue_profile(profile_id, payload)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Revenue-Profil nicht gefunden.")
+    return {"ok": True, "profile": revenue_profile_summary(updated)}
+
+
+@app.post(
+    "/api/revenue/assign",
+    tags=["Revenue"],
+    dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))],
+)
+async def api_assign_revenue_profile(payload: Dict[str, Any] = Body(...)):
+    init_db()
+    try:
+        streamer_id = int(payload.get("streamer_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="streamer_id fehlt oder ist ungültig.") from None
+    profile_id = payload.get("profile_id")
+    if profile_id is not None:
+        try:
+            profile_id = int(profile_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="profile_id ist ungültig.") from None
+        if not get_revenue_profile(profile_id):
+            raise HTTPException(status_code=404, detail="Revenue-Profil nicht gefunden.")
+    if not assign_streamer_revenue_profile(streamer_id, profile_id):
+        raise HTTPException(status_code=404, detail="Streamer nicht gefunden.")
+    return {"ok": True}
 
 
 @app.post("/api/demo/seed", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))])

@@ -92,6 +92,7 @@
             <div class="label">Netto Creator-Auszahlung</div>
             <div class="val" id="sumNetEur">0,00 €</div>
             <div class="sub" id="sumNetUsd">$0.00 USD</div>
+            <div class="sub" id="sumNetRange" style="font-size:11px;">Spanne: —</div>
         </div>
         <div class="summary-box">
             <div class="label">Gesamt Coins / Diamonds</div>
@@ -1062,12 +1063,110 @@
             </div>
         </div>
 
+        <div class="box" id="boxRevenueProfiles" style="margin-bottom:20px;">
+            <div class="box-header">
+                <div>
+                    <h2>💰 Revenue-Modell, Coin-Preise &amp; Bandbreiten</h2>
+                    <div class="section-hint">
+                        Schätzmodell pro Region: Coin-Preis, Creator-Anteil, Agency-/Payout-/Steuer-Abzüge,
+                        FX-Kurs und Unsicherheitsbandbreite. Historische Gifts behalten ihre Snapshots.
+                    </div>
+                </div>
+                <div class="inline-form">
+                    <select id="selectRevenueProfile" style="min-width:220px;"></select>
+                    <button type="button" id="btnSaveRevenueProfile" class="sm primary">Profil speichern</button>
+                </div>
+            </div>
+
+            <div class="form-grid" style="padding:0 16px 16px;">
+                <div class="field-group">
+                    <label for="revName">Profilname</label>
+                    <input type="text" id="revName" required />
+                </div>
+                <div class="field-group">
+                    <label for="revGrossRegion">Brutto-Region (Zuschauer)</label>
+                    <input type="text" id="revGrossRegion" placeholder="DE" required />
+                </div>
+                <div class="field-group">
+                    <label for="revCreatorRegion">Creator-Region</label>
+                    <input type="text" id="revCreatorRegion" placeholder="DE" required />
+                </div>
+                <div class="field-group">
+                    <label for="revCoinPriceUsd">Coin-Preis USD (brutto)</label>
+                    <input type="number" step="0.0001" id="revCoinPriceUsd" required />
+                </div>
+                <div class="field-group">
+                    <label for="revCreatorSharePct">Creator-Anteil (0-1)</label>
+                    <input type="number" step="0.01" id="revCreatorSharePct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revAgencySharePct">Agency-Anteil (0-1)</label>
+                    <input type="number" step="0.01" id="revAgencySharePct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revPayoutFeePct">Payout-Gebühr (0-1)</label>
+                    <input type="number" step="0.01" id="revPayoutFeePct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revTaxPct">Steuer (0-1, Basis)</label>
+                    <input type="number" step="0.01" id="revTaxPct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revFxRate">USD → EUR</label>
+                    <input type="number" step="0.0001" id="revFxRate" required />
+                </div>
+                <div class="field-group">
+                    <label for="revCoinUncertaintyPct">Coin-Preis ± (0-1)</label>
+                    <input type="number" step="0.01" id="revCoinUncertaintyPct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revShareUncertaintyPct">Creator-Anteil ± (0-1)</label>
+                    <input type="number" step="0.01" id="revShareUncertaintyPct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revAgencyMaxPct">Agency-Bandbreite max (0-1)</label>
+                    <input type="number" step="0.01" id="revAgencyMaxPct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revTaxMaxPct">Steuer-Bandbreite max (0-1)</label>
+                    <input type="number" step="0.01" id="revTaxMaxPct" required />
+                </div>
+                <div class="field-group">
+                    <label for="revFxUncertaintyPct">FX ± (0-1)</label>
+                    <input type="number" step="0.01" id="revFxUncertaintyPct" required />
+                </div>
+                <div class="field-group" style="display:flex; align-items:center; gap:8px; padding-top:18px;">
+                    <input type="checkbox" id="revIsDefault" style="width:17px; height:17px;" />
+                    <label for="revIsDefault" style="cursor:pointer;">Standardprofil</label>
+                </div>
+            </div>
+
+            <div style="padding:0 16px 16px;">
+                <h3 style="font-size:13px; margin-bottom:8px;">Streamer-Zuordnung</h3>
+                <div class="section-hint" style="margin-bottom:8px;">
+                    Der Pakistan-Streamer bekommt „Pakistan (DE-Zuschauer)“: Brutto-Region DE, Creator-Region PK.
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Streamer</th><th>Revenue-Profil</th></tr>
+                        </thead>
+                        <tbody id="revenueStreamerBody">
+                            <tr><td colspan="2" class="muted">Lade Streamer...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div class="grid-2">
             <div class="box">
                 <div class="box-header">
                     <div>
                         <h2>Umrechnungskurse &amp; Worker-Parameter</h2>
-                        <div class="section-hint">Berechnungsgrundlage für alle Netto- und Brutto-Auszahlungswerte.</div>
+                        <div class="section-hint">
+                            Legacy-Fallback für Altdaten. Neue Gift-Berechnungen verwenden die Revenue-Profile oben.
+                        </div>
                     </div>
                 </div>
                 <form id="formSettings" class="form-grid">
@@ -1224,5 +1323,5 @@
 
 </footer>
 
-<script src="static/dashboard.js?v=2.11.0"></script>
+<script src="static/dashboard.js?v=2.12.0"></script>
 {% endblock %}

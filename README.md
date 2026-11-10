@@ -167,6 +167,37 @@ spätestens 30 Sekunden.
 stehen, den Worker über das Dashboard stoppen/starten oder den Ingest-Container
 neu starten.
 
+### Revenue-Modell & Bandbreiten
+
+Die Einnahmen werden über konfigurierbare **Revenue-Profile** geschätzt:
+
+- `coin_price_usd` – effektiver Brutto-Coinpreis (App-Store/Web/Bundle/Land)
+- `creator_share_pct` – Creator-Anteil
+- `agency_share_pct`, `payout_fee_pct`, `tax_pct` – weitere Abzüge
+- `fx_rate` – USD → EUR
+- Unsicherheitswerte für Coinpreis, Creator-Anteil, Agency, Steuern und FX
+
+Jedes Gift-Event speichert die verwendeten Faktoren als **Snapshot**. Spätere
+Profiländerungen verändern die Vergangenheit daher nicht. Das Dashboard zeigt
+neben der exakten Schätzung eine Bandbreite.
+
+Im Admin-Panel unter **System, Kurse & Logs → Revenue-Modell** lassen sich
+Profile bearbeiten und Streamern zuordnen. Für den Pakistan-Streamer ist das
+Profil **„Pakistan (DE-Zuschauer)“** vorbereitet (Brutto-Region DE,
+Creator-Region PK).
+
+Die einmalige Migration für den Cutoff `2026-11-01`:
+
+```bash
+# Dry-Run
+docker exec toktracker_app python migrate_revenue_model.py
+
+# anwenden (Gift-Events und Battles ab 2026-11-01)
+docker exec toktracker_app python migrate_revenue_model.py --apply
+```
+
+Events vor dem Cutoff bleiben als Legacy-Snapshots unverändert.
+
 ---
 
 ## Sicherheit & Datenschutz

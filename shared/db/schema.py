@@ -2,6 +2,7 @@
 TokTracker - Schema-Initialisierung und Migrationen für SQLite und MySQL/MariaDB.
 """
 
+import logging
 import re
 import sqlite3
 import threading
@@ -18,6 +19,8 @@ except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
 
 from shared.config import config
 from shared.db._base import DEFAULT_SETTINGS, MySQLConnectionWrapper, _open_mysql_connection, get_db
+
+logger = logging.getLogger("toktracker.schema")
 
 _db_init_lock = threading.Lock()
 
@@ -83,6 +86,30 @@ def _init_mysql_schema() -> None:
             CREATE TABLE IF NOT EXISTS settings (
                 `key` VARCHAR(128) PRIMARY KEY,
                 `value` TEXT NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS revenue_profiles (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(191) NOT NULL UNIQUE,
+                gross_region VARCHAR(16) NOT NULL DEFAULT 'DE',
+                creator_region VARCHAR(16) NOT NULL DEFAULT 'DE',
+                coin_price_usd DECIMAL(14,8) NOT NULL DEFAULT 0.01050000,
+                creator_share_pct DECIMAL(6,4) NOT NULL DEFAULT 0.5000,
+                agency_share_pct DECIMAL(6,4) NOT NULL DEFAULT 0.0000,
+                payout_fee_pct DECIMAL(6,4) NOT NULL DEFAULT 0.0000,
+                tax_pct DECIMAL(6,4) NOT NULL DEFAULT 0.0000,
+                coin_price_uncertainty_pct DECIMAL(6,4) NOT NULL DEFAULT 0.1000,
+                creator_share_uncertainty_pct DECIMAL(6,4) NOT NULL DEFAULT 0.0500,
+                agency_share_max_pct DECIMAL(6,4) NOT NULL DEFAULT 0.1500,
+                tax_max_pct DECIMAL(6,4) NOT NULL DEFAULT 0.3000,
+                fx_rate DECIMAL(14,8) NOT NULL DEFAULT 0.92000000,
+                fx_uncertainty_pct DECIMAL(6,4) NOT NULL DEFAULT 0.0200,
+                is_default TINYINT DEFAULT 0,
+                valid_from VARCHAR(64) NOT NULL,
+                created_at VARCHAR(64) NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
@@ -307,6 +334,16 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
         _ensure_index_mysql(conn, "gift_events", "idx_gift_events_sender", "sender_username")
+        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_gift", "streamer_id, gift_name, total_coins, repeat_count")
+        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_sender", "streamer_id, sender_username, total_coins")
+        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_created", "created_at")
+        _ensure_index_mysql(
+            conn,
+            "gift_events",
+            "idx_gift_events_revenue_cover",
+            "streamer_id, created_at, total_coins, usd_net, eur_net, usd_gross, eur_gross, "
+            "usd_net_low, usd_net_high, eur_net_low, eur_net_high",
+        )
         _ensure_index_mysql(conn, "stream_sessions", "idx_stream_sessions_streamer", "streamer_id, started_at")
         _ensure_index_mysql(conn, "telegram_users", "idx_telegram_users_username", "username")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_streamer", "streamer_id, created_at")
@@ -348,6 +385,37 @@ def _init_mysql_schema() -> None:
         _ensure_column_mysql(conn, "tiktok_battles", "opponent3_avatar_url", "TEXT")
         _ensure_column_mysql(conn, "tiktok_battles", "opponent3_score", "BIGINT DEFAULT 0")
         _ensure_column_mysql(conn, "tiktok_battles", "streamer_rank", "INT DEFAULT 0")
+
+        _ensure_column_mysql(conn, "streamers", "revenue_profile_id", "BIGINT NULL")
+        _ensure_column_mysql(conn, "gift_events", "revenue_profile_id", "BIGINT NULL")
+        _ensure_column_mysql(conn, "gift_events", "revenue_model", "VARCHAR(32) DEFAULT 'legacy'")
+        _ensure_column_mysql(conn, "gift_events", "coin_price_usd", "DECIMAL(14,8) NULL")
+        _ensure_column_mysql(conn, "gift_events", "creator_share_pct", "DECIMAL(6,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "agency_share_pct", "DECIMAL(6,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "payout_fee_pct", "DECIMAL(6,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "tax_pct", "DECIMAL(6,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "fx_rate", "DECIMAL(14,8) NULL")
+        _ensure_column_mysql(conn, "gift_events", "usd_net_low", "DECIMAL(14,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "usd_net_high", "DECIMAL(14,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "eur_net_low", "DECIMAL(14,4) NULL")
+        _ensure_column_mysql(conn, "gift_events", "eur_net_high", "DECIMAL(14,4) NULL")
+
+        # Bestehende Legacy-Zeilen ohne Bandbreite: exakter Wert als Unter-/Obergrenze.
+        conn.execute(
+            """
+            UPDATE gift_events
+            SET usd_net_low = COALESCE(usd_net_low, usd_net),
+                usd_net_high = COALESCE(usd_net_high, usd_net),
+                eur_net_low = COALESCE(eur_net_low, eur_net),
+                eur_net_high = COALESCE(eur_net_high, eur_net),
+                revenue_model = COALESCE(revenue_model, 'legacy')
+            WHERE usd_net_low IS NULL
+               OR usd_net_high IS NULL
+               OR eur_net_low IS NULL
+               OR eur_net_high IS NULL
+               OR revenue_model IS NULL
+            """
+        )
         conn.commit()
     finally:
         raw_conn.close()
@@ -360,6 +428,27 @@ def _init_sqlite_schema() -> None:
             CREATE TABLE IF NOT EXISTS settings (
                 `key` TEXT PRIMARY KEY,
                 `value` TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS revenue_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                gross_region TEXT NOT NULL DEFAULT 'DE',
+                creator_region TEXT NOT NULL DEFAULT 'DE',
+                coin_price_usd REAL NOT NULL DEFAULT 0.0105,
+                creator_share_pct REAL NOT NULL DEFAULT 0.50,
+                agency_share_pct REAL NOT NULL DEFAULT 0.0,
+                payout_fee_pct REAL NOT NULL DEFAULT 0.0,
+                tax_pct REAL NOT NULL DEFAULT 0.0,
+                coin_price_uncertainty_pct REAL NOT NULL DEFAULT 0.10,
+                creator_share_uncertainty_pct REAL NOT NULL DEFAULT 0.05,
+                agency_share_max_pct REAL NOT NULL DEFAULT 0.15,
+                tax_max_pct REAL NOT NULL DEFAULT 0.30,
+                fx_rate REAL NOT NULL DEFAULT 0.92,
+                fx_uncertainty_pct REAL NOT NULL DEFAULT 0.02,
+                is_default INTEGER DEFAULT 0,
+                valid_from TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS streamers (
@@ -574,6 +663,36 @@ def _init_sqlite_schema() -> None:
         _ensure_column_sqlite(conn, "tiktok_battles", "opponent3_score", "INTEGER DEFAULT 0")
         _ensure_column_sqlite(conn, "tiktok_battles", "streamer_rank", "INTEGER DEFAULT 0")
 
+        _ensure_column_sqlite(conn, "streamers", "revenue_profile_id", "INTEGER")
+        _ensure_column_sqlite(conn, "gift_events", "revenue_profile_id", "INTEGER")
+        _ensure_column_sqlite(conn, "gift_events", "revenue_model", "TEXT DEFAULT 'legacy'")
+        _ensure_column_sqlite(conn, "gift_events", "coin_price_usd", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "creator_share_pct", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "agency_share_pct", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "payout_fee_pct", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "tax_pct", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "fx_rate", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "usd_net_low", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "usd_net_high", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "eur_net_low", "REAL")
+        _ensure_column_sqlite(conn, "gift_events", "eur_net_high", "REAL")
+
+        conn.execute(
+            """
+            UPDATE gift_events
+            SET usd_net_low = COALESCE(usd_net_low, usd_net),
+                usd_net_high = COALESCE(usd_net_high, usd_net),
+                eur_net_low = COALESCE(eur_net_low, eur_net),
+                eur_net_high = COALESCE(eur_net_high, eur_net),
+                revenue_model = COALESCE(revenue_model, 'legacy')
+            WHERE usd_net_low IS NULL
+               OR usd_net_high IS NULL
+               OR eur_net_low IS NULL
+               OR eur_net_high IS NULL
+               OR revenue_model IS NULL
+            """
+        )
+
         conn.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_date
@@ -582,6 +701,18 @@ def _init_sqlite_schema() -> None:
                 ON gift_events(session_id);
             CREATE INDEX IF NOT EXISTS idx_gift_events_sender
                 ON gift_events(sender_username);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_gift
+                ON gift_events(streamer_id, gift_name, total_coins, repeat_count);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_sender
+                ON gift_events(streamer_id, sender_username, total_coins);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_created
+                ON gift_events(created_at);
+            CREATE INDEX IF NOT EXISTS idx_gift_events_revenue_cover
+                ON gift_events(
+                    streamer_id, created_at, total_coins, usd_net, eur_net,
+                    usd_gross, eur_gross, usd_net_low, usd_net_high,
+                    eur_net_low, eur_net_high
+                );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_events_uid
                 ON gift_events(event_uid) WHERE event_uid IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_stream_sessions_streamer
@@ -688,4 +819,15 @@ def init_db(force: bool = False) -> None:
                         """,
                         (tg_uname.lower(), now, now),
                     )
+
+        # Default-Revenue-Profile anlegen und Streamer ohne Profil zuordnen.
+        # Mehrere Container können init_db() parallel ausführen; MySQL kann
+        # dabei mit "Record has changed since last read" (1020) antworten.
+        # Das ist unkritisch, weil ein anderer Prozess die Zuordnung abschließt.
+        from shared.db.revenue import ensure_revenue_profiles
+
+        try:
+            ensure_revenue_profiles()
+        except Exception as exc:
+            logger.warning("Revenue-Profile konnten nicht vollständig initialisiert werden: %s", exc)
         _db_initialized = True
