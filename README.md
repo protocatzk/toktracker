@@ -1,6 +1,11 @@
-# TokTracker
+# TT-INTELLIGENCE
 
-**TikTok Live Earnings Tracker** – erfasst TikTok-Livestreams in Echtzeit, berechnet Brutto-/Netto-Einnahmen in USD und EUR, visualisiert sie in einem Web-Dashboard und liefert Reports über einen Telegram-Bot.
+**Live Earnings Intelligence** – erfasst TikTok-Livestreams in Echtzeit, berechnet Brutto-/Netto-Einnahmen in USD und EUR, visualisiert sie in einem Web-Dashboard und liefert Reports über einen Telegram-Bot.
+
+> Markenhinweis: Die sichtbare Oberfläche heißt **TT-INTELLIGENCE**. Technische
+> Bezeichner (Cookies, localStorage-Keys, Redis-Prefixe, Docker-Services,
+> Datenbank-Namen) bleiben aus Kompatibilitätsgründen unter `toktracker`.
+> Die Marken-Konstanten liegen zentral in [`shared/branding.py`](./shared/branding.py).
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688?logo=fastapi&logoColor=white)

@@ -79,6 +79,7 @@ from schemas import (
 from shared.access_gate import is_exempt_path, session_grants_access, wants_json
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_client import bot_client as telegram_bot_service
+from shared.branding import brand_context
 from shared.bus import get_bus
 from shared.contracts import CHANNEL_SETTINGS_CHANGED
 from shared.database import invalidate_settings_cache
@@ -252,6 +253,9 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 if os.path.isdir(os.path.join(BASE_DIR, "pictures")):
     app.mount("/pictures", StaticFiles(directory=os.path.join(BASE_DIR, "pictures")), name="pictures")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+# Marken-Konstanten zentral in allen Templates verfügbar machen.
+templates.env.globals.update(brand_context())
 
 
 def _extract_client_ip(request: Request) -> str:
