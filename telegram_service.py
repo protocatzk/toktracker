@@ -153,7 +153,7 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
         "────────────────────────",
     ]
     html_lines = [
-        bf.eyebrow(f"REPORT / {hours}H"),
+        bf.eyebrow(f"{bf.BRAND} · REPORT / {hours}H"),
         bf.kv_table(
             [
                 ("STAND", now.strftime("%d.%m.%Y %H:%M")),

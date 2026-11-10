@@ -3517,3 +3517,45 @@ code {
 ::-webkit-scrollbar-thumb {
     background: var(--border);
 }
+
+/* Restfarben der Legacy-Komponenten auf die Industrial-Palette ziehen */
+.ma-mini-kpi-sub,
+.ma-gifter-coins {
+    color: var(--text-strong);
+}
+
+.ma-ticker-pulse {
+    background: var(--accent);
+    box-shadow: none;
+    animation: none;
+}
+
+.ma-ticker-chip:active,
+.ma-ticker-btn.active {
+    border-color: var(--text-strong);
+    background: var(--surface-2);
+    color: var(--text-strong);
+}
+
+.ma-btn-toggle.active {
+    background: var(--text-strong);
+    border-color: var(--text-strong);
+    color: var(--bg);
+}
+
+.ma-toast.success {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.ma-toast.error {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.ma-whale-ticker-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    box-shadow: none;
+}
