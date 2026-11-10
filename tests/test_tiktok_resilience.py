@@ -107,12 +107,16 @@ class TestWorkerDiagnostics(unittest.TestCase):
     def test_snapshot_contains_health_fields(self):
         worker = StreamerWorker(streamer_id=1, username="@resilience_test")
         worker.diag.state = "connected"
-        worker._last_frame_mono = time.monotonic() - 30
-        worker._connected_at_mono = time.monotonic() - 120
         worker.diag.last_disconnect_reason = "network"
         worker.diag.close_code = 1006
 
-        snap = worker.get_snapshot()
+        # Deterministische monotonic-Clock: auf frisch gebooteten CI-Runnern
+        # kann time.monotonic() kleiner als 120 sein, wodurch die alten
+        # Subtraktionen negativ wurden und der Snapshot 0 lieferte.
+        with patch("tiktok_service.time.monotonic", return_value=1000.0):
+            worker._last_frame_mono = 970.0
+            worker._connected_at_mono = 880.0
+            snap = worker.get_snapshot()
         self.assertEqual(snap["transport"], "tiktoklive")
         self.assertGreaterEqual(snap["last_frame_age_seconds"], 29)
         self.assertGreaterEqual(snap["connected_for_seconds"], 119)
