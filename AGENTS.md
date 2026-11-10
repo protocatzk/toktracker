@@ -209,6 +209,20 @@ Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
 4. **Fehlertoleranz**:
    - Wenn der Telegram-Bot nicht erreichbar ist (z.B. falscher Token), darf FastAPI nicht abstürzen. Das System ist fehlertolerant aufgebaut (`telegram_bot_service.start()` fängt Fehler isoliert ab).
 
+### Design-System & Frontend
+
+Verbindlicher Styling-Guide: [`docs/design-system.md`](./docs/design-system.md).
+
+Kurzregeln für neue Seiten:
+
+- Von [`templates/base.html`](./templates/base.html) erben; `brand.css` wird dort global geladen.
+- Header über `partials/app_header.html`, Footer über `partials/footer.html` einbinden – keinen eigenen Header-Markup duplizieren.
+- Nur Tokens/Komponenten aus [`static/brand.css`](./static/brand.css) verwenden. Keine Inline-Styles, Gradients, Glows oder hardcodierten Farben.
+- Dark **und** Light prüfen; die Mini-App bleibt dark-only.
+- Sichtbare Marke ist `brand_name`/`brand_wordmark` (`TT-INTELLIGENCE`). Technische Identifier (`toktracker_session`, `toktracker_*`, Redis-/Docker-/DB-Namen) bleiben unverändert.
+- Bei CSS-/JS-Änderungen die `?v=`-Version in den Templates erhöhen.
+- [`tests/test_branding.py`](./tests/test_branding.py) und [`tests/test_frontend_assets.py`](./tests/test_frontend_assets.py) bei neuen Seiten/Assets mitpflegen.
+
 ---
 
 ## 7. Wichtige Befehle
