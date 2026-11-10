@@ -168,7 +168,7 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
     ]
 
     for idx, c in enumerate(cards, start=1):
-        status_dot = "●" if c["is_live"] else "○"
+        status_dot = "🟢" if c["is_live"] else "⚪"
         top_g = (
             f"{c['top_gifts'][0]['gift_name']} ({c['top_gifts'][0]['total_coins']:,})"
             if c["top_gifts"]
@@ -771,7 +771,7 @@ class TelegramBotService:
             1 if access.get("allowed") else 0,
         )
         if not access.get("allowed") or PERM_BOT_ADMIN_LOGIN not in access_perms:
-            await query.answer("× Nur Administratoren dürfen Logins freigeben.", show_alert=True)
+            await query.answer("⛔ Nur Administratoren dürfen Logins freigeben.", show_alert=True)
             return
 
         action_part, cid = query.data.split(":", 1)
@@ -1441,7 +1441,7 @@ class TelegramBotService:
             worker_state,
         )
 
-        live_str = bf.status(bool(card["is_live"])) if card["is_live"] else f"○ {card['worker_state'].upper()}"
+        live_str = bf.LIVE if card["is_live"] else bf.worker_status(card["worker_state"])
         top_g = (
             " · ".join(
                 f"{g['gift_name']} ({g['total_coins']:,})" for g in card["top_gifts"][:3]
@@ -1560,7 +1560,7 @@ class TelegramBotService:
             lines.append("<i>Keine Einnahmen in diesem Zeitraum verzeichnet.</i>")
         else:
             for idx, s in enumerate(active_sorted[:5], start=1):
-                live_badge = " ●" if s.get("is_live") else ""
+                live_badge = " 🟢" if s.get("is_live") else ""
                 s_coins = int(s.get("total_coins") or 0)
                 s_eur = float(s.get("eur_net") or 0.0)
                 lines.append(
@@ -2178,7 +2178,7 @@ class TelegramBotService:
             update.effective_chat.title if update.effective_chat else "",
         )
         if not access.get("allowed"):
-            await query.answer("× Kein Zugriff (Whitelist aktiv).", show_alert=True)
+            await query.answer("⛔ Kein Zugriff (Whitelist aktiv).", show_alert=True)
             return
 
         data = query.data
@@ -2191,7 +2191,7 @@ class TelegramBotService:
 
         async def _deny_permission(permission: str) -> None:
             await query.answer(
-                f"× Deine Rolle ({role_label(access_role)}) darf diese Aktion nicht ausführen.",
+                f"⛔ Deine Rolle ({role_label(access_role)}) darf diese Aktion nicht ausführen.",
                 show_alert=True,
             )
 
@@ -2348,7 +2348,7 @@ class TelegramBotService:
         ]
         for w in workers:
             worker_state = str(w["state"]).lower()
-            state_glyph = bf.LIVE if worker_state in ("live", "connected", "streaming") else f"○ {worker_state.upper()}"
+            state_glyph = bf.worker_status(worker_state)
             lines.append(
                 f"{state_glyph} · <b>@{html.escape(w['username'])}</b> · "
                 f"{w['current_viewers']} Viewer · {w['coins_received_session']:,} Coins"
@@ -2493,7 +2493,7 @@ class TelegramBotService:
         ]
         for u in users[:30]:
             st = int(u.get("is_allowed", 0))
-            badge = "✓" if st == 1 else ("…" if st == 0 else "×")
+            badge = "✅" if st == 1 else ("⏳" if st == 0 else "🚫")
             role_tag = f" [{role_label(u.get('role')).upper()}]"
             uname = f"@{u['username']}" if u.get("username") else (u.get("first_name") or "-")
             tg_id = u.get("telegram_id") or "-"

@@ -7,8 +7,7 @@ Telegram erlaubt kein CSS. „Design“ entsteht hier deshalb über:
 - ausgerichtete Kennzahlen in ``<pre>``-Blöcken
 - ``<blockquote>`` als linke Führungslinie
 - Emojis als Kategorie-Icons in Menüs und Buttons
-- einfarbige Unicode-Glyphen (● ○ ✓ ✕ ▸) für Status, weil Telegram
-  keine eigene monochrome Status-Icon-Bibliothek für Bot-Nachrichten hat
+- farbige Status-Emojis (🟢 ⚪ 🟡 🔴 ✅ ⏳ 🚫) für maximale Sichtbarkeit
 """
 
 import html
@@ -21,8 +20,8 @@ RULE = "────────────────────────
 TELEGRAM_LIMIT = 4096
 
 # Erlaubte Status-Glyphen
-LIVE = "● LIVE"
-OFFLINE = "○ OFFLINE"
+LIVE = "🟢 LIVE"
+OFFLINE = "⚪ OFFLINE"
 
 
 def esc(value: object) -> str:
@@ -65,6 +64,20 @@ def blockquote(body: str) -> str:
 
 def status(is_live: bool) -> str:
     return LIVE if is_live else OFFLINE
+
+
+def worker_status(state: str) -> str:
+    """Mappt Worker-Zustände auf gut sichtbare Status-Emojis."""
+    value = (state or "").strip().lower()
+    if value in ("live", "connected", "streaming"):
+        return LIVE
+    if value in ("error", "failed"):
+        return "🔴 ERROR"
+    if value in ("connecting", "backoff", "polling", "polling_offline"):
+        return f"🟡 {value.upper()}"
+    if not value:
+        return "⚪ UNKNOWN"
+    return f"⚪ {value.upper()}"
 
 
 def rank(index: int) -> str:

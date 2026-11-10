@@ -79,8 +79,9 @@ alert - [Admin] Live-Alert in diesem Chat verwalten
 - Eyebrow: `// TT-INTELLIGENCE · 01 / TITEL` in `<code>`.
 - Kennzahlen: ausgerichtete `<pre>`-Tabelle, Breite ≤ 34 Zeichen.
 - Menü-Kategorien und Buttons: ein Emoji als Icon (📊 🎯 🐋 🏆 ⚙️ …).
-- Status: einfarbige Unicode-Glyphen `● LIVE` / `○ OFFLINE`, `✓` / `✕`.
-  Telegram bietet keine eigene monochrome Status-Icon-Bibliothek für Bots.
+- Status: farbige Emojis für bessere Sichtbarkeit — `🟢 LIVE` / `⚪ OFFLINE`,
+  `✅` freigeschaltet, `⏳` wartend, `🚫` gesperrt, `🟡` verbindet/Backoff,
+  `🔴` Fehler.
 - Trenner: `────────────────────────`.
 - Footer: `TT-I · TT.MM.JJJJ HH:MM`.
 - Keine Emoji-Ketten; maximal ein Icon pro Zeile/Button.
