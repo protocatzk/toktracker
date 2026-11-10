@@ -127,6 +127,12 @@ class AppConfig:
     tiktok_gift_cache_ttl: int = int(os.getenv("TIKTOK_GIFT_CACHE_TTL_SECONDS", "21600"))
     tiktok_session_grace: int = int(os.getenv("TIKTOK_SESSION_GRACE_SECONDS", "90"))
 
+    # Live-Alerts: Mindest-Offline-Zeit, bevor ein neuer Stream als Alert gilt.
+    # Verhindert Spam bei kurzen Stream-Neustarts/Reconnects.
+    live_alert_min_offline_minutes: int = int(
+        os.getenv("LIVE_ALERT_MIN_OFFLINE_MINUTES", "30")
+    )
+
     # Telegram Bot Konfiguration & Zugriffskontrolle
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -288,6 +294,7 @@ class AppConfig:
             "tiktok_reconnect_base": self.tiktok_reconnect_base,
             "tiktok_reconnect_max": self.tiktok_reconnect_max,
             "tiktok_session_grace": self.tiktok_session_grace,
+            "live_alert_min_offline_minutes": self.live_alert_min_offline_minutes,
             "has_telegram_config": bool(self.telegram_bot_token),
             "telegram_access_mode": self.telegram_access_mode,
             "telegram_webapp_url": self.telegram_webapp_url,

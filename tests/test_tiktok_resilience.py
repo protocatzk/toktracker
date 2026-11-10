@@ -12,11 +12,17 @@ import asyncio
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from shared.database import (
+    get_active_stream_session,
+    start_stream_session,
+    upsert_streamer,
+)
 from tiktok_service import (
     DisconnectReason,
     ReconnectPolicy,
+    StreamerMonitorManager,
     StreamerWorker,
     classify_disconnect,
     sign_cooldown_seconds,
@@ -128,6 +134,77 @@ class TestWorkerDiagnostics(unittest.TestCase):
         streaks.assert_called_once()
         chats.assert_called_once()
         session.assert_called_once()
+
+
+class TestGracefulShutdownSession(unittest.TestCase):
+    def _worker_with_session(self, username):
+        streamer = upsert_streamer(username)
+        streamer_id = int(streamer["id"])
+        session_id = start_stream_session(streamer_id, room_id="room-preserve")
+        worker = StreamerWorker(streamer_id, username)
+        worker.diag.session_id = session_id
+        return streamer_id, session_id, worker
+
+    def test_preserve_db_state_keeps_session_active(self):
+        streamer_id, session_id, worker = self._worker_with_session(
+            "alert_preserve_session"
+        )
+        worker._preserve_db_state = True
+
+        with (
+            patch.object(worker, "_finish_active_battle_if_any"),
+            patch.object(worker, "_flush_all_pending_streaks"),
+            patch.object(worker, "_flush_chat_buffer"),
+        ):
+            worker._cleanup_runtime_state()
+
+        active = get_active_stream_session(streamer_id)
+        self.assertIsNotNone(active)
+        self.assertEqual(int(active["id"]), session_id)
+
+    def test_manual_stop_ends_session(self):
+        streamer_id, session_id, worker = self._worker_with_session(
+            "alert_manual_stop_session"
+        )
+        worker._preserve_db_state = False
+
+        with (
+            patch.object(worker, "_finish_active_battle_if_any"),
+            patch.object(worker, "_flush_all_pending_streaks"),
+            patch.object(worker, "_flush_chat_buffer"),
+        ):
+            worker._cleanup_runtime_state()
+
+        self.assertIsNone(get_active_stream_session(streamer_id))
+
+    def test_manual_stop_closes_stale_session_without_diag_state(self):
+        streamer = upsert_streamer("alert_stale_session")
+        streamer_id = int(streamer["id"])
+        start_stream_session(streamer_id, room_id="room-stale")
+        worker = StreamerWorker(streamer_id, "alert_stale_session")
+        worker._preserve_db_state = False
+        self.assertIsNone(worker.diag.session_id)
+
+        with (
+            patch.object(worker, "_finish_active_battle_if_any"),
+            patch.object(worker, "_flush_all_pending_streaks"),
+            patch.object(worker, "_flush_chat_buffer"),
+        ):
+            worker._cleanup_runtime_state()
+
+        self.assertIsNone(get_active_stream_session(streamer_id))
+
+
+class TestPauseTracking(unittest.TestCase):
+    def test_pause_preserves_db_state_and_session(self):
+        manager = StreamerMonitorManager()
+        worker = MagicMock()
+        manager._workers["paused_streamer"] = worker
+
+        result = manager.pause_tracking("@paused_streamer")
+
+        worker.stop.assert_called_once_with(preserve_db_state=True)
+        self.assertTrue(result["ok"])
 
 
 class TestChatDeduplication(unittest.TestCase):

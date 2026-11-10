@@ -8,6 +8,7 @@ except ImportError:  # pragma: no cover
     import _bootstrap  # noqa: F401
 
 import unittest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -16,6 +17,7 @@ from shared.database import (
     add_streamer_alert,
     end_stream_session,
     get_active_stream_session,
+    get_db,
     list_streamer_alert_subscriptions,
     mark_streamer_alert_notified,
     remove_streamer_alert,
@@ -172,6 +174,108 @@ class TestTelegramAlertDispatch(unittest.IsolatedAsyncioTestCase):
 
         subscriptions = list_streamer_alert_subscriptions(chat_id=chat_id)
         self.assertEqual(int(subscriptions[0]["last_notified_session_id"]), 9001)
+        remove_streamer_alert(streamer_id, chat_id)
+
+    def _dispatch_payload(self, streamer_id, username, session_id):
+        return {
+            "type": EVENT_LIVE_STATUS,
+            "streamer_id": streamer_id,
+            "username": username,
+            "display_name": username,
+            "avatar_url": "",
+            "room_id": "room-test",
+            "session_id": session_id,
+            "title": "Teststream",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    async def test_skips_alert_when_offline_gap_is_too_short(self):
+        from config import config
+        from telegram_service import TelegramBotService
+
+        streamer = upsert_streamer("alert_min_offline_short")
+        streamer_id = int(streamer["id"])
+        chat_id = -1009000000101
+        remove_streamer_alert(streamer_id, chat_id)
+        add_streamer_alert(streamer_id, chat_id, chat_title="Short Gap")
+
+        previous_id = start_stream_session(streamer_id, room_id="room-prev")
+        end_stream_session(streamer_id, previous_id)
+        current_id = start_stream_session(streamer_id, room_id="room-current")
+
+        service = TelegramBotService()
+        service._state = "running"
+        service._app = FakeApp()
+
+        with patch.object(config, "live_alert_min_offline_minutes", 30):
+            await service._send_live_status_alert(
+                self._dispatch_payload(streamer_id, "alert_min_offline_short", current_id)
+            )
+
+        self.assertEqual(service._app.bot.messages, [])
+        subscriptions = list_streamer_alert_subscriptions(chat_id=chat_id)
+        self.assertEqual(int(subscriptions[0]["last_notified_session_id"]), current_id)
+        remove_streamer_alert(streamer_id, chat_id)
+
+    async def test_sends_alert_after_offline_gap(self):
+        from config import config
+        from telegram_service import TelegramBotService
+
+        streamer = upsert_streamer("alert_min_offline_long")
+        streamer_id = int(streamer["id"])
+        chat_id = -1009000000102
+        remove_streamer_alert(streamer_id, chat_id)
+        add_streamer_alert(streamer_id, chat_id, chat_title="Long Gap")
+
+        previous_id = start_stream_session(streamer_id, room_id="room-prev")
+        end_stream_session(streamer_id, previous_id)
+        old_end = (datetime.now() - timedelta(minutes=31)).isoformat(timespec="seconds")
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE stream_sessions SET ended_at = ? WHERE id = ?",
+                (old_end, previous_id),
+            )
+        current_id = start_stream_session(streamer_id, room_id="room-current")
+
+        service = TelegramBotService()
+        service._state = "running"
+        service._app = FakeApp()
+
+        with patch.object(config, "live_alert_min_offline_minutes", 30):
+            await service._send_live_status_alert(
+                self._dispatch_payload(streamer_id, "alert_min_offline_long", current_id)
+            )
+
+        self.assertEqual(len(service._app.bot.messages), 1)
+        subscriptions = list_streamer_alert_subscriptions(chat_id=chat_id)
+        self.assertEqual(int(subscriptions[0]["last_notified_session_id"]), current_id)
+        remove_streamer_alert(streamer_id, chat_id)
+
+    async def test_concurrent_duplicate_event_sends_once(self):
+        import asyncio
+
+        from telegram_service import TelegramBotService
+
+        streamer = upsert_streamer("alert_concurrent_dispatch")
+        streamer_id = int(streamer["id"])
+        chat_id = -1009000000103
+        remove_streamer_alert(streamer_id, chat_id)
+        add_streamer_alert(streamer_id, chat_id, chat_title="Concurrent")
+
+        session_id = start_stream_session(streamer_id, room_id="room-concurrent")
+        service = TelegramBotService()
+        service._state = "running"
+        service._app = FakeApp()
+        payload = self._dispatch_payload(
+            streamer_id, "alert_concurrent_dispatch", session_id
+        )
+
+        await asyncio.gather(
+            service._send_live_status_alert(payload),
+            service._send_live_status_alert(payload),
+        )
+
+        self.assertEqual(len(service._app.bot.messages), 1)
         remove_streamer_alert(streamer_id, chat_id)
 
 

@@ -51,6 +51,7 @@ from database import (
     get_donor_radar_data,
     get_live_streamers,
     get_network_loyalty_and_overlap,
+    get_previous_stream_session,
     get_recent_whale_gifts,
     get_settings,
     get_streamer_by_id_or_username,
@@ -238,6 +239,7 @@ class TelegramBotService:
         self._logs: Deque[Dict[str, str]] = deque(maxlen=40)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._live_alert_subscribed: bool = False
+        self._live_alert_lock: Optional[asyncio.Lock] = None
 
     def _log(self, level: str, msg: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -471,6 +473,13 @@ class TelegramBotService:
             self._log("ERROR", f"Live-Status-Event konnte nicht eingeplant werden: {exc}")
 
     async def _send_live_status_alert(self, payload: Dict[str, Any]) -> None:
+        """Serialisiert die Alert-Zustellung, damit parallele Events nicht doppelt senden."""
+        if self._live_alert_lock is None:
+            self._live_alert_lock = asyncio.Lock()
+        async with self._live_alert_lock:
+            await self._dispatch_live_status_alert(payload)
+
+    async def _dispatch_live_status_alert(self, payload: Dict[str, Any]) -> None:
         """Verschickt einen Live-Alert an alle abonnierten Chats eines Streamers."""
         if not self._app or self._state != "running":
             return
@@ -494,6 +503,49 @@ class TelegramBotService:
             streamer_id=streamer_id,
         )
         if not alerts:
+            return
+
+        # Nur alarmieren, wenn der Streamer zuvor ausreichend lange offline war.
+        # Kurze Stream-Neustarts/Reconnects sollen keinen neuen Alert auslösen.
+        min_offline_minutes = max(0, int(config.live_alert_min_offline_minutes or 0))
+        previous_session = await asyncio.to_thread(
+            get_previous_stream_session,
+            streamer_id,
+            session_id,
+        )
+        offline_seconds: Optional[float] = None
+        if previous_session and previous_session.get("ended_at"):
+            try:
+                ended_at = datetime.fromisoformat(str(previous_session["ended_at"]))
+                offline_seconds = max(0.0, (datetime.now() - ended_at).total_seconds())
+            except (TypeError, ValueError):
+                offline_seconds = None
+
+        if (
+            min_offline_minutes > 0
+            and offline_seconds is not None
+            and offline_seconds < min_offline_minutes * 60
+        ):
+            # Gleitende Dedupe: auch übersprungene Sessions markieren, damit
+            # dasselbe Event nicht später erneut verarbeitet wird.
+            for alert in alerts:
+                try:
+                    await asyncio.to_thread(
+                        mark_streamer_alert_notified,
+                        int(alert["id"]),
+                        session_id,
+                    )
+                except Exception:
+                    pass
+            if offline_seconds < 60:
+                offline_label = f"{int(offline_seconds)} Sek."
+            else:
+                offline_label = f"{offline_seconds / 60:.1f}".replace(".", ",") + " Min."
+            self._log(
+                "INFO",
+                f"Live-Alert für @{username} übersprungen: nur {offline_label} offline "
+                f"(Minimum {min_offline_minutes} Min.).",
+            )
             return
 
         stream_url = f"https://www.tiktok.com/@{username}/live"

@@ -719,6 +719,16 @@ class StreamerWorker:
         with self._lock:
             session_id = self.diag.session_id
             self.diag.session_id = None
+        if not session_id:
+            # Nach einem Neustart kann eine Session aus dem vorherigen Prozess
+            # noch aktiv sein, ohne dass dieser Worker sie im Diagnose-State hat.
+            # Beim Offline-Pfad/Manuell-Stop muss sie trotzdem geschlossen werden.
+            try:
+                active = get_active_stream_session(self.streamer_id)
+                if active:
+                    session_id = int(active["id"])
+            except Exception:
+                session_id = None
         if session_id:
             try:
                 end_stream_session(self.streamer_id, session_id)
@@ -734,7 +744,14 @@ class StreamerWorker:
         self._finish_active_battle_if_any()
         self._flush_all_pending_streaks()
         self._flush_chat_buffer()
-        self._end_active_session()
+
+        # Bei einem geordneten Server-/Container-Stopp (preserve_db_state=True)
+        # bleibt die Session absichtlich offen. Der nächste Worker kann sie bei
+        # gleicher Room-ID wiederverwenden, statt einen neuen Stream (und einen
+        # neuen Live-Alert) zu erzeugen. Ist der Streamer beim Neustart offline,
+        # beendet der normale Offline-Pfad die Session.
+        if not self._preserve_db_state:
+            self._end_active_session()
 
     def _thread_main(self) -> None:
         loop = new_event_loop()
@@ -2682,6 +2699,32 @@ class StreamerMonitorManager:
         return {
             "ok": True,
             "message": f"Worker für @{clean} gestoppt.",
+        }
+
+    def pause_tracking(self, username: str) -> Dict[str, Any]:
+        """
+        Pausiert einen Worker ohne DB-Zustand oder Session zu beenden.
+
+        Wird z.B. bei einem Lease-Verlust genutzt: Eine andere Ingest-Instanz
+        übernimmt, die Session bleibt für den nahtlosen Reconnect offen und
+        `auto_monitor` wird nicht deaktiviert.
+        """
+        clean = username.strip().lstrip("@").lower()
+        with self._lock:
+            worker = self._workers.get(clean)
+
+        if worker:
+            worker.stop(preserve_db_state=True)
+        else:
+            update_streamer_runtime_state(
+                clean,
+                is_live=False,
+                current_viewers=0,
+            )
+
+        return {
+            "ok": True,
+            "message": f"Worker für @{clean} pausiert (Session bleibt offen).",
         }
 
     def stop_all(self) -> None:

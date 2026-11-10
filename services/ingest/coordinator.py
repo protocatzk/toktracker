@@ -131,8 +131,12 @@ class IngestCoordinator:
             # Lease verlängern
             renewed = await self.bus.renew_lease(f"{PREFIX_LEASE}{uname}", self.instance_id, ttl=30)
             if not renewed:
-                logger.warning("Lease für @%s verloren -> stoppe Worker auf dieser Instanz", uname)
-                monitor_manager.stop_tracking(uname)
+                logger.warning(
+                    "Lease für @%s verloren -> pausiere Worker auf dieser Instanz "
+                    "(Session/auto_monitor bleiben erhalten)",
+                    uname,
+                )
+                monitor_manager.pause_tracking(uname)
                 self._my_leases.remove(uname)
 
         # 3. Aktive Ingest-Instanzen ermitteln für Fair-Sharing
