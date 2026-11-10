@@ -9,7 +9,9 @@
 set -euo pipefail
 
 CONTAINER_NAME="${CONTAINER_NAME:-toktracker_app}"
-TMP_DIR="/tmp/toktracker_tests_$$"
+# Innerhalb von /app ablegen, damit Tests, die das Projekt-Root aus
+# __file__ ableiten, Templates/Static korrekt finden.
+TMP_DIR="/app/.toktracker_tests_$$"
 
 # Trap stellt sicher, dass /tmp/... im Container bei JEDEM Exit (auch Ctrl+C / Fehler) gelöscht wird
 cleanup() {
@@ -19,11 +21,13 @@ cleanup() {
 trap cleanup EXIT
 
 echo "📦 Kopiere Test-Suite temporär nach $CONTAINER_NAME:$TMP_DIR..."
-docker exec "$CONTAINER_NAME" mkdir -p "$TMP_DIR"
+docker exec -u root "$CONTAINER_NAME" mkdir -p "$TMP_DIR"
 docker cp tests/. "$CONTAINER_NAME:$TMP_DIR/"
+docker exec -u root "$CONTAINER_NAME" chown -R appuser:appgroup "$TMP_DIR"
 
 echo "🚀 Starte Tests..."
 docker exec \
     -e PYTHONPATH=/app \
+    -e TOKTRACKER_PROJECT_ROOT=/app \
     -e TOKTRACKER_TEST_REDIS_URL="${TOKTRACKER_TEST_REDIS_URL:-redis://redis:6379/0}" \
     "$CONTAINER_NAME" python "$TMP_DIR/run_tests.py"

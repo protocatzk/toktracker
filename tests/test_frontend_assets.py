@@ -15,7 +15,9 @@ import os
 import re
 import unittest
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ROOT = os.environ.get("TOKTRACKER_PROJECT_ROOT") or os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")
+)
 STATIC = os.path.join(ROOT, "static")
 TEMPLATES = os.path.join(ROOT, "templates")
 

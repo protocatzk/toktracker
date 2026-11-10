@@ -18,7 +18,9 @@ from shared.branding import (
     LEGACY_STORAGE_PREFIX,
 )
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ROOT = os.environ.get("TOKTRACKER_PROJECT_ROOT") or os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")
+)
 
 
 def _read(*parts: str) -> str:
