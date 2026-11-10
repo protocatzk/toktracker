@@ -83,7 +83,7 @@
             });
             if (!resp.ok) {
                 if (resp.status === 401 || resp.status === 403) {
-                    window.location.href = "login";
+                    window.location.href = loginUrl();
                     return;
                 }
                 throw new Error(`HTTP ${resp.status}`);

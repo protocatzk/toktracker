@@ -414,3 +414,19 @@ def get_all_streamers_summary() -> List[Dict[str, Any]]:
             (cutoff, cutoff),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_live_streamers() -> List[Dict[str, Any]]:
+    """Liefert alle aktuell als live markierten Streamer (API-/Bot-Fallback)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id, username, display_name, avatar_url, is_live, is_tracking,
+                auto_monitor, current_viewers, last_seen_at
+            FROM streamers
+            WHERE is_live = 1
+            ORDER BY current_viewers DESC, username ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]

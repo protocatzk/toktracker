@@ -80,7 +80,7 @@ async function loadOverview() {
     try {
         const res = await fetch(`api/overview?period=${encodeURIComponent(currentPeriod)}`);
         if (res.status === 401) {
-            window.location.href = "login";
+            window.location.href = loginUrl();
             return;
         }
         const data = await res.json();
@@ -1287,7 +1287,7 @@ async function loadAnalytics(isBackground = false) {
         const sidParam = analyticsStreamerId && analyticsStreamerId !== "all" ? `&streamer_id=${encodeURIComponent(analyticsStreamerId)}` : "";
         const res = await fetch(`api/analytics?period=${encodeURIComponent(analyticsPeriod)}${sidParam}`);
         if (res.status === 401) {
-            window.location.href = "login";
+            window.location.href = loginUrl();
             return;
         }
         if (!res.ok) return;

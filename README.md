@@ -1,6 +1,11 @@
-# TokTracker
+# TT-INTELLIGENCE
 
-**TikTok Live Earnings Tracker** – erfasst TikTok-Livestreams in Echtzeit, berechnet Brutto-/Netto-Einnahmen in USD und EUR, visualisiert sie in einem Web-Dashboard und liefert Reports über einen Telegram-Bot.
+**Live Earnings Intelligence** – erfasst TikTok-Livestreams in Echtzeit, berechnet Brutto-/Netto-Einnahmen in USD und EUR, visualisiert sie in einem Web-Dashboard und liefert Reports über einen Telegram-Bot.
+
+> Markenhinweis: Die sichtbare Oberfläche heißt **TT-INTELLIGENCE**. Technische
+> Bezeichner (Cookies, localStorage-Keys, Redis-Prefixe, Docker-Services,
+> Datenbank-Namen) bleiben aus Kompatibilitätsgründen unter `toktracker`.
+> Die Marken-Konstanten liegen zentral in [`shared/branding.py`](./shared/branding.py).
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688?logo=fastapi&logoColor=white)
@@ -18,7 +23,7 @@
 | **Live-Tracking** | Geschenke (Coins/Diamonds) in Echtzeit, Combo-/Streak-Aggregation, Zuschauerzahlen, Stream-Sessions, Battle-Erkennung (1v1, 2v2, 1v1v1, 1v1v1v1) |
 | **Finanzen** | Brutto-Kaufwert (Zuschauer) und Netto-Auszahlung (Creator) in USD und EUR, konfigurierbare Kurse, Periodenfilter (today/24h/7d/30d/all) |
 | **Web-Oberfläche** | Öffentliche Infoseite (`/`), Öffentliches Read-Only-Panel (`/public`), Admin-Dashboard (`/admin`), Moderator-Statistiken (`/stats`), Analytics (`/site-analytics`), Spender-Radar (`/donor-radar`), Chat-Intelligence (`/chat-intelligence`), Telegram Mini-App (`/app`) |
-| **Telegram-Bot** | 24h-Reports, Streamer-Statistiken, Live-Status, Live-Alerts für einzelne Streamer in Gruppen (`/alert`), Whitelist-Verwaltung, Login per Telegram-Widget/OTP |
+| **Telegram-Bot** | 24h-Reports, Streamer-Statistiken, Live-Status (`/live`), Live-Alerts für einzelne Streamer in Gruppen (`/alert`), Whitelist-Verwaltung, Login per Telegram-Widget/OTP |
 | **Sicherheit** | HMAC-signierte Sessions, Telegram-Signaturprüfung, Whitelist/Rollen, Rate-Limiting auf Auth-Endpunkten, Datenschutz-Maskierung auf öffentlichen Flächen |
 | **Betrieb** | Microservices mit Redis-Bus, horizontales Ingest-Sharding über Leases, Leader-Locks, Healthchecks, Docker-Compose mit Nginx + Let's Encrypt |
 

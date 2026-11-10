@@ -61,6 +61,10 @@ class AppConfig:
     # Service Role ("all", "api", "ingest", "bot", "scheduler")
     service_role: str = os.getenv("SERVICE_ROLE", "all").strip().lower()
 
+    # Interne API-Basis-URL für Service-zu-Service-Aufrufe (z.B. Bot -> App).
+    # In Docker: http://app:5000. Leer = direkter DB-Fallback.
+    internal_api_url: str = os.getenv("INTERNAL_API_URL", "").strip()
+
     # Redis URL für Message-Bus & Shared State (z.B. redis://redis:6379/0)
     redis_url: str = os.getenv("REDIS_URL", "").strip()
 

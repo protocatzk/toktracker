@@ -41,7 +41,7 @@
     async function fetchJSON(url) {
         var res = await fetch(url, { headers: { Accept: "application/json" } });
         if (res.status === 401) {
-            window.location.href = "login?next=/stats";
+            window.location.href = loginUrl();
             throw new Error("unauthorized");
         }
         if (!res.ok) {

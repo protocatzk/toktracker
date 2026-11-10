@@ -7,6 +7,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
+import httpx
 from telegram.request import HTTPXRequest
 
 try:
@@ -48,6 +49,7 @@ from database import (
     get_db,
     get_donor_details,
     get_donor_radar_data,
+    get_live_streamers,
     get_network_loyalty_and_overlap,
     get_recent_whale_gifts,
     get_settings,
@@ -63,7 +65,9 @@ from database import (
     upsert_streamer,
     upsert_telegram_user_permission,
 )
+from shared import bot_format as bf
 from shared.auth_store import AdminAuthManager, admin_auth_manager
+from shared.bot_format import BRAND as BOT_BRAND
 from shared.bus import get_bus
 from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
@@ -143,20 +147,26 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
     live_now = sum(1 for c in cards if c["is_live"])
 
     md_lines = [
-        f"📋 *toktracker – Streamer Einnahmen-Report ({hours}h)*",
-        f"🕒 Stand: `{now.strftime('%d.%m.%Y %H:%M')}`",
-        f"💰 *Gesamt Netto ({hours}h):* `{total_period_eur_net:,.2f} €` (`${total_period_usd_net:,.2f}`)",
-        f"🪙 *Gesamt Coins ({hours}h):* `{total_period_coins:,}` ({total_gifts_sent:,} Gifts)",
-        f"📡 *Streamer:* {len(cards)} überwacht ({live_now} aktuell LIVE)",
+        f"*{BOT_BRAND} – Streamer Einnahmen-Report ({hours}h)*",
+        f"Stand: `{now.strftime('%d.%m.%Y %H:%M')}`",
+        f"Gesamt Netto ({hours}h): `{total_period_eur_net:,.2f} €` (`${total_period_usd_net:,.2f}`)",
+        f"Gesamt Coins ({hours}h): `{total_period_coins:,}` ({total_gifts_sent:,} Gifts)",
+        f"Streamer: {len(cards)} überwacht ({live_now} aktuell LIVE)",
         "────────────────────────",
     ]
     html_lines = [
-        f"<b>📋 toktracker – Streamer Einnahmen-Report ({hours}h)</b>",
-        f"🕒 Stand: <code>{now.strftime('%d.%m.%Y %H:%M')}</code>",
-        f"💰 <b>Gesamt Netto ({hours}h):</b> <code>{total_period_eur_net:,.2f} €</code> (<code>${total_period_usd_net:,.2f}</code>)",
-        f"🪙 <b>Gesamt Coins ({hours}h):</b> <code>{total_period_coins:,}</code> ({total_gifts_sent:,} Gifts)",
-        f"📡 <b>Streamer:</b> {len(cards)} überwacht ({live_now} aktuell LIVE)",
-        "────────────────────────",
+        bf.eyebrow(f"📋 {bf.BRAND} · REPORT / {hours}H"),
+        bf.kv_table(
+            [
+                ("STAND", now.strftime("%d.%m.%Y %H:%M")),
+                ("NETTO", f"€ {total_period_eur_net:,.2f}"),
+                ("USD", f"$ {total_period_usd_net:,.2f}"),
+                ("COINS", f"{total_period_coins:,}"),
+                ("GIFTS", f"{total_gifts_sent:,}"),
+                ("STREAMER", f"{len(cards)} · {live_now} LIVE"),
+            ]
+        ),
+        bf.rule(),
     ]
 
     for idx, c in enumerate(cards, start=1):
@@ -173,16 +183,16 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
         )
 
         md_lines.append(
-            f"*{idx}. {c['display_name']}* (@{c['username']}) {status_dot}\n"
+            f"*{idx:02d}  {c['display_name']}* (@{c['username']}) {status_dot}\n"
             f"   • {hours}h Netto: *{c['period_eur_net']:,.2f} €* (`${c['period_usd_net']:,.2f}`) | `{c['period_coins']:,}` Coins\n"
             f"   • Top Gift: {top_g} | Top Gifter: {top_u}\n"
             f"   • All-Time: {c['alltime_eur_net']:,.2f} € ({c['alltime_coins']:,} Coins)"
         )
         html_lines.append(
-            f"<b>{idx}. {html.escape(str(c['display_name']))}</b> (@{html.escape(str(c['username']))}) {status_dot}\n"
-            f"   • {hours}h Netto: <b>{c['period_eur_net']:,.2f} €</b> (<code>${c['period_usd_net']:,.2f}</code>) | <code>{c['period_coins']:,}</code> Coins\n"
-            f"   • Top Gift: {html.escape(top_g)} | Top Gifter: {html.escape(top_u)}\n"
-            f"   • All-Time: {c['alltime_eur_net']:,.2f} € ({c['alltime_coins']:,} Coins)"
+            f"<b>{idx:02d}  {html.escape(str(c['display_name']))}</b> (@{html.escape(str(c['username']))}) {status_dot}\n"
+            f"▪ {hours}H: <b>{c['period_eur_net']:,.2f} €</b> (<code>${c['period_usd_net']:,.2f}</code>) · <code>{c['period_coins']:,}</code> Coins\n"
+            f"▪ TOP: {html.escape(top_g)} · {html.escape(top_u)}\n"
+            f"▪ ALL: {c['alltime_eur_net']:,.2f} € · {c['alltime_coins']:,} Coins"
         )
 
     return {
@@ -308,6 +318,7 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler(["vip", "vips"], self._cmd_vip))
             self._app.add_handler(CommandHandler(["loyalty", "switchers", "frontenwechsler"], self._cmd_loyalty))
             self._app.add_handler(CommandHandler(["streamers", "channels", "liste"], self._cmd_streamers))
+            self._app.add_handler(CommandHandler("live", self._cmd_live))
             self._app.add_handler(CommandHandler(["gifts", "geschenke", "ticker"], self._cmd_gifts))
             self._app.add_handler(CommandHandler("report", self._cmd_report))
             self._app.add_handler(CommandHandler(["streamer", "stats"], self._cmd_streamer))
@@ -332,7 +343,7 @@ class TelegramBotService:
             self._app.add_handler(
                 CallbackQueryHandler(
                     self._on_interactive_callback,
-                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|overview_streamer):"
+                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
                 )
             )
 
@@ -404,29 +415,30 @@ class TelegramBotService:
         if not self._app:
             return
         commands = [
-            BotCommand("start", "Hauptmenü & Befehlsübersicht öffnen"),
-            BotCommand("overview", "Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
-            BotCommand("radar", "Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
-            BotCommand("whales", "Live-Stream der neuesten Großspenden"),
-            BotCommand("donor", "Spender-Dossier, Stammkanal & VIP (<username>)"),
-            BotCommand("vip", "VIP-Watchlist anzeigen oder Spender markieren"),
-            BotCommand("loyalty", "Frontenwechsler & Streamer-Überschneidungen"),
-            BotCommand("streamers", "Alle Kanäle mit Live-Status (🟢/⚪) & Zuschauern"),
-            BotCommand("gifts", "Live Gift-Ticker der letzten Geschenke"),
-            BotCommand("streamer", "Einzelabfrage für einen Streamer (<username>)"),
-            BotCommand("report", "24h-Gesamtbericht aller überwachten Streamer"),
-            BotCommand("status", "Laufzeit-Status aller aktiven TikTokLive-Worker"),
-            BotCommand("app", "📱 toktracker Mini-App (Live-Matches & Einnahmen)"),
-            BotCommand("id", "Eigene Telegram-ID, Gruppen-ID & Berechtigung"),
-            BotCommand("login", "[Admin] Einmal-Code für das Web-Admin-Panel erzeugen"),
-            BotCommand("add", "[Admin] Streamer hinzufügen & Live-Worker starten"),
-            BotCommand("track", "[Admin] Live-Überwachung für einen Streamer starten"),
-            BotCommand("stop", "[Admin] Live-Überwachung für einen Streamer stoppen"),
-            BotCommand("allow", "[Admin] Nutzer freischalten (viewer|user|moderator|admin)"),
-            BotCommand("revoke", "[Admin] Nutzer-Berechtigung entziehen / sperren"),
-            BotCommand("users", "[Admin] Freigeschaltete Nutzer & offene Anfragen auflisten"),
-            BotCommand("mode", "[Admin] Zugriffsmodus wechseln (whitelist oder public)"),
-            BotCommand("alert", "[Admin] Live-Alert für Streamer in diesem Chat verwalten"),
+            BotCommand("start", "🏠 Hauptmenü & Befehlsübersicht öffnen"),
+            BotCommand("overview", "📊 Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
+            BotCommand("radar", "🎯 Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
+            BotCommand("whales", "🐋 Live-Stream der neuesten Großspenden"),
+            BotCommand("donor", "👤 Spender-Dossier, Stammkanal & VIP (<username>)"),
+            BotCommand("vip", "⭐ VIP-Watchlist anzeigen oder Spender markieren"),
+            BotCommand("loyalty", "🔀 Frontenwechsler & Streamer-Überschneidungen"),
+            BotCommand("streamers", "📺 Alle Kanäle mit Live-Status & Zuschauern"),
+            BotCommand("live", "🟢 Aktuell live Streamer anzeigen"),
+            BotCommand("gifts", "🎁 Live Gift-Ticker der letzten Geschenke"),
+            BotCommand("streamer", "🔍 Einzelabfrage für einen Streamer (<username>)"),
+            BotCommand("report", "📋 24h-Gesamtbericht aller überwachten Streamer"),
+            BotCommand("status", "⚙️ Laufzeit-Status aller aktiven TikTokLive-Worker"),
+            BotCommand("app", "📱 Mini-App: Live-Matches & Einnahmen"),
+            BotCommand("id", "📌 Eigene Telegram-ID, Gruppen-ID & Berechtigung"),
+            BotCommand("login", "🔐 [Admin] Einmal-Code für das Web-Admin-Panel erzeugen"),
+            BotCommand("add", "➕ [Admin] Streamer hinzufügen & Live-Worker starten"),
+            BotCommand("track", "▶️ [Admin] Live-Überwachung für einen Streamer starten"),
+            BotCommand("stop", "⏹️ [Admin] Live-Überwachung für einen Streamer stoppen"),
+            BotCommand("allow", "✅ [Admin] Nutzer freischalten (viewer|user|moderator|admin)"),
+            BotCommand("revoke", "🚫 [Admin] Nutzer-Berechtigung entziehen / sperren"),
+            BotCommand("users", "👥 [Admin] Freigeschaltete Nutzer & offene Anfragen auflisten"),
+            BotCommand("mode", "🔐 [Admin] Zugriffsmodus wechseln (whitelist oder public)"),
+            BotCommand("alert", "🔔 [Admin] Live-Alert für Streamer in diesem Chat verwalten"),
         ]
         try:
             await self._app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
@@ -486,16 +498,16 @@ class TelegramBotService:
 
         stream_url = f"https://www.tiktok.com/@{username}/live"
         text_lines = [
-            f"🔴 <b>@{html.escape(username)} ist jetzt LIVE!</b>",
-            "",
+            bf.eyebrow("🔴 LIVE-ALERT"),
+            f"{bf.LIVE} · <b>@{html.escape(username)}</b>",
             f"<b>{html.escape(display_name)}</b>",
         ]
         if title:
-            text_lines.append(f"🎬 {html.escape(title)}")
-        text_lines.append(f'🔗 <a href="{stream_url}">Stream öffnen</a>')
+            text_lines.append(f"▪ {html.escape(title)}")
+        text_lines.append(f'<a href="{stream_url}">Stream öffnen →</a>')
         text = "\n".join(text_lines)
         markup = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("▶️ Stream öffnen", url=stream_url)]]
+            [[InlineKeyboardButton("▶️ STREAM ÖFFNEN", url=stream_url)]]
         )
 
         for alert in alerts:
@@ -634,11 +646,11 @@ class TelegramBotService:
             [
                 [
                     InlineKeyboardButton(
-                        "✅ Login im Browser freigeben",
+                        "✅ LOGIN FREIGEBEN",
                         callback_data=f"admin_login_approve:{cid}",
                     ),
                     InlineKeyboardButton(
-                        "❌ Ablehnen",
+                        "❌ ABLEHNEN",
                         callback_data=f"admin_login_reject:{cid}",
                     ),
                 ]
@@ -646,11 +658,16 @@ class TelegramBotService:
         )
 
         msg_html = (
-            "<b>🔐 toktracker · Admin-Panel Login-Anfrage</b>\n\n"
-            f"• <b>Einmal-Code (OTP):</b> <code>{code}</code>\n"
-            f"• <b>Anfrage:</b> <code>{html.escape(client_info)}</code>\n"
-            "• <b>Gültigkeit:</b> 10 Minuten\n\n"
-            "<i>Gib den 6-stelligen Code im Web-Browser ein oder bestätige den Login direkt per Klick:</i>"
+            bf.eyebrow("🔐 ADMIN-LOGIN")
+            + "\n<b>LOGIN-ANFRAGE</b>\n"
+            + bf.kv_table(
+                [
+                    ("CODE", code),
+                    ("ANFRAGE", client_info),
+                    ("GÜLTIG", "10 MINUTEN"),
+                ]
+            )
+            + "\n<i>Code im Browser eingeben oder Login direkt bestätigen.</i>"
         )
 
         delivered = 0
@@ -721,7 +738,7 @@ class TelegramBotService:
             [
                 [
                     InlineKeyboardButton(
-                        "✅ Aktuelle Browser-Sitzung sofort freigeben",
+                        "✅ BROWSER-SITZUNG FREIGEBEN",
                         callback_data=f"admin_login_approve:{cid}",
                     )
                 ]
@@ -729,11 +746,11 @@ class TelegramBotService:
         )
 
         await update.effective_message.reply_text(
-            "<b>🔐 toktracker · Admin-Panel Einmal-Code</b>\n\n"
-            f"Dein 6-stelliger Login-Code lautet:\n"
-            f"👉 <code>{code}</code>\n\n"
-            "<i>Gib diesen Code unter <code>/login</code> im Browser ein (gültig für 10 Minuten) "
-            "oder klicke unten auf Freigeben, falls du die Login-Seite bereits geöffnet hast.</i>",
+            bf.eyebrow("🔐 ADMIN-LOGIN")
+            + "\n<b>EINMAL-CODE</b>\n\n"
+            f"<code>{code}</code>\n\n"
+            "<i>Unter <code>/login</code> im Browser eingeben (10 Minuten gültig) "
+            "oder die geöffnete Sitzung unten freigeben.</i>",
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard,
         )
@@ -773,10 +790,10 @@ class TelegramBotService:
             self._log("INFO", f"Admin-Panel Login per 1-Klick freigegeben von {admin_label}.")
             try:
                 await query.edit_message_text(
-                    f"<b>✅ Admin-Panel Login freigegeben</b>\n\n"
-                    f"• <b>Bestätigt durch:</b> <code>{html.escape(admin_label)}</code>\n"
-                    f"• <b>Zeitpunkt:</b> <code>{datetime.now().strftime('%H:%M:%S')}</code>\n\n"
-                    "<i>Der Browser wird automatisch in die Admin-Konsole weitergeleitet.</i>",
+                    f"<b>LOGIN FREIGEGEBEN</b>\n\n"
+                    f"▪ Bestätigt durch: <code>{html.escape(admin_label)}</code>\n"
+                    f"▪ Zeitpunkt: <code>{datetime.now().strftime('%H:%M:%S')}</code>\n\n"
+                    "<i>Der Browser wird automatisch weitergeleitet.</i>",
                     parse_mode=ParseMode.HTML,
                 )
             except Exception:
@@ -787,7 +804,7 @@ class TelegramBotService:
             self._log("INFO", f"Admin-Panel Login abgelehnt von {admin_label}.")
             try:
                 await query.edit_message_text(
-                    f"<b>❌ Admin-Panel Login-Anfrage abgelehnt</b> von <code>{html.escape(admin_label)}</code>.",
+                    f"<b>LOGIN-ANFRAGE ABGELEHNT</b> · <code>{html.escape(admin_label)}</code>",
                     parse_mode=ParseMode.HTML,
                 )
             except Exception:
@@ -846,11 +863,17 @@ class TelegramBotService:
                 else f"<code>/allow {tg_user.id}</code>"
             )
             await update.effective_message.reply_text(
-                "🔒 <b>toktracker · Zugriff beschränkt (Whitelist aktiv)</b>\n\n"
-                "Du bist aktuell noch nicht für diesen Bot freigeschaltet.\n"
-                f"• <b>Deine User-ID:</b> <code>{tg_user.id}</code>\n"
-                f"• <b>Dein Username:</b> <code>{html.escape(uname_display)}</code>\n\n"
-                f"<i>Ein Admin kann dich im Web-Interface, per Reply mit <code>/allow</code> oder mit {allow_hint} freischalten.</i>",
+                bf.eyebrow("🔒 ZUGRIFF BESCHRÄNKT")
+                + "\n<b>WHITELIST AKTIV</b>\n\n"
+                "Du bist noch nicht für diesen Bot freigeschaltet.\n\n"
+                + bf.kv_table(
+                    [
+                        ("USER-ID", str(tg_user.id)),
+                        ("USERNAME", uname_display),
+                    ]
+                )
+                + f"\n<i>Freischaltung über das Web-Interface, per Reply mit <code>/allow</code> oder {allow_hint}.</i>\n"
+                + bf.footer(),
                 parse_mode=ParseMode.HTML,
             )
             return None
@@ -864,7 +887,7 @@ class TelegramBotService:
                 f"Admin-Befehl verweigert für {uname_display} (ID: {tg_user.id}){chat_context}.",
             )
             await update.effective_message.reply_text(
-                "⛔ <b>Keine Berechtigung:</b> Dieser Verwaltungsbefehl ist nur für Administratoren freigegeben.",
+                "<b>KEINE BERECHTIGUNG</b>\nDieser Verwaltungsbefehl ist Administratoren vorbehalten.",
                 parse_mode=ParseMode.HTML,
             )
             return None
@@ -882,7 +905,7 @@ class TelegramBotService:
                 f"[Rolle: {access['role']}, fehlt: {missing_permission}].",
             )
             await update.effective_message.reply_text(
-                "⛔ <b>Keine Berechtigung:</b> Deine Rolle "
+                "<b>KEINE BERECHTIGUNG</b>\nDeine Rolle "
                 f"<code>{html.escape(role_label(access['role']))}</code> darf diesen Befehl nicht ausführen.",
                 parse_mode=ParseMode.HTML,
             )
@@ -899,32 +922,31 @@ class TelegramBotService:
         reply_to_message_id: Optional[int] = None,
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
+        chunks = list(bf.chunk_message(html_text))
+        single = len(chunks) == 1
+
         if os.path.exists(banner_path):
             with open(banner_path, "rb") as photo_file:
-                if len(html_text) <= 1000:
-                    await bot.send_photo(
-                        chat_id=chat_id,
-                        photo=photo_file,
-                        caption=html_text,
-                        parse_mode=ParseMode.HTML,
-                        reply_to_message_id=reply_to_message_id,
-                        reply_markup=reply_markup,
-                    )
-                    return
-                else:
-                    await bot.send_photo(
-                        chat_id=chat_id,
-                        photo=photo_file,
-                        reply_to_message_id=reply_to_message_id,
-                    )
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_file,
+                    caption=chunks[0] if single and len(chunks[0]) <= 1000 else None,
+                    parse_mode=ParseMode.HTML if single and len(chunks[0]) <= 1000 else None,
+                    reply_to_message_id=reply_to_message_id,
+                    reply_markup=reply_markup if single and len(chunks[0]) <= 1000 else None,
+                )
+            if single and len(chunks[0]) <= 1000:
+                return
 
-        await bot.send_message(
-            chat_id=chat_id,
-            text=html_text,
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=reply_to_message_id,
-            reply_markup=reply_markup,
-        )
+        for index, chunk in enumerate(chunks):
+            await bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to_message_id if index == 0 else None,
+                reply_markup=reply_markup if index == len(chunks) - 1 else None,
+                disable_web_page_preview=True,
+            )
 
     async def send_report_now(
         self, chat_id: Optional[str] = None, hours: int = 24
@@ -998,29 +1020,37 @@ class TelegramBotService:
                     cont_lines = []
                     for c in containers:
                         cont_lines.append(
-                            f"• <b>{html.escape(c.get('name', ''))}</b>: "
+                            f"▪ <b>{html.escape(c.get('name', ''))}</b> · "
                             f"<code>{c.get('memory_used_mb', 0)} MB</code> RAM "
-                            f"({c.get('memory_percent', 0)}%) | "
+                            f"({c.get('memory_percent', 0)}%) · "
                             f"<code>{c.get('cpu_percent', 0)}%</code> CPU"
                         )
 
                     vol_lines = []
                     for v in volumes[:4]:
                         vol_lines.append(
-                            f"• <code>{html.escape(v.get('name', ''))}</code>: <b>{v.get('size_mb', 0):.1f} MB</b>"
+                            f"▪ <code>{html.escape(v.get('name', ''))}</code> · <b>{v.get('size_mb', 0):.1f} MB</b>"
                         )
 
                     msg = (
-                        "🚨 <b>WARNUNG: Kritischer Speicherplatz auf dem Server!</b>\n\n"
-                        f"💾 <b>Festplatte:</b> <code>{used_gb:.1f} GB</code> von <code>{total_gb:.1f} GB</code> (<b>{pct:.1f}%</b> belegt)\n"
-                        f"Freier Speicher: <b>{free_gb:.1f} GB</b>\n\n"
-                        "🐳 <b>Docker Container:</b>\n"
+                        bf.eyebrow("🚨 WARNUNG · SPEICHERPLATZ")
+                        + "\n<b>KRITISCHER SPEICHERPLATZ</b>\n"
+                        + bf.kv_table(
+                            [
+                                ("DISK", f"{pct:.1f}% · {used_gb:.1f}/{total_gb:.1f} GB"),
+                                ("FREI", f"{free_gb:.1f} GB"),
+                            ]
+                        )
+                        + "\n"
+                        + bf.eyebrow("🐳 DOCKER CONTAINER")
+                        + "\n"
                         + ("\n".join(cont_lines) if cont_lines else "<i>Keine Container erfasst</i>")
                         + "\n\n"
-                        "📦 <b>Wichtige Volumes:</b>\n"
+                        + bf.eyebrow("📦 VOLUMES")
+                        + "\n"
                         + ("\n".join(vol_lines) if vol_lines else "<i>Keine Volumes</i>")
                         + "\n\n"
-                        "⚠️ <i>Tipp: Bereinige ungenutzte Docker-Images/Build-Caches mit <code>docker system prune -a</code>.</i>"
+                        + "<i>Tipp: Ungenutzte Images/Build-Caches mit <code>docker system prune -a</code> bereinigen.</i>"
                     )
 
                     admin_ids = self._resolve_admin_chat_ids()
@@ -1042,8 +1072,14 @@ class TelegramBotService:
             elif pct < 78.0 and self._disk_alert_active:
                 self._disk_alert_active = False
                 recovery_msg = (
-                    "✅ <b>Entwarnung: Speicherplatz wieder normalisiert</b>\n\n"
-                    f"💾 Festplatte ist jetzt zu <b>{pct:.1f}%</b> belegt (Frei: <b>{free_gb:.1f} GB</b> von <code>{total_gb:.1f} GB</code>)."
+                    bf.eyebrow("✅ ENTWARNUNG · SPEICHERPLATZ")
+                    + "\n\nSpeicherplatz wieder normalisiert.\n\n"
+                    + bf.kv_table(
+                        [
+                            ("DISK", f"{pct:.1f}% BELEGT"),
+                            ("FREI", f"{free_gb:.1f} GB / {total_gb:.1f} GB"),
+                        ]
+                    )
                 )
                 admin_ids = self._resolve_admin_chat_ids()
                 if config.telegram_chat_id:
@@ -1156,19 +1192,25 @@ class TelegramBotService:
             if access["allowed"]
             else "Gesperrt / Wartend"
         )
-        group_line = ""
+        profile_rows = [
+            ("USER-ID", str(tg_user.id)),
+            ("USERNAME", f"@{tg_user.username or '-'}"),
+        ]
         if self._is_group_chat(update):
-            group_line = (
-                f"• <b>Gruppen-Name:</b> <code>{html.escape(tg_chat.title or '-')}</code>\n"
-                f"• <b>Gruppen Chat-ID:</b> <code>{tg_chat.id}</code> <i>(für 24h-Report in Gruppe)</i>\n"
+            profile_rows.extend(
+                [
+                    ("GRUPPE", tg_chat.title or "-"),
+                    ("CHAT-ID", str(tg_chat.id)),
+                ]
             )
-
+        profile_rows.append(("STATUS", role_display.upper()))
+        profile_rows.append(("MODUS", str(access["mode"]).upper()))
         await update.effective_message.reply_text(
-            f"👤 <b>toktracker · Telegram-Profil &amp; Chat-Info</b>\n"
-            f"• <b>Deine User-ID:</b> <code>{tg_user.id}</code>\n"
-            f"• <b>Dein Username:</b> <code>@{html.escape(tg_user.username or '-')}</code>\n"
-            f"{group_line}"
-            f"• <b>Dein Status:</b> <b>{role_display}</b> (Bot-Modus: <code>{access['mode']}</code>)",
+            bf.eyebrow("👤 PROFIL")
+            + "\n"
+            + bf.kv_table(profile_rows)
+            + "\n"
+            + bf.footer(),
             parse_mode=ParseMode.HTML,
         )
 
@@ -1183,65 +1225,73 @@ class TelegramBotService:
         user_id = update.effective_user.id
         is_grp = self._is_group_chat(update)
 
-        id_info = (
-            f"📌 <b>User-ID:</b> <code>{user_id}</code> | <b>Gruppen-ID:</b> <code>{chat_id}</code>"
-            if is_grp
-            else f"📌 <b>Deine ID:</b> <code>{user_id}</code>"
-        )
-
         perms = access.get("permissions", set())
         sections: List[str] = []
 
+        identity_rows = [("USER-ID", str(user_id))]
+        if is_grp:
+            identity_rows.insert(0, ("CHAT-ID", str(chat_id)))
+        identity_rows.append(("ROLLE", role_label(access.get("role")).upper()))
+        identity_rows.append(("MODUS", str(access["mode"]).upper()))
+
         public_lines = [
-            "• <code>/streamers</code> – 👥 Alle Kanäle mit Live-Status (🟢/⚪) &amp; Zuschauern",
-            "• <code>/gifts [streamer]</code> – 🎁 Live Gift-Ticker der letzten Geschenke",
-            "• <code>/app</code> – 📱 toktracker Mini-App öffnen",
-            "• <code>/id</code> – 📌 Eigene User-ID &amp; Gruppen-ID prüfen",
+            "▪ 📺 <code>/streamers</code> — Kanäle mit Live-Status &amp; Zuschauern",
+            "▪ 🟢 <code>/live</code> — aktuell live Streamer anzeigen",
+            "▪ 🎁 <code>/gifts [streamer]</code> — Gift-Ticker der letzten Geschenke",
+            "▪ 📱 <code>/app</code> — Mini-App öffnen",
+            "▪ 📌 <code>/id</code> — eigene User- und Gruppen-ID prüfen",
         ]
-        sections.append("<b>🌐 Öffentliche Befehle:</b>\n" + "\n".join(public_lines))
+        sections.append(bf.eyebrow("🌐 01 / ÖFFENTLICH") + "\n" + "\n".join(public_lines))
 
         if PERM_BOT_ANALYTICS_VIEW in perms:
             sections.append(
-                "<b>📊 Statistik-Befehle:</b>\n"
-                "• <code>/overview [heute|24h|7d|30d|all]</code> – Finanz- &amp; Performance-Dashboard\n"
-                "• <code>/report [stunden]</code> – 24h-Gesamtbericht aller Streamer\n"
-                "• <code>/streamer &lt;username&gt; [stunden]</code> – Detail-Bericht pro Streamer\n"
-                "• <code>/status</code> – Laufzeit-Status aller TikTokLive-Worker"
+                bf.eyebrow("📊 02 / STATISTIK") + "\n"
+                "▪ 📊 <code>/overview [heute|24h|7d|30d|all]</code> — Finanz-Dashboard\n"
+                "▪ 📋 <code>/report [stunden]</code> — Gesamtbericht aller Streamer\n"
+                "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
+                "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
             )
 
         if PERM_BOT_RADAR_VIEW in perms:
             sections.append(
-                "<b>🐋 Whitelist-Befehle:</b>\n"
-                "• <code>/radar [all|whale|shark|dolphin|vip]</code> – Spender-Radar &amp; Rangliste\n"
-                "• <code>/whales [min_coins]</code> – Live-Feed der neuesten Großspenden\n"
-                "• <code>/donor &lt;username&gt;</code> – Spender-Dossier &amp; Stammkanal\n"
-                "• <code>/vip [add|remove &lt;user&gt;]</code> – VIP-Watchlist &amp; Spender-Markierungen\n"
-                "• <code>/loyalty [tage]</code> – Frontenwechsler &amp; Streamer-Überschneidungen"
+                bf.eyebrow("🎯 03 / RADAR") + "\n"
+                "▪ 🎯 <code>/radar [all|whale|shark|dolphin|vip]</code> — Spender-Radar\n"
+                "▪ 🐋 <code>/whales [min_coins]</code> — Feed der Großspenden\n"
+                "▪ 👤 <code>/donor &lt;username&gt;</code> — Spender-Dossier\n"
+                "▪ ⭐ <code>/vip [add|remove &lt;user&gt;]</code> — VIP-Watchlist\n"
+                "▪ 🔀 <code>/loyalty [tage]</code> — Frontenwechsler &amp; Überschneidungen"
             )
 
         admin_lines: List[str] = []
         if PERM_BOT_ADMIN_LOGIN in perms:
-            admin_lines.append("• <code>/login</code> – Einmal-Code für das Web-Admin-Panel (<code>/admin</code>)")
+            admin_lines.append("▪ 🔐 <code>/login</code> — Einmal-Code für das Web-Panel")
         if PERM_BOT_STREAMERS_MANAGE in perms:
-            admin_lines.append("• <code>/add &lt;username&gt;</code> – Streamer hinzufügen &amp; Worker starten")
-            admin_lines.append("• <code>/track &lt;username&gt;</code> | <code>/stop &lt;username&gt;</code> – Worker steuern")
-            admin_lines.append("• <code>/alert &lt;@username&gt;</code> – Live-Alert in diesem Chat aktivieren")
+            admin_lines.append("▪ ➕ <code>/add &lt;username&gt;</code> — Streamer anlegen")
+            admin_lines.append("▪ ▶️ <code>/track</code> | ⏹️ <code>/stop &lt;username&gt;</code> — Worker steuern")
+            admin_lines.append("▪ 🔔 <code>/alert &lt;@username&gt;</code> — Live-Alert in diesem Chat")
         if PERM_BOT_USERS_MANAGE in perms:
-            admin_lines.append("• <code>/allow &lt;id|@user&gt; [viewer|user|moderator|admin]</code> – Nutzer freischalten")
-            admin_lines.append("• <code>/revoke &lt;id|@user&gt;</code> – Zugriff entziehen (oder per Reply!)")
-            admin_lines.append("• <code>/users</code> – Nutzerliste &amp; Anfragen anzeigen")
+            admin_lines.append("▪ ✅ <code>/allow &lt;id|@user&gt; [rolle]</code> — Nutzer freischalten")
+            admin_lines.append("▪ 🚫 <code>/revoke &lt;id|@user&gt;</code> — Zugriff entziehen")
+            admin_lines.append("▪ 👥 <code>/users</code> — Nutzerliste &amp; Anfragen")
         if PERM_BOT_SETTINGS_MANAGE in perms:
-            admin_lines.append("• <code>/mode &lt;whitelist|public&gt;</code> – Zugriffsmodus umschalten")
+            admin_lines.append("▪ 🔐 <code>/mode &lt;whitelist|public&gt;</code> — Zugriffsmodus")
         if admin_lines:
-            sections.append("<b>🔐 Verwaltungs-Befehle:</b>\n" + "\n".join(admin_lines))
+            sections.append(bf.eyebrow("🔐 04 / VERWALTUNG") + "\n" + "\n".join(admin_lines))
 
         text = (
-            "<b>🚀 Willkommen bei toktracker!</b>\n\n"
-            "toktracker überwacht TikTok-Streamer in Echtzeit, erfasst alle Live-Geschenke "
-            "(Coins &amp; Diamonds) und berechnet die Netto-Creator-Auszahlung in <b>EUR (€)</b> und <b>USD ($)</b>.\n\n"
-            f"{id_info} | <b>Rolle:</b> <code>{html.escape(role_label(access.get('role')))}</code> | "
-            f"<b>Modus:</b> <code>{access['mode'].upper()}</code>\n\n"
+            bf.eyebrow("📡 LIVE EARNINGS INTELLIGENCE")
+            + "\n<b>🚀 WILLKOMMEN BEI TT-INTELLIGENCE</b>\n\n"
+            "Echtzeit-Tracking von TikTok-Livestreams: Geschenke, Coins und "
+            "Netto-Auszahlungen in <b>EUR (€)</b> und <b>USD ($)</b>.\n\n"
+            + bf.kv_table(identity_rows)
+            + "\n"
+            + bf.rule()
+            + "\n"
             + "\n\n".join(sections)
+            + "\n\n"
+            + bf.rule()
+            + "\n"
+            + bf.footer()
         )
 
         buttons = []
@@ -1250,14 +1300,14 @@ class TelegramBotService:
             if webapp_url.lower().startswith("https://"):
                 buttons.append([
                     InlineKeyboardButton(
-                        text="📱 toktracker Mini-App öffnen",
+                        text="📱 MINI-APP ÖFFNEN",
                         web_app=WebAppInfo(url=webapp_url),
                     )
                 ])
             else:
                 buttons.append([
                     InlineKeyboardButton(
-                        text="🌐 toktracker Web-App öffnen",
+                        text="🌐 WEB-APP ÖFFNEN",
                         url=webapp_url,
                     )
                 ])
@@ -1288,14 +1338,14 @@ class TelegramBotService:
             if webapp_url.lower().startswith("https://"):
                 buttons.append([
                     InlineKeyboardButton(
-                        text="⚡ toktracker Mini-App öffnen",
+                        text="📱 MINI-APP ÖFFNEN",
                         web_app=WebAppInfo(url=webapp_url),
                     )
                 ])
             else:
                 buttons.append([
                     InlineKeyboardButton(
-                        text="🌐 toktracker Web-App im Browser öffnen",
+                        text="🌐 WEB-APP ÖFFNEN",
                         url=webapp_url,
                     )
                 ])
@@ -1303,25 +1353,30 @@ class TelegramBotService:
         reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
 
         text = (
-            "📱 <b>toktracker Telegram Mini-App</b>\n\n"
-            "Verfolge alle Live-Battles (1v1, 2v2, 3er &amp; 4er-Matches), Punktestände "
-            "und Einnahmen in Echtzeit direkt in der Telegram Mini-App!\n\n"
-            "✨ <b>Features:</b>\n"
-            "• ⚔️ <b>Live-Matches:</b> Punktestände, MVPs &amp; Ranglisten in Echtzeit\n"
-            "• 💰 <b>Einnahmen:</b> Netto-Creator-Auszahlung (€/$), Coins &amp; Top-Gifter\n"
-            "• 👥 <b>Streamer-Monitor:</b> Live-Zuschauer, Status &amp; Tagesverdienst\n\n"
+            bf.eyebrow("📱 MINI-APP")
+            + "\n<b>TT-INTELLIGENCE MOBILE</b>\n\n"
+            "Live-Battles, Punktestände und Einnahmen direkt in Telegram.\n\n"
+            + bf.kv_table(
+                [
+                    ("LIVE-MATCHES", "PUNKTE · MVPS"),
+                    ("EINNAHMEN", "NETTO € / $"),
+                    ("MONITOR", "ZUSCHAUER · STATUS"),
+                    ("RADAR", "WHALES · ALERTS"),
+                ]
+            )
+            + "\n"
+            + bf.rule()
         )
         if webapp_url:
-            text += f"🔗 <b>URL:</b> <code>{html.escape(webapp_url)}</code>\n\nTippe auf den Button unten, um die Mini-App zu starten:"
+            text += f"\n<code>{html.escape(webapp_url)}</code>\n\nTippe auf den Button, um die Mini-App zu starten."
         else:
             text += (
-                "ℹ️ <i>Hinweis:</i> Es ist noch keine <code>TELEGRAM_WEBAPP_URL</code> in der <code>.env</code> hinterlegt.\n"
-                "Du erreichst die Mini-App im Browser unter:\n"
-                f"👉 <code>http://localhost:{config.app_port}/miniapp</code>\n\n"
-                "<i>Tipp für native Telegram WebApps:</i>\n"
-                "Hinterlege deine öffentliche HTTPS-Adresse in der <code>.env</code>:\n"
+                "\n<i>Hinweis:</i> Es ist noch keine <code>TELEGRAM_WEBAPP_URL</code> hinterlegt.\n"
+                f"Browser-Aufruf: <code>http://localhost:{config.app_port}/miniapp</code>\n\n"
+                "Für die native Telegram-WebApp in der <code>.env</code> setzen:\n"
                 "<code>TELEGRAM_WEBAPP_URL=https://deine-domain.de/miniapp</code>"
             )
+        text += "\n" + bf.footer()
 
         await self._send_with_optional_banner(
             bot=context.bot,
@@ -1373,7 +1428,7 @@ class TelegramBotService:
         s_row = await asyncio.to_thread(get_streamer_by_id_or_username, identifier)
         if not s_row:
             await update.effective_message.reply_text(
-                f"❌ Streamer <code>@{html.escape(identifier)}</code> wurde nicht in der Datenbank gefunden.",
+                f"Streamer <code>@{html.escape(identifier)}</code> nicht in der Datenbank gefunden.",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -1391,15 +1446,15 @@ class TelegramBotService:
             worker_state,
         )
 
-        live_str = "🟢 LIVE" if card["is_live"] else f"⚪ {card['worker_state'].upper()}"
+        live_str = bf.LIVE if card["is_live"] else bf.worker_status(card["worker_state"])
         top_g = (
-            ", ".join(
+            " · ".join(
                 f"{g['gift_name']} ({g['total_coins']:,})" for g in card["top_gifts"][:3]
             )
             or "Keine"
         )
         top_u = (
-            ", ".join(
+            " · ".join(
                 f"@{u['sender_username']} ({u['total_coins']:,})"
                 for u in card["top_gifters"][:3]
             )
@@ -1407,20 +1462,26 @@ class TelegramBotService:
         )
 
         msg = (
-            f"<b>📊 toktracker · Streamer-Einzelabfrage: {html.escape(card['display_name'])}</b> (@{html.escape(uname)})\n"
-            f"Status: <b>{live_str}</b> | Aktuelle Zuschauer: <code>{card['current_viewers']:,}</code>\n"
-            "────────────────────────\n"
-            f"<b>Zeitraum ({hours}h):</b>\n"
-            f"• Netto-Auszahlung: <b>{card['period_eur_net']:,.2f} €</b> (<code>${card['period_usd_net']:,.2f}</code>)\n"
-            f"• Brutto-Kaufwert: <code>{card['period_eur_gross']:,.2f} €</code>\n"
-            f"• Coins / Diamonds: <b>{card['period_coins']:,}</b> ({card['period_gifts_sent']:,} Gifts von {card['period_unique_gifters']} Giftern)\n"
-            f"• Peak Zuschauer ({hours}h): <code>{card['period_peak_viewers']:,}</code>\n"
-            f"• Top Gifts: {html.escape(top_g)}\n"
-            f"• Top Spender: {html.escape(top_u)}\n"
-            "────────────────────────\n"
-            f"<b>Gesamt (All-Time):</b> <code>{card['alltime_eur_net']:,.2f} €</code> (<code>{card['alltime_coins']:,}</code> Coins)"
+            bf.header(8, f"📊 STREAMER · {card['display_name']}")
+            + f"\n<b>@{html.escape(uname)}</b> · {live_str} · {card['current_viewers']:,} Viewer\n"
+            + bf.kv_table(
+                [
+                    ("NETTO", f"€ {card['period_eur_net']:,.2f}"),
+                    ("USD", f"$ {card['period_usd_net']:,.2f}"),
+                    ("BRUTTO", f"€ {card['period_eur_gross']:,.2f}"),
+                    ("COINS", f"{card['period_coins']:,}"),
+                    ("GIFTS", f"{card['period_gifts_sent']:,} / {card['period_unique_gifters']} GIFTER"),
+                    ("PEAK", f"{card['period_peak_viewers']:,}"),
+                    ("ZEITRAUM", f"{hours}H"),
+                ]
+            )
+            + f"\n<b>TOP GIFTS</b>\n{html.escape(top_g)}\n"
+            + f"<b>TOP SPENDER</b>\n{html.escape(top_u)}\n"
+            + bf.rule()
+            + f"\nALL-TIME: <code>{card['alltime_eur_net']:,.2f} €</code> · <code>{card['alltime_coins']:,}</code> Coins\n"
+            + bf.footer()
         )
-        await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+        await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
     @staticmethod
     def _format_relative_time(dt_val: Any) -> str:
@@ -1481,15 +1542,21 @@ class TelegramBotService:
         total_gifts = totals.get("total_gifts_sent", 0)
 
         lines = [
-            "<b>📊 toktracker · Finanzübersicht</b>",
-            f"Zeitraum: <b>{html.escape(p_label)}</b>",
-            "────────────────────────",
-            f"💰 <b>Creator Netto-Auszahlung:</b> <b>{eur_net:,.2f} €</b> (<code>${usd_net:,.2f}</code>)",
-            f"🛒 <b>Viewer Brutto-Kaufwert:</b> <code>{eur_gross:,.2f} €</code> (<code>${usd_gross:,.2f}</code>)",
-            f"💎 <b>Coins / Diamonds:</b> <b>{total_coins:,}</b> ({total_gifts:,} Geschenke)",
-            f"📡 <b>Streamer:</b> <b>{live_count} live</b> von {streamer_count} überwachten",
-            "────────────────────────",
-            f"<b>🏆 Top Streamer ({p_label}):</b>",
+            bf.header(1, "📊 FINANZEN"),
+            bf.kv_table(
+                [
+                    ("ZEITRAUM", p_label.upper()),
+                    ("NETTO", f"€ {eur_net:,.2f}"),
+                    ("USD", f"$ {usd_net:,.2f}"),
+                    ("BRUTTO", f"€ {eur_gross:,.2f}"),
+                    ("BRUTTO USD", f"$ {usd_gross:,.2f}"),
+                    ("COINS", f"{total_coins:,}"),
+                    ("GIFTS", f"{total_gifts:,}"),
+                    ("STREAMER", f"{live_count} LIVE / {streamer_count}"),
+                ]
+            ),
+            bf.rule(),
+            bf.eyebrow(f"🏆 TOP STREAMER · {p_label}"),
         ]
 
         sorted_streamers = sorted(streamers, key=lambda s: int(s.get("total_coins") or 0), reverse=True)
@@ -1497,30 +1564,28 @@ class TelegramBotService:
         if not active_sorted:
             lines.append("<i>Keine Einnahmen in diesem Zeitraum verzeichnet.</i>")
         else:
-            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            for idx, s in enumerate(active_sorted[:5]):
-                medal = medals[idx] if idx < len(medals) else f"{idx+1}."
+            for idx, s in enumerate(active_sorted[:5], start=1):
                 live_badge = " 🟢" if s.get("is_live") else ""
                 s_coins = int(s.get("total_coins") or 0)
                 s_eur = float(s.get("eur_net") or 0.0)
                 lines.append(
-                    f"{medal} <b>{html.escape(s.get('display_name') or s['username'])}</b>{live_badge}: "
-                    f"<b>{s_eur:,.2f} €</b> (<code>{s_coins:,} Coins</code>)"
+                    f"<b>{bf.rank(idx)}</b>  {html.escape(s.get('display_name') or s['username'])}{live_badge}  "
+                    f"<code>{s_eur:,.2f} €</code> · <code>{s_coins:,}</code>"
                 )
 
-        lines.append("\n💡 <i>Wechsle den Zeitraum mit den Buttons unten:</i>")
+        lines.append("\n" + bf.footer())
         text = "\n".join(lines)
 
         buttons = [
             [
-                InlineKeyboardButton(f"{'✓ ' if norm_period == 'today' else ''}Heute", callback_data="overview_period:today"),
-                InlineKeyboardButton(f"{'✓ ' if norm_period == '24h' else ''}24h", callback_data="overview_period:24h"),
-                InlineKeyboardButton(f"{'✓ ' if norm_period == '7d' else ''}7 Tage", callback_data="overview_period:7d"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == 'today' else '📅 '}HEUTE", callback_data="overview_period:today"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == '24h' else '⏱ '}24H", callback_data="overview_period:24h"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == '7d' else '🗓 '}7 TAGE", callback_data="overview_period:7d"),
             ],
             [
-                InlineKeyboardButton(f"{'✓ ' if norm_period == '30d' else ''}30 Tage", callback_data="overview_period:30d"),
-                InlineKeyboardButton(f"{'✓ ' if norm_period == 'all' else ''}Gesamt", callback_data="overview_period:all"),
-                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"overview_period:{norm_period}"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == '30d' else '🗓 '}30 TAGE", callback_data="overview_period:30d"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == 'all' else '📈 '}GESAMT", callback_data="overview_period:all"),
+                InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"overview_period:{norm_period}"),
             ],
         ]
         return text, InlineKeyboardMarkup(buttons)
@@ -1564,53 +1629,56 @@ class TelegramBotService:
         donors = data.get("donors", [])
 
         tier_labels = {
-            "all": "Alle Spender",
-            "whale": "🐋 Whales (≥ 10k Coins)",
-            "shark": "🦈 Sharks (≥ 2.5k Coins)",
-            "dolphin": "🐬 Dolphins (≥ 500 Coins)",
+            "all": "ALLE SPENDER",
+            "whale": "WHALE ≥ 10K",
+            "shark": "SHARK ≥ 2.5K",
+            "dolphin": "DOLPHIN ≥ 500",
         }
-        tier_title = tier_labels.get(norm_tier, "Alle Spender")
-        tier_icons = {"whale": "🐋", "shark": "🦈", "dolphin": "🐬", "fish": "🐟"}
+        tier_title = tier_labels.get(norm_tier, "ALLE SPENDER")
 
         lines = [
-            "<b>🎯 toktracker · Spender-Radar</b>",
-            f"Filter: <b>{html.escape(tier_title)}</b>",
-            "────────────────────────",
-            "📊 <b>Netzwerk-Metriken:</b>",
-            f"• 🐋 Whales: <b>{kpis.get('whales', 0)}</b> | 🦈 Sharks: <b>{kpis.get('sharks', 0)}</b> | 🐬 Dolphins: <b>{kpis.get('dolphins', 0)}</b>",
-            f"• 🔀 Multi-Streamer Spender: <b>{kpis.get('cross_streamer_whales', 0)}</b>",
-            f"• ⭐ VIP Spender: <b>{kpis.get('vip_donors', 0)}</b>",
-            f"• 💰 Wal-Volumen: <b>{kpis.get('whale_eur_net', 0.0):,.2f} €</b> (<code>{kpis.get('whale_coins', 0):,} Coins</code>)",
-            "────────────────────────",
-            "<b>Top Spender:</b>",
+            bf.header(2, "🎯 SPENDER-RADAR"),
+            bf.kv_table(
+                [
+                    ("FILTER", tier_title),
+                    ("WHALES", str(kpis.get("whales", 0))),
+                    ("SHARKS", str(kpis.get("sharks", 0))),
+                    ("DOLPHINS", str(kpis.get("dolphins", 0))),
+                    ("CROSS", str(kpis.get("cross_streamer_whales", 0))),
+                    ("VIP", str(kpis.get("vip_donors", 0))),
+                    ("WAL-VOLUMEN", f"€ {kpis.get('whale_eur_net', 0.0):,.2f}"),
+                ]
+            ),
+            bf.rule(),
+            bf.eyebrow("🏆 TOP SPENDER"),
         ]
 
         if not donors:
             lines.append("<i>Keine Spender in dieser Kategorie erfasst.</i>")
         else:
             for idx, d in enumerate(donors[:8], 1):
-                icon = tier_icons.get(d.get("tier"), "🐟")
-                vip_star = " ⭐VIP" if d.get("is_vip") else ""
+                vip_star = " · VIP" if d.get("is_vip") else ""
                 d_coins = int(d.get("total_coins") or 0)
                 d_eur = float(d.get("total_net_eur") or 0.0)
                 s_count = int(d.get("streamer_count") or 1)
                 lines.append(
-                    f"{idx}. {icon} <b>@{html.escape(d['username'])}</b>{vip_star}\n"
-                    f"   └ <b>{d_coins:,} Coins</b> (<code>{d_eur:,.2f} €</code> Netto) · {s_count} Streamer"
+                    f"<b>{bf.rank(idx)}</b>  @{html.escape(d['username'])}{vip_star}\n"
+                    f"    <code>{d_coins:,}</code> Coins · <code>{d_eur:,.2f} €</code> · {s_count} Streamer"
                 )
 
-        lines.append("\n💡 <i>Dossier anzeigen:</i> <code>/donor &lt;username&gt;</code>")
+        lines.append("\nDossier: <code>/donor &lt;username&gt;</code>")
+        lines.append(bf.footer())
         text = "\n".join(lines)
 
         buttons = [
             [
-                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'all' else ''}Alle", callback_data="radar_tier:all"),
-                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'whale' else ''}🐋 Whales", callback_data="radar_tier:whale"),
-                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'shark' else ''}🦈 Sharks", callback_data="radar_tier:shark"),
+                InlineKeyboardButton(f"{'✅ ' if norm_tier == 'all' else '👥 '}ALLE", callback_data="radar_tier:all"),
+                InlineKeyboardButton(f"{'✅ ' if norm_tier == 'whale' else '🐋 '}WHALE", callback_data="radar_tier:whale"),
+                InlineKeyboardButton(f"{'✅ ' if norm_tier == 'shark' else '🦈 '}SHARK", callback_data="radar_tier:shark"),
             ],
             [
-                InlineKeyboardButton(f"{'✓ ' if norm_tier == 'dolphin' else ''}🐬 Dolphins", callback_data="radar_tier:dolphin"),
-                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"radar_tier:{norm_tier}"),
+                InlineKeyboardButton(f"{'✅ ' if norm_tier == 'dolphin' else '🐬 '}DOLPHIN", callback_data="radar_tier:dolphin"),
+                InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"radar_tier:{norm_tier}"),
             ],
         ]
         return text, InlineKeyboardMarkup(buttons)
@@ -1645,11 +1713,10 @@ class TelegramBotService:
     def _format_whales_view(self, min_coins: int = 1000) -> Tuple[str, InlineKeyboardMarkup]:
         val_min = min_coins if min_coins in (1000, 5000, 10000, 30000) else min_coins
         alerts = get_recent_whale_gifts(min_coins=val_min, limit=10)
-        tier_icons = {"whale": "🐋", "shark": "🦈", "dolphin": "🐬", "fish": "🐟"}
-
         lines = [
-            f"<b>🚨 toktracker · Whale Gift Ticker (≥ {val_min:,} Coins)</b>",
-            "────────────────────────",
+            bf.header(3, "🐋 WHALE-TICKER"),
+            bf.kv_table([("SCHWELLE", f"≥ {val_min:,} Coins"), ("EINTRÄGE", str(len(alerts)))]),
+            bf.rule(),
         ]
 
         if not alerts:
@@ -1657,28 +1724,28 @@ class TelegramBotService:
         else:
             for a in alerts[:8]:
                 rel = self._format_relative_time(a.get("created_at"))
-                vip_star = " ⭐VIP" if a.get("is_vip") else ""
-                icon = tier_icons.get(a.get("tier"), "🐋")
+                vip_star = " · VIP" if a.get("is_vip") else ""
                 a_coins = int(a.get("total_coins") or 0)
                 a_eur = float(a.get("eur_net") or 0.0)
-                repeat = f" x{a['repeat_count']}" if int(a.get("repeat_count") or 1) > 1 else ""
+                repeat = f" ×{a['repeat_count']}" if int(a.get("repeat_count") or 1) > 1 else ""
                 lines.append(
-                    f"{icon} <b>@{html.escape(a['sender_username'])}</b>{vip_star} ➔ <b>@{html.escape(a['streamer_username'])}</b>\n"
-                    f"   └ <b>{html.escape(a['gift_name'])}</b>{repeat} · <b>{a_coins:,} Coins</b> (<code>{a_eur:,.2f} €</code>) · <i>{rel}</i>"
+                    f"<b>@{html.escape(a['sender_username'])}</b>{vip_star} → <b>@{html.escape(a['streamer_username'])}</b>\n"
+                    f"    {html.escape(a['gift_name'])}{repeat} · <code>{a_coins:,}</code> Coins · <code>{a_eur:,.2f} €</code> · {rel}"
                 )
 
-        lines.append("\n💡 <i>Spender analysieren:</i> <code>/donor &lt;username&gt;</code>")
+        lines.append("\nAnalyse: <code>/donor &lt;username&gt;</code>")
+        lines.append(bf.footer())
         text = "\n".join(lines)
 
         buttons = [
             [
-                InlineKeyboardButton(f"{'✓ ' if val_min == 1000 else ''}≥ 1k", callback_data="whales_min:1000"),
-                InlineKeyboardButton(f"{'✓ ' if val_min == 5000 else ''}≥ 5k", callback_data="whales_min:5000"),
-                InlineKeyboardButton(f"{'✓ ' if val_min == 10000 else ''}≥ 10k", callback_data="whales_min:10000"),
-                InlineKeyboardButton(f"{'✓ ' if val_min == 30000 else ''}≥ 30k", callback_data="whales_min:30000"),
+                InlineKeyboardButton(f"{'✅ ' if val_min == 1000 else '🐋 '}≥ 1K", callback_data="whales_min:1000"),
+                InlineKeyboardButton(f"{'✅ ' if val_min == 5000 else '🐋 '}≥ 5K", callback_data="whales_min:5000"),
+                InlineKeyboardButton(f"{'✅ ' if val_min == 10000 else '🐋 '}≥ 10K", callback_data="whales_min:10000"),
+                InlineKeyboardButton(f"{'✅ ' if val_min == 30000 else '🐋 '}≥ 30K", callback_data="whales_min:30000"),
             ],
             [
-                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"whales_min:{val_min}"),
+                InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"whales_min:{val_min}"),
             ],
         ]
         return text, InlineKeyboardMarkup(buttons)
@@ -1716,21 +1783,20 @@ class TelegramBotService:
         data = get_donor_details(clean_uname)
         if not data or not data.get("profile"):
             text = (
-                f"❌ <b>Spender nicht gefunden</b>\n\n"
+                "<b>SPENDER NICHT GEFUNDEN</b>\n\n"
                 f"Für <code>@{html.escape(clean_uname)}</code> liegen noch keine Geschenke-Daten vor.\n"
-                "Sobald dieser Nutzer in einem überwachten Livestream schenkt, wird sein Dossier automatisch angelegt."
+                "Sobald dieser Nutzer in einem überwachten Livestream schenkt, wird sein Dossier automatisch angelegt.\n\n"
+                + bf.footer()
             )
             buttons = [
-                [InlineKeyboardButton("🎯 Zum Spender-Radar", callback_data="radar_tier:all")]
+                [InlineKeyboardButton("🎯 ZUM SPENDER-RADAR", callback_data="radar_tier:all")]
             ]
             return text, InlineKeyboardMarkup(buttons)
 
         p = data["profile"]
         tier = p.get("tier", "fish")
-        tier_icons = {"whale": "🐋", "shark": "🦈", "dolphin": "🐬", "fish": "🐟"}
-        tier_icon = tier_icons.get(tier, "🐟")
         is_vip = bool(p.get("is_vip"))
-        vip_str = "⭐ VIP Spender" if is_vip else "Standard-Spender"
+        vip_str = "VIP" if is_vip else "STANDARD"
 
         rel_first = self._format_relative_time(p.get("first_seen"))
         rel_last = self._format_relative_time(p.get("last_seen"))
@@ -1740,51 +1806,58 @@ class TelegramBotService:
         loyalty_label = loyalty.get("label", "")
 
         lines = [
-            "<b>👤 toktracker · Spender-Dossier</b>",
-            f"Name: <b>{html.escape(p.get('display_name') or p['username'])}</b> (@{html.escape(p['username'])})",
-            f"Status: {tier_icon} <b>{tier.upper()}</b> | <b>{vip_str}</b>",
-            "────────────────────────",
-            "💰 <b>Finanz- & Spenden-Volumen:</b>",
-            f"• Coins: <b>{int(p.get('total_coins') or 0):,}</b>",
-            f"• Creator-Netto: <b>{float(p.get('total_eur_net') or 0.0):,.2f} €</b> (<code>${float(p.get('total_usd_net') or 0.0):,.2f}</code>)",
-            f"• Geschenke gesamt: <code>{int(p.get('total_gifts') or 0):,}</code>",
-            f"• Aktivität: Zuerst {rel_first} · Zuletzt {rel_last}",
-            "────────────────────────",
-            f"🔀 <b>Netzwerk-Loyalität:</b> {loyalty_badge}",
+            bf.header(4, "👤 SPENDER-DOSSIER"),
+            f"<b>@{html.escape(p['username'])}</b> · {html.escape(p.get('display_name') or p['username'])}\n"
+            f"<code>{str(tier).upper()}</code> · <code>{vip_str}</code>",
+            bf.rule(),
+            bf.kv_table(
+                [
+                    ("COINS", f"{int(p.get('total_coins') or 0):,}"),
+                    ("NETTO", f"€ {float(p.get('total_eur_net') or 0.0):,.2f}"),
+                    ("USD", f"$ {float(p.get('total_usd_net') or 0.0):,.2f}"),
+                    ("GIFTS", f"{int(p.get('total_gifts') or 0):,}"),
+                    ("ZUERST", rel_first.upper()),
+                    ("ZULETZT", rel_last.upper()),
+                ]
+            ),
+            bf.rule(),
+            f"LOYALITÄT: <b>{html.escape(str(loyalty_badge)).upper()}</b>",
         ]
         if loyalty_label:
             lines.append(f"<i>{html.escape(loyalty_label)}</i>")
 
         streamers = data.get("streamers", [])
         if streamers:
-            lines.append(f"\n<b>Unterstützte Streamer ({len(streamers)} Kanäle):</b>")
+            lines.append("\n" + bf.eyebrow(f"📡 KANÄLE · {len(streamers)}"))
             total_coins = max(1, int(p.get("total_coins") or 0))
             for s in streamers[:4]:
                 c_given = int(s.get("coins_given") or 0)
                 pct = round((c_given / total_coins) * 100, 1)
                 lines.append(
-                    f"• <b>@{html.escape(s['streamer_username'])}</b>: <b>{c_given:,} Coins</b> ({pct}%) · <code>{float(s.get('eur_net') or 0.0):,.2f} €</code>"
+                    f"▪ @{html.escape(s['streamer_username'])} · <code>{c_given:,}</code> Coins ({pct}%) · "
+                    f"<code>{float(s.get('eur_net') or 0.0):,.2f} €</code>"
                 )
 
         top_gifts = data.get("top_gifts", [])
         if top_gifts:
-            lines.append("\n<b>Lieblings-Geschenke:</b>")
+            lines.append("\n" + bf.eyebrow("🎁 TOP GESCHENKE"))
             g_strs = [
                 f"{html.escape(g['gift_name'])} ({int(g.get('total_coins') or 0):,})"
                 for g in top_gifts[:3]
             ]
-            lines.append("• " + ", ".join(g_strs))
+            lines.append("▪ " + " · ".join(g_strs))
 
         if p.get("notes"):
-            lines.append(f"\n📝 <b>CRM-Notiz:</b> <i>{html.escape(p['notes'])}</i>")
+            lines.append(f"\n<b>CRM-NOTIZ</b>\n<i>{html.escape(p['notes'])}</i>")
 
+        lines.append("\n" + bf.footer())
         text = "\n".join(lines)
 
         first_row = [
-            InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"donor_refresh:{p['username']}"),
+            InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"donor_refresh:{p['username']}"),
         ]
         if can_edit_crm:
-            vip_btn_label = "⭐ VIP-Status entfernen" if is_vip else "⭐ Als VIP markieren"
+            vip_btn_label = "☆ VIP ENTFERNEN" if is_vip else "⭐ ALS VIP MARKIEREN"
             first_row.insert(
                 0,
                 InlineKeyboardButton(vip_btn_label, callback_data=f"donor_vip_toggle:{p['username']}"),
@@ -1792,7 +1865,7 @@ class TelegramBotService:
         buttons = [
             first_row,
             [
-                InlineKeyboardButton("🎯 Zum Spender-Radar", callback_data="radar_tier:all"),
+                InlineKeyboardButton("🎯 ZUM SPENDER-RADAR", callback_data="radar_tier:all"),
             ],
         ]
         return text, InlineKeyboardMarkup(buttons)
@@ -1844,23 +1917,24 @@ class TelegramBotService:
             vips = radar_data.get("donors", [])
             if not vips:
                 msg = (
-                    "<b>⭐ toktracker · VIP Spender-Liste</b>\n"
-                    "────────────────────────\n"
-                    "Es sind aktuell keine Spender als VIP markiert.\n\n"
-                    "<i>Spender als VIP hinzufügen:</i> <code>/vip add &lt;username&gt;</code>"
+                    bf.eyebrow("⭐ VIP-WATCHLIST")
+                    + "\n\nEs sind aktuell keine Spender als VIP markiert.\n\n"
+                    "<i>Hinzufügen:</i> <code>/vip add &lt;username&gt;</code>\n"
+                    + bf.footer()
                 )
             else:
                 lines = [
-                    "<b>⭐ toktracker · VIP Spender-Liste</b>",
-                    "────────────────────────",
-                    f"Gesamtanzahl: <b>{len(vips)} VIPs</b>\n",
+                    bf.header(5, "⭐ VIP-WATCHLIST"),
+                    bf.kv_table([("EINTRÄGE", str(len(vips)))]),
+                    bf.rule(),
                 ]
                 for idx, v in enumerate(vips, 1):
                     lines.append(
-                        f"{idx}. ⭐ <b>@{html.escape(v['username'])}</b> · <b>{v['total_coins']:,} Coins</b> "
-                        f"(<code>{v['total_net_eur']:,.2f} €</code> Netto, {v['streamer_count']} Streamer)"
+                        f"<b>{bf.rank(idx)}</b>  @{html.escape(v['username'])} · <code>{v['total_coins']:,}</code> Coins · "
+                        f"<code>{v['total_net_eur']:,.2f} €</code> · {v['streamer_count']} Streamer"
                     )
-                lines.append("\n💡 <i>Dossier anzeigen:</i> <code>/donor &lt;username&gt;</code>")
+                lines.append("\nDossier: <code>/donor &lt;username&gt;</code>")
+                lines.append(bf.footer())
                 msg = "\n".join(lines)
             await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
             return
@@ -1873,22 +1947,22 @@ class TelegramBotService:
             target_uname = args[1].strip().lstrip("@").lower()
             await asyncio.to_thread(save_donor_crm, target_uname, is_vip=True)
             await update.effective_message.reply_text(
-                f"✅ Spender <b>@{html.escape(target_uname)}</b> wurde als <b>⭐ VIP</b> markiert.",
+                f"<b>@{html.escape(target_uname)}</b> als <b>VIP</b> markiert.",
                 parse_mode=ParseMode.HTML,
             )
         elif first in ("remove", "delete", "del") and len(args) > 1:
             target_uname = args[1].strip().lstrip("@").lower()
             await asyncio.to_thread(save_donor_crm, target_uname, is_vip=False)
             await update.effective_message.reply_text(
-                f"ℹ️ VIP-Status für <b>@{html.escape(target_uname)}</b> wurde <b>entfernt</b>.",
+                f"VIP-Status für <b>@{html.escape(target_uname)}</b> entfernt.",
                 parse_mode=ParseMode.HTML,
             )
         else:
             target_uname = first.lstrip("@").lower()
             new_status = await asyncio.to_thread(toggle_donor_vip, target_uname)
-            st_str = "⭐ VIP" if new_status else "Standard"
+            st_str = "VIP" if new_status else "STANDARD"
             await update.effective_message.reply_text(
-                f"Status für <b>@{html.escape(target_uname)}</b> geändert auf: <b>{st_str}</b>.",
+                f"Status für <b>@{html.escape(target_uname)}</b>: <b>{st_str}</b>.",
                 parse_mode=ParseMode.HTML,
             )
 
@@ -1902,10 +1976,16 @@ class TelegramBotService:
         overlaps = data.get("overlap_matrix", [])
 
         lines = [
-            f"<b>🔀 toktracker · Loyalität & Frontenwechsler ({norm_days} Tage)</b>",
-            "────────────────────────",
-            f"Erfasste Wechsel: <b>{len(shifters)}</b> | Streamer-Overlaps: <b>{len(overlaps)}</b>\n",
-            "<b>⚡ Top Frontenwechsler (Streamer-Wechsel):</b>",
+            bf.header(6, "🔀 LOYALITÄT"),
+            bf.kv_table(
+                [
+                    ("ZEITRAUM", f"{norm_days} TAGE"),
+                    ("WECHSEL", str(len(shifters))),
+                    ("OVERLAPS", str(len(overlaps))),
+                ]
+            ),
+            bf.rule(),
+            bf.eyebrow("⚡ FRONTENWECHSLER"),
         ]
 
         if not shifters:
@@ -1917,13 +1997,13 @@ class TelegramBotService:
                 new_s = fw.get("new_streamer", "?")
                 vol_coins = int(s.get("shift_volume_coins") or 0)
                 vol_eur = float(s.get("shift_volume_eur") or 0.0)
-                vip = " ⭐VIP" if s.get("is_vip") else ""
+                vip = " · VIP" if s.get("is_vip") else ""
                 lines.append(
-                    f"• <b>@{html.escape(s['username'])}</b>{vip}: <code>{s.get('migration_type', 'Wechsel')}</code>\n"
-                    f"   @{html.escape(old_s)} ➔ <b>@{html.escape(new_s)}</b> (<b>{vol_coins:,} Coins</b> · <code>{vol_eur:,.2f} €</code>)"
+                    f"▪ <b>@{html.escape(s['username'])}</b>{vip} · <code>{html.escape(str(s.get('migration_type', 'Wechsel')))}</code>\n"
+                    f"    @{html.escape(old_s)} → <b>@{html.escape(new_s)}</b> · <code>{vol_coins:,}</code> Coins · <code>{vol_eur:,.2f} €</code>"
                 )
 
-        lines.append("\n<b>🤝 Top Streamer-Overlaps (Geteilte Großspender):</b>")
+        lines.append("\n" + bf.eyebrow("🤝 STREAMER-OVERLAPS"))
         if not overlaps:
             lines.append("<i>Keine geteilten Spender verzeichnet.</i>")
         else:
@@ -1933,19 +2013,20 @@ class TelegramBotService:
                 count = int(o.get("shared_donors_count") or 0)
                 vol = float(o.get("shared_volume_eur") or 0.0)
                 lines.append(
-                    f"• <b>@{html.escape(s1)}</b> & <b>@{html.escape(s2)}</b>: <b>{count} gemeinsame Spender</b> (<code>{vol:,.2f} €</code>)"
+                    f"▪ @{html.escape(s1)} &amp; @{html.escape(s2)} · <b>{count}</b> geteilte Spender · <code>{vol:,.2f} €</code>"
                 )
 
+        lines.append("\n" + bf.footer())
         text = "\n".join(lines)
 
         buttons = [
             [
-                InlineKeyboardButton(f"{'✓ ' if norm_days == 7 else ''}7 Tage", callback_data="loyalty_days:7"),
-                InlineKeyboardButton(f"{'✓ ' if norm_days == 14 else ''}14 Tage", callback_data="loyalty_days:14"),
-                InlineKeyboardButton(f"{'✓ ' if norm_days == 30 else ''}30 Tage", callback_data="loyalty_days:30"),
+                InlineKeyboardButton(f"{'✅ ' if norm_days == 7 else '🗓 '}7 TAGE", callback_data="loyalty_days:7"),
+                InlineKeyboardButton(f"{'✅ ' if norm_days == 14 else '🗓 '}14 TAGE", callback_data="loyalty_days:14"),
+                InlineKeyboardButton(f"{'✅ ' if norm_days == 30 else '🗓 '}30 TAGE", callback_data="loyalty_days:30"),
             ],
             [
-                InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"loyalty_days:{norm_days}"),
+                InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"loyalty_days:{norm_days}"),
             ],
         ]
         return text, InlineKeyboardMarkup(buttons)
@@ -1974,34 +2055,114 @@ class TelegramBotService:
         )
 
     # -----------------------------------------------------------------
+    # LIVE JETZT (/live)
+    # -----------------------------------------------------------------
+    async def _fetch_live_streamers(self) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        Holt die Live-Liste bevorzugt aus der App-API.
+        Ist die API nicht erreichbar, wird direkt aus der DB gelesen.
+        """
+        base = (config.internal_api_url or "").strip().rstrip("/")
+        if base:
+            headers = {"Accept": "application/json"}
+            if config.api_key:
+                headers["X-API-Key"] = config.api_key
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    res = await client.get(f"{base}/api/v1/live", headers=headers)
+                    res.raise_for_status()
+                    payload = res.json()
+                    rows = payload.get("streamers") or []
+                    return [dict(row) for row in rows], "API"
+            except Exception as exc:
+                logger.warning(
+                    "Live-API unter %s nicht erreichbar (%s) – nutze DB-Fallback.",
+                    base,
+                    exc,
+                )
+
+        rows = await asyncio.to_thread(get_live_streamers)
+        return list(rows), "DB"
+
+    async def _format_live_view(self) -> Tuple[str, InlineKeyboardMarkup]:
+        streamers, source = await self._fetch_live_streamers()
+        lines = [
+            bf.header(10, "LIVE JETZT"),
+            bf.kv_table(
+                [
+                    ("LIVE", str(len(streamers))),
+                    ("QUELLE", source),
+                    ("STAND", datetime.now().strftime("%d.%m.%Y %H:%M")),
+                ]
+            ),
+            bf.rule(),
+        ]
+
+        if not streamers:
+            lines.append("⚪ <i>Aktuell ist kein überwachter Streamer live.</i>")
+        else:
+            for streamer in streamers:
+                uname = str(streamer.get("username") or "")
+                display = str(streamer.get("display_name") or uname)
+                viewers = int(streamer.get("current_viewers") or 0)
+                safe_uname = html.escape(uname, quote=True)
+                lines.append(
+                    f"{bf.LIVE} · <b>{html.escape(display)}</b> (@{html.escape(uname)})\n"
+                    f"    👀 <code>{viewers:,}</code> Viewer · "
+                    f'<a href="https://www.tiktok.com/@{safe_uname}/live">Stream öffnen →</a>'
+                )
+
+        lines.append("\n" + bf.footer())
+        buttons = [
+            [InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data="live_refresh:")]
+        ]
+        return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+    async def _cmd_live(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message:
+            return
+        if not await self._authorize(update, require_permission=PERM_BOT_PUBLIC_VIEW):
+            return
+
+        text, markup = await self._format_live_view()
+        await update.effective_message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+
+    # -----------------------------------------------------------------
     # STREAMER-MONITOR & LISTE (/streamers)
     # -----------------------------------------------------------------
     def _format_streamers_view(self) -> Tuple[str, InlineKeyboardMarkup]:
         streamers = get_all_streamers_summary()
         lines = [
-            f"<b>📺 toktracker · Streamer-Monitor ({len(streamers)} Kanäle)</b>",
-            "────────────────────────",
+            bf.header(7, "📺 STREAMER-MONITOR"),
+            bf.kv_table([("KANÄLE", str(len(streamers)))]),
+            bf.rule(),
         ]
 
         if not streamers:
-            lines.append("<i>Keine Streamer hinterlegt. Füge einen mit <code>/add &lt;username&gt;</code> hinzu.</i>")
+            lines.append("<i>Keine Streamer hinterlegt. Anlegen mit <code>/add &lt;username&gt;</code>.</i>")
         else:
             for s in streamers[:12]:
                 is_live = bool(s.get("is_live"))
-                status_icon = "🟢 LIVE" if is_live else "⚪ OFFLINE"
-                viewers = f" ({int(s.get('current_viewers') or 0):,} Viewers)" if is_live else ""
+                status_icon = bf.status(is_live)
+                viewers = f" · {int(s.get('current_viewers') or 0):,} Viewer" if is_live else ""
                 coins = int(s.get("today_coins") or 0)
                 eur = float(s.get("today_eur_net") or 0.0)
                 lines.append(
-                    f"• {status_icon}{viewers} <b>{html.escape(s.get('display_name') or s['username'])}</b> (@{html.escape(s['username'])})\n"
-                    f"   └ Heute: <b>{coins:,} Coins</b> · <code>{eur:,.2f} €</code> Netto"
+                    f"{status_icon}{viewers} · <b>{html.escape(s.get('display_name') or s['username'])}</b> (@{html.escape(s['username'])})\n"
+                    f"    Heute: <code>{coins:,}</code> Coins · <code>{eur:,.2f} €</code>"
                 )
 
-        lines.append("\n💡 <i>Einzelabfrage:</i> <code>/streamer &lt;username&gt;</code>")
+        lines.append("\nEinzelabfrage: <code>/streamer &lt;username&gt;</code>")
+        lines.append(bf.footer())
         text = "\n".join(lines)
 
         buttons = [
-            [InlineKeyboardButton("🔄 Aktualisieren", callback_data="streamers_list:all")]
+            [InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data="streamers_list:all")]
         ]
         return text, InlineKeyboardMarkup(buttons)
 
@@ -2030,14 +2191,17 @@ class TelegramBotService:
         if streamer_row:
             s_id = streamer_row["id"]
             gifts = get_recent_whale_gifts(min_coins=1, streamer_id=s_id, limit=10)
-            header = f"<b>🎁 toktracker · Geschenke-Feed: {html.escape(streamer_row.get('display_name') or streamer_row['username'])}</b> (@{html.escape(streamer_row['username'])})"
+            header = (
+                bf.eyebrow("🎁 GIFT-TICKER")
+                + f"\n<b>@{html.escape(streamer_row['username'])}</b> · {html.escape(streamer_row.get('display_name') or streamer_row['username'])}"
+            )
         else:
             gifts = get_recent_whale_gifts(min_coins=100, limit=10)
-            header = "<b>🎁 toktracker · Geschenke-Feed (Netzwerkweit ≥ 100 Coins)</b>"
+            header = bf.eyebrow("🎁 GIFT-TICKER") + "\n<b>NETZWERKWEIT · ≥ 100 COINS</b>"
 
         lines = [
             header,
-            "────────────────────────",
+            bf.rule(),
         ]
 
         if not gifts:
@@ -2045,21 +2209,22 @@ class TelegramBotService:
         else:
             for g in gifts[:8]:
                 rel = self._format_relative_time(g.get("created_at"))
-                vip = " ⭐VIP" if g.get("is_vip") else ""
+                vip = " · VIP" if g.get("is_vip") else ""
                 coins = int(g.get("total_coins") or 0)
                 eur = float(g.get("eur_net") or 0.0)
-                repeat = f" x{g['repeat_count']}" if int(g.get("repeat_count") or 1) > 1 else ""
+                repeat = f" ×{g['repeat_count']}" if int(g.get("repeat_count") or 1) > 1 else ""
                 lines.append(
-                    f"• <b>@{html.escape(g['sender_username'])}</b>{vip} ➔ <b>@{html.escape(g['streamer_username'])}</b>\n"
-                    f"   └ <b>{html.escape(g['gift_name'])}</b>{repeat} · <b>{coins:,} Coins</b> (<code>{eur:,.2f} €</code>) · <i>{rel}</i>"
+                    f"<b>@{html.escape(g['sender_username'])}</b>{vip} → <b>@{html.escape(g['streamer_username'])}</b>\n"
+                    f"    {html.escape(g['gift_name'])}{repeat} · <code>{coins:,}</code> Coins · <code>{eur:,.2f} €</code> · {rel}"
                 )
 
-        lines.append("\n💡 <i>Spender analysieren:</i> <code>/donor &lt;username&gt;</code>")
+        lines.append("\nAnalyse: <code>/donor &lt;username&gt;</code>")
+        lines.append(bf.footer())
         text = "\n".join(lines)
 
         val = streamer_row["username"] if streamer_row else "all"
         buttons = [
-            [InlineKeyboardButton("🔄 Aktualisieren", callback_data=f"gifts_refresh:{val}")]
+            [InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"gifts_refresh:{val}")]
         ]
         return text, InlineKeyboardMarkup(buttons)
 
@@ -2144,7 +2309,7 @@ class TelegramBotService:
         elif action == "donor_vip_toggle":
             uname = val.strip().lower()
             new_vip = await asyncio.to_thread(toggle_donor_vip, uname)
-            alert_msg = f"⭐ @{uname} ist jetzt VIP!" if new_vip else f"ℹ️ VIP-Status für @{uname} entfernt."
+            alert_msg = f"@{uname} ist jetzt VIP." if new_vip else f"VIP-Status für @{uname} entfernt."
             await query.answer(alert_msg)
             text, markup = await asyncio.to_thread(self._format_donor_view, uname, True)
         elif action == "donor_refresh":
@@ -2169,6 +2334,9 @@ class TelegramBotService:
             await query.answer("Aktualisiert")
             ident = None if val == "all" else val
             text, markup = await asyncio.to_thread(self._format_gifts_view, ident)
+        elif action == "live_refresh":
+            await query.answer("Aktualisiert")
+            text, markup = await self._format_live_view()
 
         if text and markup:
             try:
@@ -2208,7 +2376,7 @@ class TelegramBotService:
         )
         monitor_manager.start_tracking(streamer["id"], streamer["username"], auto_reconnect=True)
         await update.effective_message.reply_text(
-            f"✅ Streamer <b>@{html.escape(streamer['username'])}</b> gespeichert und Live-Worker gestartet!",
+            f"Streamer <b>@{html.escape(streamer['username'])}</b> gespeichert; Live-Worker gestartet.",
             parse_mode=ParseMode.HTML,
         )
 
@@ -2224,10 +2392,10 @@ class TelegramBotService:
             return
         s_row = await asyncio.to_thread(get_streamer_by_id_or_username, context.args[0])
         if not s_row:
-            await update.effective_message.reply_text("❌ Streamer nicht gefunden.")
+            await update.effective_message.reply_text("Streamer nicht gefunden.")
             return
         res = monitor_manager.start_tracking(s_row["id"], s_row["username"], auto_reconnect=True)
-        await update.effective_message.reply_text(f"▶️ {res.get('message')}")
+        await update.effective_message.reply_text(f"▸ {res.get('message')}")
 
     async def _cmd_stop_streamer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -2241,10 +2409,10 @@ class TelegramBotService:
             return
         s_row = await asyncio.to_thread(get_streamer_by_id_or_username, context.args[0])
         if not s_row:
-            await update.effective_message.reply_text("❌ Streamer nicht gefunden.")
+            await update.effective_message.reply_text("Streamer nicht gefunden.")
             return
         res = monitor_manager.stop_tracking(s_row["username"])
-        await update.effective_message.reply_text(f"⏹️ {res.get('message')}")
+        await update.effective_message.reply_text(f"■ {res.get('message')}")
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -2254,14 +2422,22 @@ class TelegramBotService:
         diag = monitor_manager.get_all_diagnostics()
         workers = diag.get("workers", [])
         lines = [
-            "<b>⚙️ toktracker · Backend &amp; Worker Status</b>",
-            f"Zugriffsmodus: <code>{get_telegram_access_mode().upper()}</code>",
-            f"Aktive Worker: <b>{diag['workers_running']}</b> ({diag['workers_connected']} im Stream verbunden)",
+            bf.header(9, "⚙️ SYSTEM-STATUS"),
+            bf.kv_table(
+                [
+                    ("MODUS", get_telegram_access_mode().upper()),
+                    ("WORKER", str(diag["workers_running"])),
+                    ("VERBUNDEN", str(diag["workers_connected"])),
+                ]
+            ),
+            bf.rule(),
         ]
         for w in workers:
+            worker_state = str(w["state"]).lower()
+            state_glyph = bf.worker_status(worker_state)
             lines.append(
-                f"• <b>@{html.escape(w['username'])}</b>: <code>{w['state']}</code> "
-                f"(Viewers: {w['current_viewers']}, Session-Coins: {w['coins_received_session']:,})"
+                f"{state_glyph} · <b>@{html.escape(w['username'])}</b> · "
+                f"{w['current_viewers']} Viewer · {w['coins_received_session']:,} Coins"
             )
 
         try:
@@ -2271,15 +2447,20 @@ class TelegramBotService:
             d = h.get("host", {}).get("disk", {})
             m = h.get("host", {}).get("memory", {})
             c = h.get("host", {}).get("cpu", {})
+            lines.append("\n" + bf.eyebrow("🖥️ SERVER-RESSOURCEN"))
             lines.append(
-                "\n🖥️ <b>Server-Ressourcen:</b>\n"
-                f"• Festplatte: <code>{d.get('used_gb', 0):.1f}/{d.get('total_gb', 0):.1f} GB</code> (<b>{d.get('percent', 0)}%</b>)\n"
-                f"• RAM: <code>{m.get('used_mb', 0):.0f}/{m.get('total_mb', 0):.0f} MB</code> (<b>{m.get('percent', 0)}%</b>)\n"
-                f"• CPU: <b>{c.get('percent', 0)}%</b> (Load: {c.get('load_1m', 0)})"
+                bf.kv_table(
+                    [
+                        ("DISK", f"{d.get('percent', 0)}% · {d.get('used_gb', 0):.1f}/{d.get('total_gb', 0):.1f} GB"),
+                        ("RAM", f"{m.get('percent', 0)}% · {m.get('used_mb', 0):.0f}/{m.get('total_mb', 0):.0f} MB"),
+                        ("CPU", f"{c.get('percent', 0)}% · LOAD {c.get('load_1m', 0)}"),
+                    ]
+                )
             )
         except Exception:
             pass
 
+        lines.append("\n" + bf.footer())
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def _cmd_allow_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2333,8 +2514,8 @@ class TelegramBotService:
         label = f"@{row['username']}" if row.get("username") else str(row.get("telegram_id"))
         self._log("INFO", f"Telegram-Nutzer {label} als {role.upper()} freigeschaltet.")
         await update.effective_message.reply_text(
-            f"✅ Nutzer <b>{html.escape(label)}</b> (ID: <code>{row.get('telegram_id') or 'wird bei Nachricht verknüpft'}</code>) "
-            f"wurde mit Rolle <code>{role.upper()}</code> für Privatchat &amp; Gruppen freigeschaltet!",
+            f"<b>@{html.escape(label)}</b> · ID <code>{row.get('telegram_id') or 'PENDING'}</code> "
+            f"· Rolle <code>{role.upper()}</code> freigeschaltet.",
             parse_mode=ParseMode.HTML,
         )
 
@@ -2379,7 +2560,7 @@ class TelegramBotService:
         label = f"@{row['username']}" if row.get("username") else str(row.get("telegram_id"))
         self._log("INFO", f"Telegram-Nutzer {label} wurde gesperrt.")
         await update.effective_message.reply_text(
-            f"🚫 Zugriff für <b>{html.escape(label)}</b> wurde entzogen.",
+            f"Zugriff für <b>{html.escape(label)}</b> entzogen.",
             parse_mode=ParseMode.HTML,
         )
 
@@ -2392,9 +2573,9 @@ class TelegramBotService:
         users = await asyncio.to_thread(list_telegram_users)
         mode = await asyncio.to_thread(get_telegram_access_mode)
         lines = [
-            f"<b>👥 toktracker · Telegram-Nutzerverwaltung (Modus: {mode.upper()})</b>",
-            f"Gesamt erfasst: <b>{len(users)}</b>",
-            "────────────────────────",
+            bf.eyebrow("👥 NUTZERVERWALTUNG"),
+            bf.kv_table([("MODUS", mode.upper()), ("ERFASST", str(len(users)))]),
+            bf.rule(),
         ]
         for u in users[:30]:
             st = int(u.get("is_allowed", 0))
@@ -2403,8 +2584,9 @@ class TelegramBotService:
             uname = f"@{u['username']}" if u.get("username") else (u.get("first_name") or "-")
             tg_id = u.get("telegram_id") or "-"
             lines.append(
-                f"{badge} <code>{tg_id}</code> – <b>{html.escape(uname)}</b>{role_tag}"
+                f"{badge} <code>{tg_id}</code> · <b>{html.escape(uname)}</b>{role_tag}"
             )
+        lines.append(bf.footer())
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def _cmd_alert(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2434,22 +2616,23 @@ class TelegramBotService:
             )
             if not subscriptions:
                 await update.effective_message.reply_text(
-                    "<b>🔔 Live-Alerts</b>\n\n"
-                    "Für diesen Chat sind noch keine Streamer-Alerts aktiv.\n"
-                    "Aktivieren mit <code>/alert &lt;@username&gt;</code>.",
+                    bf.eyebrow("🔔 LIVE-ALERTS")
+                    + "\n\nFür diesen Chat sind noch keine Streamer-Alerts aktiv.\n"
+                    "Aktivieren mit <code>/alert &lt;@username&gt;</code>.\n"
+                    + bf.footer(),
                     parse_mode=ParseMode.HTML,
                 )
                 return
             lines = [
-                "<b>🔔 Live-Alerts für diesen Chat</b>",
-                "────────────────────────",
+                bf.eyebrow("🔔 LIVE-ALERTS · DIESER CHAT"),
+                bf.rule(),
             ]
             for sub in subscriptions:
                 uname = str(sub.get("streamer_username") or "").lstrip("@")
-                live_tag = " 🟢 LIVE" if int(sub.get("streamer_is_live") or 0) else ""
-                lines.append(f"• <b>@{html.escape(uname)}</b>{live_tag}")
+                live_tag = " " + bf.LIVE if int(sub.get("streamer_is_live") or 0) else ""
+                lines.append(f"▪ <b>@{html.escape(uname)}</b>{live_tag}")
             lines.append(
-                "\n<i>Entfernen mit</i> <code>/alert off &lt;@username&gt;</code>."
+                "\nEntfernen mit <code>/alert off &lt;@username&gt;</code>.\n" + bf.footer()
             )
             await update.effective_message.reply_text(
                 "\n".join(lines), parse_mode=ParseMode.HTML
@@ -2484,8 +2667,8 @@ class TelegramBotService:
         streamer = await asyncio.to_thread(get_streamer_by_id_or_username, target)
         if not streamer:
             await update.effective_message.reply_text(
-                f"❌ Streamer <code>{html.escape(str(target).lstrip('@'))}</code> wurde nicht gefunden.\n"
-                "Lege ihn zuerst mit <code>/add &lt;username&gt;</code> an.",
+                f"Streamer <code>{html.escape(str(target).lstrip('@'))}</code> nicht gefunden.\n"
+                "Zuerst mit <code>/add &lt;username&gt;</code> anlegen.",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -2498,9 +2681,9 @@ class TelegramBotService:
                 chat_id,
             )
             if removed:
-                msg = f"🔕 Live-Alert für <b>@{html.escape(uname)}</b> wurde in diesem Chat deaktiviert."
+                msg = f"Live-Alert für <b>@{html.escape(uname)}</b> deaktiviert."
             else:
-                msg = f"ℹ️ Für <b>@{html.escape(uname)}</b> war in diesem Chat kein Live-Alert aktiv."
+                msg = f"Für <b>@{html.escape(uname)}</b> war kein Live-Alert aktiv."
             await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
             return
 
@@ -2515,12 +2698,11 @@ class TelegramBotService:
         warning = ""
         if not int(streamer.get("auto_monitor") or 0):
             warning = (
-                "\n\n⚠️ <i>Hinweis: Der Streamer ist aktuell nicht für Auto-Monitoring "
-                f"markiert. Starte die Überwachung mit</i> <code>/track @{html.escape(uname)}</code>, "
-                "<i>damit Live-Events erkannt werden.</i>"
+                "\n\n<i>Hinweis: Der Streamer ist nicht für Auto-Monitoring markiert. "
+                f"Überwachung starten mit</i> <code>/track @{html.escape(uname)}</code>."
             )
         await update.effective_message.reply_text(
-            f"✅ Live-Alert für <b>@{html.escape(uname)}</b> ist in diesem Chat aktiviert."
+            f"Live-Alert für <b>@{html.escape(uname)}</b> aktiviert."
             f"{warning}",
             parse_mode=ParseMode.HTML,
         )
@@ -2534,10 +2716,11 @@ class TelegramBotService:
         if not context.args or context.args[0].lower() not in ("whitelist", "public"):
             curr = await asyncio.to_thread(get_telegram_access_mode)
             await update.effective_message.reply_text(
-                f"🔐 Aktueller Zugriffsmodus: <b>{curr.upper()}</b>\n\n"
-                "Umschalten mit:\n"
-                "• <code>/mode whitelist</code> – Nur freigeschaltete Personen (@username oder ID) dürfen den Bot im Privatchat &amp; in Gruppen nutzen\n"
-                "• <code>/mode public</code> – Alle Telegram-Nutzer erhalten die Rolle Viewer (nur öffentliche Inhalte; Radar/Chat bleiben Whitelist)",
+                bf.eyebrow("🔐 ZUGRIFFSMODUS")
+                + f"\n\nAktuell: <b>{curr.upper()}</b>\n\n"
+                "▪ <code>/mode whitelist</code> — nur freigeschaltete Personen\n"
+                "▪ <code>/mode public</code> — alle Nutzer als Viewer\n"
+                + bf.footer(),
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -2545,7 +2728,7 @@ class TelegramBotService:
         new_mode = await asyncio.to_thread(set_telegram_access_mode, context.args[0].lower())
         self._log("INFO", f"Telegram-Zugriffsmodus geändert auf: {new_mode.upper()}")
         await update.effective_message.reply_text(
-            f"✅ Bot-Zugriffsmodus wurde auf <b>{new_mode.upper()}</b> umgestellt!",
+            f"Zugriffsmodus: <b>{new_mode.upper()}</b>.",
             parse_mode=ParseMode.HTML,
         )
 

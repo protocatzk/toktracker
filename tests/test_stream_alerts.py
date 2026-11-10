@@ -163,7 +163,8 @@ class TestTelegramAlertDispatch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(service._app.bot.messages), 1)
         message = service._app.bot.messages[0]
         self.assertEqual(int(message["chat_id"]), chat_id)
-        self.assertIn("ist jetzt LIVE", message["text"])
+        self.assertIn("LIVE-ALERT", message["text"])
+        self.assertIn("@alert_dispatch_streamer", message["text"])
 
         # Derselbe Session-Alert darf nicht doppelt verschickt werden.
         await service._send_live_status_alert(payload)

@@ -1,96 +1,58 @@
 /* =====================================================================
-   toktracker Telegram Mini-App Stylesheet (Hybrid Theme)
+   TT-INTELLIGENCE Telegram Mini-App Stylesheet (Industrial / Dark only)
    Aligned with the Main Dashboard Design System (#0d1117 / JetBrains Mono)
    Optimized for Mobile Form Factor & Telegram WebApp Viewport
    ===================================================================== */
 
-:root,
-[data-theme="dark"] {
-    --bg-body: #0d1117;
-    --bg-surface: #12171f;
-    --bg-subtle: #161b22;
-    --bg-card: #12171f;
+:root {
+    /* Marken-Tokens kommen aus brand.css (Industrial Design der Startseite) */
+    --bg-body: var(--bg);
+    --bg-surface: var(--surface);
+    --bg-subtle: var(--surface-2);
+    --bg-card: var(--surface);
     --bg-card-hover: #1c222b;
     --bg-row-even: #0f141b;
     --bg-row-hover: #1c222b;
-    --bg-input: #0d1117;
-    --border-color: #2a313c;
-    --border-strong: #f0f6fc;
+    --bg-input: var(--bg);
+    --border-color: var(--border);
+    --border-strong: var(--text-strong);
     --border-subtle: #1e242d;
     --border-input: #3d444d;
-    --border-focus: #f0f6fc;
-    --text-main: #e6edf3;
+    --border-focus: var(--text-strong);
+    --text-main: var(--text);
     --text-strong: #f0f6fc;
-    --text-muted: #8b949e;
-    --link-color: #f0f6fc;
+    --text-muted: var(--muted);
+    --link-color: var(--text-strong);
 
-    --btn-bg: #161b22;
+    --btn-bg: var(--surface-2);
     --btn-bg-hover: #21262d;
     --btn-border: #30363d;
-    --btn-text: #e6edf3;
+    --btn-text: var(--text);
 
-    --btn-primary-bg: #f0f6fc;
+    --btn-primary-bg: var(--text-strong);
     --btn-primary-bg-hover: #ffffff;
-    --btn-primary-border: #f0f6fc;
-    --btn-primary-text: #0d1117;
+    --btn-primary-border: var(--text-strong);
+    --btn-primary-text: var(--bg);
 
     --btn-danger-bg: rgba(248, 81, 73, 0.12);
     --btn-danger-bg-hover: rgba(248, 81, 73, 0.24);
     --btn-danger-border: rgba(248, 81, 73, 0.45);
     --btn-danger-text: #ff7b72;
 
-    --color-win: #10b981;
-    --color-lose: #ef4444;
-    --color-draw: #f59e0b;
-    --color-ongoing: #3b82f6;
-    --color-gold: #f59e0b;
+    --color-win: var(--accent);
+    --color-lose: var(--danger);
+    --color-draw: var(--warn);
+    --color-ongoing: var(--text);
+    --color-gold: var(--warn);
 
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 8px;
+    --radius-sm: 0px;
+    --radius-md: 2px;
+    --radius-lg: 2px;
 
-    --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --font-mono: "JetBrains Mono", Consolas, Monaco, monospace;
+    --font-sans: var(--sans);
+    --font-mono: var(--mono);
 
     color-scheme: dark;
-}
-
-[data-theme="light"] {
-    --bg-body: #f0f6fc;
-    --bg-surface: #ffffff;
-    --bg-subtle: #e6edf3;
-    --bg-card: #ffffff;
-    --bg-card-hover: #eaeef2;
-    --bg-row-even: #f7f9fc;
-    --bg-row-hover: #eaeef2;
-    --bg-input: #ffffff;
-    --border-color: #c8d1da;
-    --border-strong: #0d1117;
-    --border-subtle: #dde4ec;
-    --border-input: #8b949e;
-    --border-focus: #0d1117;
-    --text-main: #1f2328;
-    --text-strong: #0d1117;
-    --text-muted: #57606a;
-    --link-color: #0d1117;
-
-    --btn-bg: #f0f6fc;
-    --btn-bg-hover: #e1e8f0;
-    --btn-border: #afb8c1;
-    --btn-text: #0d1117;
-
-    --btn-primary-bg: #0d1117;
-    --btn-primary-bg-hover: #24292f;
-    --btn-primary-border: #0d1117;
-    --btn-primary-text: #f0f6fc;
-
-    --color-win: #10b981;
-    --color-lose: #cf222e;
-    --color-draw: #b45309;
-    --color-ongoing: #2563eb;
-    --color-gold: #d97706;
-
-    color-scheme: light;
 }
 
 * {
@@ -2896,3 +2858,746 @@ code {
 }
 
 
+
+/* =====================================================================
+   INDUSTRIAL LAYER – TT-INTELLIGENCE
+   Referenz: static/landing.css (harte Kanten, Mono-Labels,
+   Hairline-Rahmen, ein grüner Akzent). Diese Schicht überschreibt
+   gezielt die historischen Dashboard-Styles, ohne die DOM-Struktur
+   oder die JavaScript-Verträge zu verändern.
+   ===================================================================== */
+
+/* ---- Header ---- */
+.ma-header {
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--text-strong);
+    border-radius: 0;
+    padding: 14px;
+    background: var(--surface);
+}
+
+.ma-brand {
+    gap: 14px;
+    min-width: 0;
+}
+
+.ma-brand-logo {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--text-strong);
+    border-radius: 0;
+}
+
+.ma-brand-eyebrow {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ma-brand-title {
+    font-family: var(--sans);
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    text-transform: uppercase;
+    color: var(--text-strong);
+    gap: 6px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+}
+
+.ma-badge {
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+}
+
+.ma-admin-indicator {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--border);
+    padding: 2px 5px;
+}
+
+.ma-brand-sub {
+    font-size: 9.5px;
+    letter-spacing: 1.4px;
+    color: var(--muted);
+    margin-top: 5px;
+}
+
+.btn-icon-refresh {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--surface-2);
+}
+
+.btn-icon-refresh:active {
+    transform: none;
+    background: var(--text-strong);
+    color: var(--bg);
+}
+
+/* ---- Zeitraum / Filter ---- */
+.period-pill {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+.period-pill:hover {
+    background: var(--surface-2);
+    border-color: var(--text-strong);
+}
+
+.period-pill.active {
+    background: var(--text-strong);
+    border-color: var(--text-strong);
+    color: var(--bg);
+}
+
+/* ---- Live-Banner ---- */
+.ma-live-banner {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    border-radius: 0;
+    background: var(--surface);
+    font-size: 10.5px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.ma-live-banner.no-active {
+    border-left-color: var(--border);
+    color: var(--muted);
+}
+
+.live-pulse-dot {
+    background: var(--accent);
+    box-shadow: none;
+    animation: none;
+}
+
+/* ---- KPI / Panels ---- */
+.ma-kpi-card,
+.ma-mini-kpi-card,
+.ma-radar-kpi-card,
+.ma-card,
+.ma-loyalty-section,
+.ma-whitelist-item,
+.ffa-row-item,
+.battle-card-mobile,
+.streamer-card-mobile,
+.ma-donor-card,
+.ma-alert-card,
+.ma-shifter-card,
+.ma-overlap-card,
+.ma-admin-streamer-card,
+.ma-dossier-kpi-box,
+.ma-dossier-crm-box {
+    border-radius: 0;
+}
+
+.ma-kpi-card,
+.ma-mini-kpi-card {
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--text-strong);
+    background: var(--surface);
+}
+
+.kpi-label,
+.ma-mini-kpi-label {
+    font-size: 9.5px;
+    letter-spacing: 1.2px;
+    color: var(--muted);
+}
+
+.kpi-value,
+.ma-mini-kpi-val {
+    font-size: 21px;
+    letter-spacing: -0.5px;
+    color: var(--text-strong);
+}
+
+.kpi-sub,
+.ma-mini-kpi-sub {
+    color: var(--muted);
+}
+
+/* ---- Abschnitte ---- */
+.section-head {
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 8px;
+}
+
+.section-title {
+    font-size: 10.5px;
+    letter-spacing: 1.4px;
+    color: var(--text-strong);
+    gap: 8px;
+}
+
+.section-index {
+    color: var(--muted);
+    font-weight: 500;
+}
+
+.section-index::after {
+    content: " /";
+    color: var(--border);
+}
+
+.section-counter,
+.ma-loyalty-badge,
+.ma-subnav-badge {
+    border-radius: 0;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.6px;
+}
+
+/* ---- Buttons & Inputs ---- */
+.ma-btn,
+.ma-input,
+.ma-select-mini,
+.ma-metric-dropdown,
+.ma-chart-type-btn,
+.ma-action-btn,
+.ma-tier-pill,
+.ma-metric-pill,
+.ma-alert-pill,
+.ma-loyalty-pill,
+.ma-radar-subnav,
+.ma-radar-subnav-btn,
+.ma-toast {
+    border-radius: 0;
+}
+
+.ma-btn,
+.ma-action-btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    letter-spacing: 0.8px;
+}
+
+.ma-btn:hover,
+.ma-action-btn:hover {
+    background: #21262d;
+    border-color: var(--text-strong);
+}
+
+.ma-btn-primary {
+    background: var(--text-strong);
+    border-color: var(--text-strong);
+    color: var(--bg);
+}
+
+.ma-btn-primary:hover {
+    background: #ffffff;
+}
+
+.ma-input,
+.ma-select-mini,
+.ma-metric-dropdown {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.ma-input:focus,
+.ma-select-mini:focus,
+.ma-metric-dropdown:focus {
+    border-color: var(--text-strong);
+    box-shadow: none;
+}
+
+.ma-action-btn .action-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-strong);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.ma-action-btn .action-text {
+    font-size: 9.5px;
+    letter-spacing: 1px;
+}
+
+/* ---- Charts ---- */
+.chart-title {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-strong);
+}
+
+.chart-subtitle {
+    font-size: 9.5px;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+}
+
+.ma-chart-type-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    min-width: 30px;
+    padding: 4px 6px;
+}
+
+.ma-chart-type-btn.active {
+    background: var(--text-strong);
+    color: var(--bg);
+    border-color: var(--text-strong);
+}
+
+.ma-chart-stats-strip {
+    border-top: 1px solid var(--border-subtle);
+}
+
+.ma-stat-label {
+    font-size: 9px;
+    letter-spacing: 1px;
+}
+
+.ma-stat-val {
+    font-size: 11.5px;
+}
+
+/* ---- Radar ---- */
+.ma-radar-kpi-card {
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--text-strong);
+    background: var(--surface);
+}
+
+.ma-radar-kpi-card.whale,
+.ma-radar-kpi-card.shark,
+.ma-radar-kpi-card.dolphin,
+.ma-radar-kpi-card.cross,
+.ma-radar-kpi-card.vip {
+    border-left: 1px solid var(--border);
+}
+
+.ma-radar-kpi-val,
+.ma-radar-kpi-card.vip .ma-radar-kpi-val {
+    color: var(--text-strong) !important;
+}
+
+.ma-radar-kpi-header,
+.ma-radar-kpi-sub {
+    font-size: 9px;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+}
+
+.ma-radar-subnav {
+    background: transparent;
+    border: 1px solid var(--border);
+    padding: 0;
+    gap: 0;
+}
+
+.ma-radar-subnav-btn {
+    border: 0;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 9.5px;
+    letter-spacing: 0.8px;
+    padding: 8px 6px;
+}
+
+.ma-radar-subnav-btn:last-child {
+    border-right: 0;
+}
+
+.ma-radar-subnav-btn.active {
+    background: var(--text-strong);
+    color: var(--bg);
+    border: 0;
+    border-right: 1px solid var(--text-strong);
+    box-shadow: none;
+}
+
+.ma-radar-subnav-btn.active:last-child {
+    border-right: 0;
+}
+
+.ma-radar-search {
+    border-radius: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+}
+
+.ma-radar-search:focus {
+    border-color: var(--text-strong);
+    box-shadow: none;
+}
+
+.ma-tier-pill,
+.ma-alert-pill,
+.ma-loyalty-pill {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 9.5px;
+    letter-spacing: 0.6px;
+}
+
+.ma-tier-pill.active,
+.ma-tier-pill.tier-whale.active,
+.ma-tier-pill.tier-shark.active,
+.ma-tier-pill.tier-dolphin.active,
+.ma-tier-pill.tier-cross.active,
+.ma-tier-pill.tier-vip.active,
+.ma-alert-pill.active,
+.ma-loyalty-pill.active {
+    background: var(--text-strong) !important;
+    border-color: var(--text-strong) !important;
+    color: var(--bg) !important;
+    box-shadow: none !important;
+}
+
+.ma-donor-card.tier-whale,
+.ma-donor-card.tier-shark,
+.ma-donor-card.tier-dolphin {
+    border-left: 2px solid var(--border-strong);
+}
+
+.ma-donor-rank,
+.ma-donor-rank.rank-1,
+.ma-donor-rank.rank-2,
+.ma-donor-rank.rank-3 {
+    border-radius: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-strong);
+}
+
+.ma-donor-vip-badge {
+    color: var(--warn);
+    filter: none;
+}
+
+.ma-donor-eur {
+    color: var(--accent);
+}
+
+.ma-tier-tag.whale,
+.ma-tier-tag.shark,
+.ma-tier-tag.dolphin,
+.ma-cross-tag {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 0;
+    letter-spacing: 0.8px;
+}
+
+.ma-vip-star-btn {
+    color: var(--border);
+    text-shadow: none;
+}
+
+.ma-vip-star-btn.is-vip {
+    color: var(--warn);
+    text-shadow: none;
+}
+
+/* ---- Battle Cards ---- */
+.match-mode-pill,
+.match-mode-pill.mode-1v1,
+.match-mode-pill.mode-2v2,
+.match-mode-pill.mode-1v1v1,
+.match-mode-pill.mode-1v1v1v1 {
+    border-radius: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+
+.match-mode-pill.mode-derby {
+    background: var(--text-strong);
+    border: 1px solid var(--text-strong);
+    color: var(--bg) !important;
+    box-shadow: none;
+}
+
+.battle-card-mobile.card-derby {
+    background: var(--surface);
+    border-left: 2px solid var(--warn) !important;
+}
+
+.battle-card-mobile.active-match {
+    border-left: 2px solid var(--accent);
+}
+
+.duel-score-bar-mobile {
+    border-radius: 0;
+    height: 4px;
+}
+
+.bar-side-left {
+    background: var(--accent);
+}
+
+.bar-side-right {
+    background: var(--border-strong);
+}
+
+.match-result-badge {
+    border-radius: 0;
+}
+
+.streamer-card-mobile.is-live {
+    border-left: 2px solid var(--accent);
+}
+
+.streamer-live-dot,
+.combatant-avatar,
+.ffa-avatar-small {
+    border-radius: 0;
+}
+
+.streamer-live-dot {
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.rank-crown {
+    display: none;
+}
+
+/* ---- Admin / Health ---- */
+.ma-admin-hero {
+    border-radius: 0;
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--text-strong);
+    background: var(--surface);
+}
+
+.ma-admin-badge-icon {
+    border-radius: 0;
+    background: transparent;
+    border: 1px solid var(--text-strong);
+    color: var(--text-strong);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.ma-health-track {
+    border-radius: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+}
+
+.ma-health-fill {
+    border-radius: 0;
+}
+
+.status-pill {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    line-height: 1.4;
+    text-transform: uppercase;
+    padding: 2px 6px;
+}
+
+.status-pill.live {
+    border-color: var(--accent);
+    background: rgba(63, 185, 80, 0.10);
+    color: var(--accent);
+}
+
+.status-pill.warning {
+    border-color: var(--warn);
+    background: rgba(245, 158, 11, 0.10);
+    color: var(--warn);
+}
+
+.status-pill.danger {
+    border-color: var(--danger);
+    background: rgba(248, 81, 73, 0.10);
+    color: var(--danger);
+}
+
+.section-badge {
+    display: inline-block;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+}
+
+/* ---- Modals / Bottom Sheet ---- */
+.ma-modal-sheet {
+    border-top: 2px solid var(--text-strong);
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg);
+}
+
+.ma-sheet-header {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.ma-sheet-title {
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+}
+
+/* ---- Bottom Navigation ---- */
+.ma-bottom-nav {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    height: 60px;
+}
+
+.nav-tab-btn {
+    font-size: 9px;
+    letter-spacing: 0.8px;
+    border-top: 2px solid transparent;
+}
+
+.nav-tab-btn.active {
+    background: transparent;
+    color: var(--text-strong);
+    border-top-color: var(--text-strong);
+}
+
+.nav-tab-btn.active svg {
+    transform: none;
+}
+
+/* ---- Gates / Empty States ---- */
+.ma-gate-mark {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    display: inline-block;
+    padding: 6px 10px;
+    margin-bottom: 14px;
+}
+
+.ma-empty-state {
+    border-radius: 0;
+    border-style: solid;
+    border-color: var(--border-subtle);
+    background: transparent;
+}
+
+.ma-empty-icon {
+    display: none;
+}
+
+/* ---- Toasts ---- */
+.ma-toast {
+    box-shadow: none;
+    border: 1px solid var(--border-strong);
+}
+
+/* ---- Scrollbars ---- */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+}
+
+/* Restfarben der Legacy-Komponenten auf die Industrial-Palette ziehen */
+.ma-mini-kpi-sub,
+.ma-gifter-coins {
+    color: var(--text-strong);
+}
+
+.ma-ticker-pulse {
+    background: var(--accent);
+    box-shadow: none;
+    animation: none;
+}
+
+.ma-ticker-chip:active,
+.ma-ticker-btn.active {
+    border-color: var(--text-strong);
+    background: var(--surface-2);
+    color: var(--text-strong);
+}
+
+.ma-btn-toggle.active {
+    background: var(--text-strong);
+    border-color: var(--text-strong);
+    color: var(--bg);
+}
+
+.ma-toast.success {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.ma-toast.error {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.ma-whale-ticker-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    box-shadow: none;
+}

@@ -1,5 +1,5 @@
 /* =====================================================================
-   toktracker Telegram Mini-App Client Logic v2.2.0
+   TT-INTELLIGENCE Telegram Mini-App Client Logic v3.0.0
    Mobile-First Real-Time Feed, Public Analytics & Admin Control Panel
    ===================================================================== */
 
@@ -13,10 +13,13 @@
             tg.ready();
             tg.expand();
             if (tg.setHeaderColor) {
-                tg.setHeaderColor("#0b0e14");
+                tg.setHeaderColor("#0d1117");
             }
             if (tg.setBackgroundColor) {
-                tg.setBackgroundColor("#0b0e14");
+                tg.setBackgroundColor("#0d1117");
+            }
+            if (tg.setBottomBarColor) {
+                tg.setBottomBarColor("#0d1117");
             }
         } catch (e) {
             console.warn("Telegram WebApp init hint:", e);
@@ -382,7 +385,7 @@
         const canSeeModeration = isAdmin || hasPerm("analytics.view");
         if (elements.headerAdminBadge) {
             elements.headerAdminBadge.style.display = canSeeModeration ? "inline-block" : "none";
-            elements.headerAdminBadge.textContent = isAdmin ? "👑 ADMIN" : (canSeeModeration ? "🛡️ MODERATOR" : "");
+            elements.headerAdminBadge.textContent = isAdmin ? "● ADMIN" : (canSeeModeration ? "● MODERATOR" : "");
         }
         if (elements.navRadar) {
             elements.navRadar.style.display = hasPerm("radar.view") ? "" : "none";
@@ -448,9 +451,7 @@
             });
             if (res.status === 401) {
                 // Zugriffssperre: Nutzer ist nicht per Telegram freigeschaltet.
-                window.location.href = "login?error=" + encodeURIComponent(
-                    "Zugang nur für freigeschaltete Nutzer – bitte per Telegram anmelden."
-                );
+                window.location.href = loginUrl();
                 return;
             }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -487,10 +488,10 @@
         if (elements.liveBanner && elements.liveBannerText) {
             if (liveCount > 0) {
                 elements.liveBanner.className = "ma-live-banner";
-                elements.liveBannerText.textContent = `🟢 ${liveCount} Streamer aktiv LIVE auf Sendung`;
+                elements.liveBannerText.textContent = `${liveCount} Streamer aktiv LIVE auf Sendung`;
             } else {
                 elements.liveBanner.className = "ma-live-banner no-active";
-                elements.liveBannerText.textContent = `💤 Aktuell keine Streamer LIVE – Auto-Monitor aktiv`;
+                elements.liveBannerText.textContent = `Aktuell keine Streamer LIVE – Auto-Monitor aktiv`;
             }
         }
 
@@ -518,7 +519,7 @@
             return;
         }
 
-        let html = '<div class="section-head"><div class="section-title">🔴 LIVE DUELL</div></div>';
+        let html = '<div class="section-head"><div class="section-title">● LIVE DUELL</div></div>';
         liveBattles.forEach(item => {
             const b = item.battle || {};
             const isFfa = b.is_ffa || b.battle_mode === '1v1v1' || b.battle_mode === '1v1v1v1';
@@ -535,8 +536,8 @@
                     players.push({ username: b.opponent3_username || "Gegner 3", display_name: b.opponent3_display_name || b.opponent3_username || "Gegner 3", avatar_url: b.opponent3_avatar_url, score: b.opponent3_score || 0 });
                 }
                 players.sort((x, y) => (y.score || 0) - (x.score || 0));
-                const rankBadges = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
-                const modeLabel = bMode === "1v1v1v1" ? "⚡ 4ER-EINZEL" : "🔺 1 VS 1 VS 1";
+                const rankBadges = ["01", "02", "03", "04"];
+                const modeLabel = bMode === "1v1v1v1" ? "4ER-EINZEL" : "1 VS 1 VS 1";
 
                 html += `
                     <div class="battle-card-mobile active-match" style="border-left: 4px solid #f59e0b;">
@@ -557,8 +558,8 @@
                                         </div>
                                     </div>
                                     <div style="text-align:right;">
-                                        <div class="ffa-score" style="color:#38bdf8;">${formatNumber(p.score || 0)}</div>
-                                        ${p.eur_net !== undefined ? `<div style="font-size:10px; color:#10b981; font-weight:700;">+${formatCurrency(p.eur_net || 0)}</div>` : ''}
+                                        <div class="ffa-score" style="color:#f0f6fc;">${formatNumber(p.score || 0)}</div>
+                                        ${p.eur_net !== undefined ? `<div style="font-size:10px; color:#3fb950; font-weight:700;">+${formatCurrency(p.eur_net || 0)}</div>` : ''}
                                     </div>
                                 </div>
                             `).join("")}
@@ -566,7 +567,7 @@
 
                         <div class="battle-card-footer">
                             <span>Battle #${escapeHtml(String(b.battle_id || ""))} · Live im Gange</span>
-                            <span class="battle-earnings-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b;">🔥 +${formatNumber(b.total_coins || b.coins_earned || 0)} Coins</span>
+                            <span class="battle-earnings-badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b;">+${formatNumber(b.total_coins || b.coins_earned || 0)} Coins</span>
                         </div>
                     </div>
                 `;
@@ -585,7 +586,7 @@
                 html += `
                     <div class="battle-card-mobile active-match card-derby">
                         <div class="battle-card-header">
-                            <span class="match-mode-pill mode-derby">⚔️ DERBY</span>
+                            <span class="match-mode-pill mode-derby">DERBY</span>
                             <span class="match-result-badge live">LIVE DERBY</span>
                         </div>
 
@@ -595,30 +596,30 @@
                                     <img src="${escapeHtml(sA.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sA.display_name || sA.username || '')}</div>
-                                <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
-                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sA.eur_net || 0)}</div>
+                                <div class="combatant-score" style="color: #f0f6fc;">${formatNumber(sScore)}</div>
+                                <div style="font-size: 10px; color: #3fb950; font-weight: 700; margin-top: 2px;">+${formatCurrency(sA.eur_net || 0)}</div>
                             </div>
 
-                            <div class="vs-center-mobile"><span class="vs-text" style="color:#8b5cf6;">VS</span></div>
+                            <div class="vs-center-mobile"><span class="vs-text" style="color:#8b949e;">VS</span></div>
 
                             <div class="combatant-side">
                                 <div class="combatant-avatar-wrap">
                                     <img src="${escapeHtml(sB.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sB.display_name || sB.username || '')}</div>
-                                <div class="combatant-score" style="color: #ec4899;">${formatNumber(oScore)}</div>
-                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sB.eur_net || 0)}</div>
+                                <div class="combatant-score" style="color: #8b949e;">${formatNumber(oScore)}</div>
+                                <div style="font-size: 10px; color: #3fb950; font-weight: 700; margin-top: 2px;">+${formatCurrency(sB.eur_net || 0)}</div>
                             </div>
                         </div>
 
                         <div class="duel-score-bar-mobile">
-                            <div class="bar-side-left" style="width: ${sPct}%; background: #38bdf8;"></div>
-                            <div class="bar-side-right" style="width: ${oPct}%; background: #ec4899;"></div>
+                            <div class="bar-side-left" style="width: ${sPct}%; background: #f0f6fc;"></div>
+                            <div class="bar-side-right" style="width: ${oPct}%; background: #8b949e;"></div>
                         </div>
 
                         <div class="battle-card-footer">
                             <span>Vorsprung: ${formatNumber(Math.abs(sScore - oScore))} Pkt</span>
-                            <span class="battle-earnings-badge" style="background: rgba(139, 92, 246, 0.2); color: #c084fc; border: 1px solid #8b5cf6;">🔥 +${formatCurrency(b.total_eur_net || b.eur_net || 0, "EUR")}</span>
+                            <span class="battle-earnings-badge" style="background: rgba(139, 92, 246, 0.2); color: #8b949e; border: 1px solid #8b949e;">+${formatCurrency(b.total_eur_net || b.eur_net || 0, "EUR")}</span>
                         </div>
                     </div>
                 `;
@@ -650,7 +651,7 @@
                                 <img src="${escapeHtml(sAvatar)}" class="combatant-avatar ${sScore >= oScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(sName)}</div>
-                            <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
+                            <div class="combatant-score" style="color: #f0f6fc;">${formatNumber(sScore)}</div>
                         </div>
 
                         <div class="vs-center-mobile"><span class="vs-text">VS</span></div>
@@ -660,7 +661,7 @@
                                 <img src="${escapeHtml(oAvatar)}" class="combatant-avatar ${oScore >= sScore ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(oName)}</div>
-                            <div class="combatant-score" style="color: #ef4444;">${formatNumber(oScore)}</div>
+                            <div class="combatant-score" style="color: #f85149;">${formatNumber(oScore)}</div>
                         </div>
                     </div>
 
@@ -684,7 +685,7 @@
         if (!battles || battles.length === 0) {
             elements.recentBattlesContainer.innerHTML = `
                 <div class="ma-empty-state">
-                    <div class="ma-empty-icon">⚔️</div>
+                    <div class="ma-empty-icon">···</div>
                     <div>Noch keine Matches im gewählten Zeitraum erfasst.</div>
                 </div>
             `;
@@ -736,10 +737,10 @@
                 players.sort((x, y) => (y.score || 0) - (x.score || 0));
 
                 const rank = b.streamer_rank || (b.result === "WIN" ? 1 : 2);
-                const rankBadges = ["🥇 #1", "🥈 #2", "🥉 #3", "4."];
-                const modeLabel = bMode === "1v1v1v1" ? "⚡ 4ER-EINZEL" : "🔺 1 VS 1 VS 1";
+                const rankBadges = ["01", "02", "03", "04"];
+                const modeLabel = bMode === "1v1v1v1" ? "4ER-EINZEL" : "1 VS 1 VS 1";
                 const resClass = rank === 1 ? "win" : "lose";
-                const resLabel = rank === 1 ? "🥇 1. PLATZ" : (rank === 2 ? "🥈 2. PLATZ" : (rank === 3 ? "🥉 3. PLATZ" : "4. PLATZ"));
+                const resLabel = rank === 1 ? "01 / 1. PLATZ" : (rank === 2 ? "02 / 2. PLATZ" : (rank === 3 ? "03 / 3. PLATZ" : "04 / 4. PLATZ"));
                 const relTime = getRelativeTime(b.started_at || b.created_at);
 
                 html += `
@@ -762,7 +763,7 @@
                                     </div>
                                     <div style="text-align:right;">
                                         <div class="ffa-score">${formatNumber(p.score || 0)}</div>
-                                        ${p.eur_net !== undefined ? `<div style="font-size:10px; color:#10b981; font-weight:700;">+${formatCurrency(p.eur_net || 0)}</div>` : ''}
+                                        ${p.eur_net !== undefined ? `<div style="font-size:10px; color:#3fb950; font-weight:700;">+${formatCurrency(p.eur_net || 0)}</div>` : ''}
                                     </div>
                                 </div>
                             `).join("")}
@@ -787,12 +788,12 @@
                 const oPct = 100 - sPct;
 
                 const relTime = getRelativeTime(b.started_at || b.created_at);
-                const winnerLabel = b.winner_username ? `🏆 @${escapeHtml(b.winner_username)}` : "🤝 REMIS";
+                const winnerLabel = b.winner_username ? `WINNER @${escapeHtml(b.winner_username)}` : "REMIS";
 
                 html += `
                     <div class="battle-card-mobile card-derby">
                         <div class="battle-card-header">
-                            <span class="match-mode-pill mode-derby">⚔️ INTERNES DERBY</span>
+                            <span class="match-mode-pill mode-derby">INTERNES DERBY</span>
                             <span class="match-result-badge win">${winnerLabel}</span>
                         </div>
 
@@ -802,30 +803,30 @@
                                     <img src="${escapeHtml(sA.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sA.username ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sA.display_name || sA.username || '')}</div>
-                                <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
-                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sA.eur_net || 0)}</div>
+                                <div class="combatant-score" style="color: #f0f6fc;">${formatNumber(sScore)}</div>
+                                <div style="font-size: 10px; color: #3fb950; font-weight: 700; margin-top: 2px;">+${formatCurrency(sA.eur_net || 0)}</div>
                             </div>
 
-                            <div class="vs-center-mobile"><span class="vs-text" style="color:#8b5cf6;">VS</span></div>
+                            <div class="vs-center-mobile"><span class="vs-text" style="color:#8b949e;">VS</span></div>
 
                             <div class="combatant-side">
                                 <div class="combatant-avatar-wrap">
                                     <img src="${escapeHtml(sB.avatar_url || 'static/avatar_default.png')}" class="combatant-avatar ${b.winner_username === sB.username ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                                 </div>
                                 <div class="combatant-name">${escapeHtml(sB.display_name || sB.username || '')}</div>
-                                <div class="combatant-score" style="color: #ec4899;">${formatNumber(oScore)}</div>
-                                <div style="font-size: 10px; color: #10b981; font-weight: 700; margin-top: 2px;">+${formatCurrency(sB.eur_net || 0)}</div>
+                                <div class="combatant-score" style="color: #8b949e;">${formatNumber(oScore)}</div>
+                                <div style="font-size: 10px; color: #3fb950; font-weight: 700; margin-top: 2px;">+${formatCurrency(sB.eur_net || 0)}</div>
                             </div>
                         </div>
 
                         <div class="duel-score-bar-mobile">
-                            <div class="bar-side-left" style="width: ${sPct}%; background: #38bdf8;"></div>
-                            <div class="bar-side-right" style="width: ${oPct}%; background: #ec4899;"></div>
+                            <div class="bar-side-left" style="width: ${sPct}%; background: #f0f6fc;"></div>
+                            <div class="bar-side-right" style="width: ${oPct}%; background: #8b949e;"></div>
                         </div>
 
                         <div class="battle-card-footer">
                             <span>${relTime} · ${formatNumber(b.total_coins || b.coins_earned || 0)} Coins</span>
-                            <span class="battle-earnings-badge" style="background: rgba(139, 92, 246, 0.2); color: #c084fc; border: 1px solid #8b5cf6;">🔥 +${formatCurrency(b.total_eur_net || b.eur_net || 0, "EUR")}</span>
+                            <span class="battle-earnings-badge" style="background: rgba(139, 92, 246, 0.2); color: #8b949e; border: 1px solid #8b949e;">+${formatCurrency(b.total_eur_net || b.eur_net || 0, "EUR")}</span>
                         </div>
                     </div>
                 `;
@@ -863,7 +864,7 @@
                                 <img src="${escapeHtml(sAvatar)}" class="combatant-avatar ${res === 'WIN' ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(sName)}</div>
-                            <div class="combatant-score" style="color: #38bdf8;">${formatNumber(sScore)}</div>
+                            <div class="combatant-score" style="color: #f0f6fc;">${formatNumber(sScore)}</div>
                         </div>
 
                         <div class="vs-center-mobile"><span class="vs-text">VS</span></div>
@@ -873,7 +874,7 @@
                                 <img src="${escapeHtml(oAvatar)}" class="combatant-avatar ${res === 'LOSE' ? 'winner-glow' : ''}" onerror="this.src='static/avatar_default.png'">
                             </div>
                             <div class="combatant-name">${escapeHtml(oName)}</div>
-                            <div class="combatant-score" style="color: #ef4444;">${formatNumber(oScore)}</div>
+                            <div class="combatant-score" style="color: #f85149;">${formatNumber(oScore)}</div>
                         </div>
                     </div>
 
@@ -897,8 +898,8 @@
         if (!streamers || streamers.length === 0) {
             elements.streamersContainer.innerHTML = `
                 <div class="ma-empty-state">
-                    <div class="ma-empty-icon">👥</div>
-                    <div>Keine Streamer im TokTracker hinterlegt.</div>
+                    <div class="ma-empty-icon">···</div>
+                    <div>Keine Streamer im TT-INTELLIGENCE-System hinterlegt.</div>
                 </div>
             `;
             return;
@@ -938,7 +939,7 @@
         if (!gifts || gifts.length === 0) {
             elements.giftsContainer.innerHTML = `
                 <div class="ma-empty-state">
-                    <div class="ma-empty-icon">🎁</div>
+                    <div class="ma-empty-icon">···</div>
                     <div>Keine Geschenke im ausgewählten Zeitraum erfasst.</div>
                 </div>
             `;
@@ -953,7 +954,7 @@
             html += `
                 <div class="gift-item-mobile">
                     <div class="gift-sender-info">
-                        <div class="gift-icon-placeholder">🎁</div>
+                        <div class="gift-icon-placeholder">GIFT</div>
                         <div class="gift-text-wrap">
                             <div class="gift-sender-name">${escapeHtml(g.sender_username || 'Anonym')}</div>
                             <div class="gift-target-streamer">${count}${escapeHtml(g.gift_name)} → @${escapeHtml(g.streamer_username)} · ${relTime}</div>
@@ -1151,12 +1152,12 @@
         let datasets = [];
         let scales = {
             x: {
-                grid: { color: "rgba(255, 255, 255, 0.05)" },
+                grid: { color: "#1e242d" },
                 ticks: { color: "#8b949e", font: { family: "monospace", size: 9 }, maxTicksLimit: 7 }
             },
             y: {
                 position: "left",
-                grid: { color: "rgba(255, 255, 255, 0.05)" },
+                grid: { color: "#1e242d" },
                 ticks: { color: "#8b949e", font: { family: "monospace", size: 9 } }
             }
         };
@@ -1167,9 +1168,9 @@
         if (analyticsMetric === "multi" && !isSingleStreamer && data.multi_streamer_datasets && data.multi_streamer_datasets.length > 0) {
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Top-Streamer Vergleich (Coins)`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Chronologische Entwicklung der aktivsten Streamer`;
-            scales.y.ticks.color = "#38bdf8";
+            scales.y.ticks.color = "#f0f6fc";
             scales.y.ticks.callback = v => formatNumber(v);
-            const palette = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#39c5cf"];
+            const palette = ["#f0f6fc", "#3fb950", "#8b949e", "#f59e0b", "#30363d", "#21262d"];
             datasets = data.multi_streamer_datasets.map((s, idx) => {
                 const col = palette[idx % palette.length];
                 return {
@@ -1189,9 +1190,9 @@
         } else if (analyticsMetric === "eur") {
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Netto Creator-Auszahlung (€)`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Netto-Erlöse in Euro · ${streamerName}`;
-            scales.y.ticks.color = "#10b981";
+            scales.y.ticks.color = "#3fb950";
             scales.y.ticks.callback = v => `€${formatNumber(v)}`;
-            const col = "#10b981";
+            const col = "#3fb950";
             const vals = timeline.map(t => t.eur_net || 0);
             datasets = [{
                 type: baseType,
@@ -1200,7 +1201,7 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
@@ -1209,9 +1210,9 @@
         } else if (analyticsMetric === "usd") {
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Netto Creator-Auszahlung ($)`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Netto-Erlöse in US-Dollar · ${streamerName}`;
-            scales.y.ticks.color = "#06b6d4";
+            scales.y.ticks.color = "#8b949e";
             scales.y.ticks.callback = v => `$${formatNumber(v)}`;
-            const col = "#06b6d4";
+            const col = "#8b949e";
             const vals = timeline.map(t => t.usd_net || 0);
             datasets = [{
                 type: baseType,
@@ -1220,7 +1221,7 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
@@ -1240,7 +1241,7 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
@@ -1249,9 +1250,9 @@
         } else if (analyticsMetric === "gross_usd") {
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Brutto Zuschauer-Kaufwert ($)`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Kaufwert aller TikTok-Münzen durch Zuschauer in USD · ${streamerName}`;
-            scales.y.ticks.color = "#fbbf24";
+            scales.y.ticks.color = "#f59e0b";
             scales.y.ticks.callback = v => `$${formatNumber(v)}`;
-            const col = "#fbbf24";
+            const col = "#f59e0b";
             const vals = timeline.map(t => t.usd_gross || 0);
             datasets = [{
                 type: baseType,
@@ -1260,7 +1261,7 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
@@ -1269,9 +1270,9 @@
         } else if (analyticsMetric === "cumulative_eur") {
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Kumulierte Netto-Einnahmen (€)`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Aufsummierte Gesamterlöse über die Zeit · ${streamerName}`;
-            scales.y.ticks.color = "#22c55e";
+            scales.y.ticks.color = "#3fb950";
             scales.y.ticks.callback = v => `€${formatNumber(v)}`;
-            const col = "#22c55e";
+            const col = "#3fb950";
             let runSum = 0;
             const vals = timeline.map(t => {
                 runSum += (t.eur_net || 0);
@@ -1284,18 +1285,18 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2.5,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.25,
                 pointRadius: 2,
             }];
             updateChartStats(vals, labels, v => formatCurrency(v, "EUR"), true);
         } else if (analyticsMetric === "cumulative_coins") {
-            if (elements.timelineTitle) elements.timelineTitle.textContent = `Kumulierte TikTok-Münzen (💎)`;
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Kumulierte TikTok-Münzen`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Aufsummiertes Münzvolumen über die Zeit · ${streamerName}`;
-            scales.y.ticks.color = "#a855f7";
+            scales.y.ticks.color = "#8b949e";
             scales.y.ticks.callback = v => formatNumber(v);
-            const col = "#a855f7";
+            const col = "#8b949e";
             let runSum = 0;
             const vals = timeline.map(t => {
                 runSum += (t.coins || 0);
@@ -1308,18 +1309,18 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2.5,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.25,
                 pointRadius: 2,
             }];
             updateChartStats(vals, labels, v => `${formatNumber(v)} Coins`, true);
         } else if (analyticsMetric === "coins") {
-            if (elements.timelineTitle) elements.timelineTitle.textContent = `TikTok Diamanten & Münzen (💎)`;
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `TikTok Diamanten & Münzen`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Erhaltene TikTok-Münzen · ${streamerName}`;
-            scales.y.ticks.color = "#38bdf8";
+            scales.y.ticks.color = "#f0f6fc";
             scales.y.ticks.callback = v => formatNumber(v);
-            const col = "#38bdf8";
+            const col = "#f0f6fc";
             const vals = timeline.map(t => t.coins || 0);
             datasets = [{
                 type: baseType,
@@ -1328,18 +1329,18 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
             }];
             updateChartStats(vals, labels, v => `${formatNumber(v)} Coins`);
         } else if (analyticsMetric === "events") {
-            if (elements.timelineTitle) elements.timelineTitle.textContent = `Gift-Events & Transaktionen (🎁)`;
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Gift-Events & Transaktionen`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Anzahl Geschenk-Buchungen · ${streamerName}`;
-            scales.y.ticks.color = "#ec4899";
+            scales.y.ticks.color = "#8b949e";
             scales.y.ticks.callback = v => formatNumber(v);
-            const col = "#ec4899";
+            const col = "#8b949e";
             const vals = timeline.map(t => t.events_count || 0);
             datasets = [{
                 type: baseType,
@@ -1348,18 +1349,18 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
             }];
             updateChartStats(vals, labels, v => `${formatNumber(v)} Events`);
         } else if (analyticsMetric === "gifters") {
-            if (elements.timelineTitle) elements.timelineTitle.textContent = `Aktive Spender (👤)`;
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Aktive Spender`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Eindeutige Gifter pro Zeitintervall · ${streamerName}`;
-            scales.y.ticks.color = "#8b5cf6";
+            scales.y.ticks.color = "#8b949e";
             scales.y.ticks.callback = v => formatNumber(v);
-            const col = "#8b5cf6";
+            const col = "#8b949e";
             const vals = timeline.map(t => t.unique_gifters || 0);
             datasets = [{
                 type: baseType,
@@ -1368,7 +1369,7 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
@@ -1377,9 +1378,9 @@
         } else if (analyticsMetric === "avg_gifter") {
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Ø Netto-Wert pro Spender (€)`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Durchschnittlicher Ertrag je Gifter · ${streamerName}`;
-            scales.y.ticks.color = "#eab308";
+            scales.y.ticks.color = "#f59e0b";
             scales.y.ticks.callback = v => `€${v}`;
-            const col = "#eab308";
+            const col = "#f59e0b";
             const vals = timeline.map(t => {
                 if (t.avg_eur_per_gifter !== undefined) return t.avg_eur_per_gifter;
                 return t.unique_gifters > 0 ? (Math.round((t.eur_net / t.unique_gifters) * 100) / 100) : 0;
@@ -1391,18 +1392,18 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
             }];
             updateChartStats(vals, labels, v => formatCurrency(v, "EUR"));
         } else if (analyticsMetric === "avg_gift") {
-            if (elements.timelineTitle) elements.timelineTitle.textContent = `Ø Münzen pro Geschenk (💎)`;
+            if (elements.timelineTitle) elements.timelineTitle.textContent = `Ø Münzen pro Geschenk`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Durchschnittliche Geschenkgröße · ${streamerName}`;
-            scales.y.ticks.color = "#14b8a6";
+            scales.y.ticks.color = "#8b949e";
             scales.y.ticks.callback = v => `${formatNumber(v)}`;
-            const col = "#14b8a6";
+            const col = "#8b949e";
             const vals = timeline.map(t => {
                 if (t.avg_coins_per_gift !== undefined) return t.avg_coins_per_gift;
                 return t.events_count > 0 ? (Math.round((t.coins / t.events_count) * 10) / 10) : 0;
@@ -1414,7 +1415,7 @@
                 borderColor: col,
                 backgroundColor: isArea ? createChartGradient(ctx, col) : (baseType === "bar" ? col : "transparent"),
                 borderWidth: 2,
-                borderRadius: baseType === "bar" ? 3 : 0,
+                borderRadius: 0,
                 fill: isArea,
                 tension: 0.35,
                 pointRadius: 2,
@@ -1424,14 +1425,14 @@
             // Mode "both" (default combo: Coins Bar + Netto EUR Line)
             if (elements.timelineTitle) elements.timelineTitle.textContent = `Einnahmen- & Coin-Verlauf`;
             if (elements.timelineSub) elements.timelineSub.textContent = `Balken: Coins (links) | Linie: Netto EUR (rechts) · ${streamerName}`;
-            scales.y.title = { display: true, text: "Coins", color: "#38bdf8", font: { family: "monospace", size: 9 } };
-            scales.y.ticks.color = "#38bdf8";
+            scales.y.title = { display: true, text: "Coins", color: "#f0f6fc", font: { family: "monospace", size: 9 } };
+            scales.y.ticks.color = "#f0f6fc";
             scales.y.ticks.callback = v => formatNumber(v);
             scales.yEur = {
                 position: "right",
                 grid: { drawOnChartArea: false },
-                ticks: { color: "#10b981", font: { family: "monospace", size: 9 }, callback: v => `€${formatNumber(v)}` },
-                title: { display: true, text: "Netto EUR", color: "#10b981", font: { family: "monospace", size: 9 } }
+                ticks: { color: "#3fb950", font: { family: "monospace", size: 9 }, callback: v => `€${formatNumber(v)}` },
+                title: { display: true, text: "Netto EUR", color: "#3fb950", font: { family: "monospace", size: 9 } }
             };
             const coinVals = timeline.map(t => t.coins || 0);
             const eurVals = timeline.map(t => t.eur_net || 0);
@@ -1440,18 +1441,18 @@
                     type: "bar",
                     label: "Coins",
                     data: coinVals,
-                    backgroundColor: "rgba(56, 189, 248, 0.65)",
-                    borderColor: "#38bdf8",
+                    backgroundColor: "rgba(240, 246, 252, 0.55)",
+                    borderColor: "#f0f6fc",
                     borderWidth: 1,
-                    borderRadius: 2,
+                    borderRadius: 0,
                     yAxisID: "y",
                 },
                 {
                     type: "line",
                     label: "Netto EUR",
                     data: eurVals,
-                    borderColor: "#10b981",
-                    backgroundColor: isArea ? createChartGradient(ctx, "#10b981") : "rgba(16, 185, 129, 0.1)",
+                    borderColor: "#3fb950",
+                    backgroundColor: isArea ? createChartGradient(ctx, "#3fb950") : "rgba(63, 185, 80, 0.10)",
                     borderWidth: 2.2,
                     pointRadius: 2.5,
                     fill: isArea,
@@ -1493,8 +1494,8 @@
                     },
                     tooltip: {
                         backgroundColor: "#161b22",
-                        titleColor: "#c9d1d9",
-                        bodyColor: "#58a6ff",
+                        titleColor: "#e6edf3",
+                        bodyColor: "#8b949e",
                         borderColor: "#30363d",
                         borderWidth: 1,
                         padding: 8,
@@ -1537,9 +1538,9 @@
                     label: "Netto EUR (€)",
                     data: dataVals,
                     backgroundColor: [
-                        "#38bdf8", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#64748b"
+                        "#f0f6fc", "#3fb950", "#f59e0b", "#8b949e", "#8b949e", "#8b949e"
                     ],
-                    borderRadius: 4
+                    borderRadius: 0
                 }]
             },
             options: {
@@ -1551,7 +1552,7 @@
                 },
                 scales: {
                     x: {
-                        grid: { color: "rgba(255, 255, 255, 0.05)" },
+                        grid: { color: "#1e242d" },
                         ticks: { color: "#8b949e", font: { family: "monospace", size: 9 }, callback: v => `€${v}` }
                     },
                     y: {
@@ -1574,7 +1575,7 @@
         gifters.slice(0, 10).forEach((g, idx) => {
             const rank = idx + 1;
             const rankClass = rank === 1 ? "gold" : (rank === 2 ? "silver" : (rank === 3 ? "bronze" : ""));
-            const medal = rank === 1 ? "🥇" : (rank === 2 ? "🥈" : (rank === 3 ? "🥉" : `#${rank}`));
+            const medal = String(rank).padStart(2, "0");
             const name = g.sender_nickname || g.sender_username || "Anonym";
             const txText = `${formatNumber(g.gifts_sent || 0)} Gifts · ${formatNumber(g.transactions || 0)}x`;
 
@@ -1587,7 +1588,7 @@
                             <div class="ma-gifter-sub">@${escapeHtml(g.sender_username)} · ${txText}</div>
                         </div>
                     </div>
-                    <div class="ma-gifter-coins">+${formatNumber(g.total_coins)} 💎</div>
+                    <div class="ma-gifter-coins">+${formatNumber(g.total_coins)}</div>
                 </div>
             `;
         });
@@ -1609,7 +1610,7 @@
 
         const labels = topGifts.slice(0, 6).map(g => g.gift_name);
         const dataVals = topGifts.slice(0, 6).map(g => g.total_coins);
-        const palette = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#39c5cf"];
+        const palette = ["#f0f6fc", "#3fb950", "#8b949e", "#f59e0b", "#30363d", "#21262d"];
 
         if (chartGiftDistInstance) {
             chartGiftDistInstance.data.labels = labels;
@@ -1644,7 +1645,7 @@
             topGifts.slice(0, 5).forEach(g => {
                 listHtml += `
                     <div class="ma-gift-dist-item">
-                        <span class="ma-gift-dist-name">🎁 ${escapeHtml(g.gift_name)} (${formatNumber(g.total_quantity)}x)</span>
+                        <span class="ma-gift-dist-name">${escapeHtml(g.gift_name)} (${formatNumber(g.total_quantity)}x)</span>
                         <span class="ma-gift-dist-val">${formatNumber(g.total_coins)} Coins · ${formatCurrency(g.eur_net)}</span>
                     </div>
                 `;
@@ -1683,8 +1684,8 @@
                 datasets: [{
                     label: "Coins",
                     data: values,
-                    backgroundColor: "#38bdf8",
-                    borderRadius: 3
+                    backgroundColor: "#f0f6fc",
+                    borderRadius: 0
                 }]
             },
             options: {
@@ -1697,7 +1698,7 @@
                         ticks: { color: "#8b949e", font: { family: "monospace", size: 9 } }
                     },
                     y: {
-                        grid: { color: "rgba(255, 255, 255, 0.05)" },
+                        grid: { color: "#1e242d" },
                         ticks: { color: "#8b949e", font: { family: "monospace", size: 9 } }
                     }
                 }
@@ -1757,11 +1758,11 @@
     function renderTierBadge(tier) {
         tier = (tier || "dolphin").toLowerCase();
         if (tier === "whale") {
-            return `<span class="ma-tier-tag whale">🐋 WHALE</span>`;
+            return `<span class="ma-tier-tag whale">WHALE</span>`;
         } else if (tier === "shark") {
-            return `<span class="ma-tier-tag shark">🦈 SHARK</span>`;
+            return `<span class="ma-tier-tag shark">SHARK</span>`;
         }
-        return `<span class="ma-tier-tag dolphin">🐬 DOLPHIN</span>`;
+        return `<span class="ma-tier-tag dolphin">DOLPHIN</span>`;
     }
 
     // Polling Supervisor for Radar Tab (Smart 12s interval, stops in background)
@@ -1832,7 +1833,7 @@
             if (!silent) {
                 elements.radarDonorsContainer.innerHTML = `
                     <div class="ma-empty-state">
-                        <div class="ma-empty-icon">⚠️</div>
+                        <div class="ma-empty-icon">···</div>
                         <div>Fehler beim Laden der Radar-Daten</div>
                     </div>
                 `;
@@ -1856,7 +1857,7 @@
         if (!donors.length) {
             elements.radarDonorsContainer.innerHTML = `
                 <div class="ma-empty-state">
-                    <div class="ma-empty-icon">🔍</div>
+                    <div class="ma-empty-icon">···</div>
                     <div>Keine Spender in dieser Auswahl gefunden</div>
                 </div>
             `;
@@ -1868,7 +1869,7 @@
             const rank = idx + 1;
             const rankClass = rank === 1 ? "rank-1" : (rank === 2 ? "rank-2" : (rank === 3 ? "rank-3" : ""));
             const tier = (d.tier || "dolphin").toLowerCase();
-            const tierEmoji = tier === "whale" ? "🐋" : (tier === "shark" ? "🦈" : "🐬");
+            const tierEmoji = "";
             const tierLabel = tier.toUpperCase();
 
             const isVip = !!d.is_vip;
@@ -1892,14 +1893,14 @@
                                     <span>${displayUname}</span>
                                     ${canEditCrm ? `
                                     <button type="button" class="ma-vip-star-btn ${isVip ? 'is-vip' : ''}" data-action="toggle-vip" data-username="${displayUname}" title="VIP-Status umschalten">
-                                        ⭐
+                                        ★
                                     </button>` : ""}
                                 </div>
                                 ${displayNick ? `<div class="ma-donor-nick">${displayNick}</div>` : ""}
                             </div>
                         </div>
                         <div class="ma-donor-finance">
-                            <div class="ma-donor-coins">💎 ${coins}</div>
+                            <div class="ma-donor-coins">${coins}</div>
                             <div class="ma-donor-eur">+${eurNet}</div>
                         </div>
                     </div>
@@ -1907,11 +1908,11 @@
                     <div class="ma-donor-meta-row">
                         <div class="ma-donor-tags">
                             <span class="ma-tier-tag ${tier}">${tierEmoji} ${tierLabel}</span>
-                            ${isCross ? `<span class="ma-cross-tag">⚡ ${streamerCount} Kanäle</span>` : ""}
-                            ${d.has_notes ? `<span style="font-size: 10px; color: #fbbf24;" title="Notizen vorhanden">📝</span>` : ""}
+                            ${isCross ? `<span class="ma-cross-tag">${streamerCount} KANÄLE</span>` : ""}
+                            ${d.has_notes ? `<span style="font-size: 10px; color: var(--warn);" title="Notizen vorhanden">✎</span>` : ""}
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <span>🎁 ${giftsCount} Gifts</span>
+                            <span>${giftsCount} GIFTS</span>
                             ${d.last_seen ? `<span>· ${getRelativeTime(d.last_seen)}</span>` : ""}
                             <span style="font-size: 11px; color: var(--text-muted);">›</span>
                         </div>
@@ -1980,7 +1981,7 @@
                 triggerWhaleHaptic(highestNewTier);
                 playWhaleAlertChime(highestNewTier === "whale");
                 const topAlert = alerts[0];
-                showToast(`🐋 Whale-Alert: @${topAlert.sender_username} schenkte ${formatNumber(topAlert.total_coins)} Coins an @${topAlert.streamer_username}!`);
+                showToast(`WHALE-ALERT: @${topAlert.sender_username} schenkte ${formatNumber(topAlert.total_coins)} Coins an @${topAlert.streamer_username}!`);
             } else if (maxId > lastSeenWhaleAlertId) {
                 lastSeenWhaleAlertId = maxId;
             }
@@ -1988,7 +1989,7 @@
             let chipsHtml = "";
             alerts.slice(0, 10).forEach(a => {
                 const tier = (a.tier || "shark").toLowerCase();
-                const tierEmoji = tier === "whale" ? "🐋" : "🦈";
+                const tierEmoji = "";
                 const uname = escapeHtml(a.sender_username || "anonym");
                 const coins = formatNumber(a.total_coins || 0);
                 const sName = escapeHtml(a.streamer_username || "");
@@ -1997,7 +1998,7 @@
                     <div class="ma-ticker-chip" data-donor="${uname}" title="${uname} schenkte ${coins} Coins an @${sName}">
                         <span>${tierEmoji}</span>
                         <strong>${uname}</strong>
-                        <span style="color: #fbbf24;">💎 ${coins}</span>
+                        <span style="color: #f59e0b;">${coins}</span>
                         <span class="muted" style="font-size: 9.5px;">→ @${sName}</span>
                     </div>
                 `;
@@ -2026,7 +2027,7 @@
         if (!silent) {
             elements.whaleAlertsContainer.innerHTML = `
                 <div class="ma-empty-state">
-                    <div class="ma-empty-icon">⏳</div>
+                    <div class="ma-empty-icon">···</div>
                     <div>Lade Live-Großspenden (&ge; ${formatNumber(whaleAlertMinCoins)} Coins)...</div>
                 </div>
             `;
@@ -2046,7 +2047,7 @@
             if (!alerts.length) {
                 elements.whaleAlertsContainer.innerHTML = `
                     <div class="ma-empty-state">
-                        <div class="ma-empty-icon">🔍</div>
+                        <div class="ma-empty-icon">···</div>
                         <div>Keine Großspenden über ${formatNumber(whaleAlertMinCoins)} Coins erfasst</div>
                     </div>
                 `;
@@ -2056,7 +2057,7 @@
             let html = "";
             alerts.forEach(a => {
                 const tier = (a.tier || "shark").toLowerCase();
-                const tierEmoji = tier === "whale" ? "🐋" : (tier === "shark" ? "🦈" : "🐬");
+                const tierEmoji = "";
                 const giftImg = a.gift_icon_url || "static/avatar_default.png";
                 const giftName = escapeHtml(a.gift_name || "Geschenk");
                 const repeat = parseInt(a.repeat_count || 1, 10);
@@ -2075,7 +2076,7 @@
                                 <div class="ma-alert-sender">
                                     <span>${tierEmoji}</span>
                                     <span>${sender}</span>
-                                    ${isVip ? '<span style="color:#fbbf24;">⭐</span>' : ''}
+                                    ${isVip ? '<span style="color: var(--warn);">★</span>' : ''}
                                 </div>
                                 <div class="ma-alert-target">
                                     <img src="${escapeHtml(streamerAvatar)}" style="width: 14px; height: 14px; border-radius: 50%; object-fit: cover;" onerror="this.src='static/avatar_default.png'" />
@@ -2085,7 +2086,7 @@
                             </div>
                         </div>
                         <div class="ma-alert-right">
-                            <div class="ma-alert-coins">💎 ${coins}</div>
+                            <div class="ma-alert-coins">${coins}</div>
                             <div class="ma-alert-eur">+${eurNet}</div>
                             <div class="ma-alert-time">${a.created_at ? getRelativeTime(a.created_at) : ''}</div>
                         </div>
@@ -2109,7 +2110,7 @@
             if (!silent) {
                 elements.whaleAlertsContainer.innerHTML = `
                     <div class="ma-empty-state">
-                        <div class="ma-empty-icon">⚠️</div>
+                        <div class="ma-empty-icon">···</div>
                         <div>Fehler beim Laden des Whale-Alert Feeds</div>
                     </div>
                 `;
@@ -2123,12 +2124,12 @@
         if (!silent) {
             if (elements.frontenwechslerContainer) {
                 elements.frontenwechslerContainer.innerHTML = `
-                    <div class="ma-empty-state"><div class="ma-empty-icon">⏳</div><div>Analysiere Frontenwechsler...</div></div>
+                    <div class="ma-empty-state"><div class="ma-empty-icon">···</div><div>Analysiere Frontenwechsler...</div></div>
                 `;
             }
             if (elements.overlapMatrixContainer) {
                 elements.overlapMatrixContainer.innerHTML = `
-                    <div class="ma-empty-state"><div class="ma-empty-icon">⏳</div><div>Berechne Überschneidungs-Matrix...</div></div>
+                    <div class="ma-empty-state"><div class="ma-empty-icon">···</div><div>Berechne Überschneidungs-Matrix...</div></div>
                 `;
             }
         }
@@ -2153,7 +2154,7 @@
                 if (!shifters.length) {
                     elements.frontenwechslerContainer.innerHTML = `
                         <div class="ma-empty-state">
-                            <div class="ma-empty-icon">🤝</div>
+                            <div class="ma-empty-icon">···</div>
                             <div>Keine Frontenwechsler im gewählten Zeitraum (${loyaltyDaysRecent} Tage) erkannt.</div>
                         </div>
                     `;
@@ -2166,15 +2167,15 @@
                         const loyalty = s.loyalty || {};
                         const score = loyalty.score || 50;
                         const classLabel = escapeHtml(loyalty.label || "Spender");
-                        const classColor = loyalty.color || "#38bdf8";
+                        const classColor = loyalty.color || "#f0f6fc";
 
                         sHtml += `
                             <div class="ma-shifter-card" data-donor="${uname}">
                                 <div class="ma-shifter-head">
                                     <div class="ma-shifter-uname">
-                                        <span>🔀</span>
+                                        <span>SWITCH</span>
                                         <strong>${uname}</strong>
-                                        ${s.is_vip ? '<span style="color:#fbbf24;">⭐</span>' : ''}
+                                        ${s.is_vip ? '<span style="color: var(--warn);">★</span>' : ''}
                                     </div>
                                     <span class="ma-shifter-class" style="background: ${classColor}22; color: ${classColor}; border: 1px solid ${classColor}66;">
                                         ${classLabel} (${score}%)
@@ -2186,17 +2187,17 @@
                                         <div class="ma-shifter-streamer-info">
                                             <div class="muted" style="font-size: 9px;">FRÜHER</div>
                                             <div>@${escapeHtml(fromS.username || '')}</div>
-                                            <div class="mono" style="font-size: 10px; color: var(--text-muted);">💎 ${formatNumber(fromS.coins || 0)}</div>
+                                            <div class="mono" style="font-size: 10px; color: var(--text-muted);">${formatNumber(fromS.coins || 0)} COINS</div>
                                         </div>
                                     </div>
-                                    <div class="ma-shifter-arrow">➔</div>
+                                    <div class="ma-shifter-arrow">→</div>
                                     <div class="ma-shifter-streamer" style="text-align: right; justify-content: flex-end;">
                                         <div class="ma-shifter-streamer-info">
-                                            <div style="font-size: 9px; color: #10b981; font-weight: 800;">NEUER FOKUS</div>
-                                            <div style="color: #38bdf8;">@${escapeHtml(toS.username || '')}</div>
-                                            <div class="mono" style="font-size: 10px; color: #fbbf24; font-weight: 800;">💎 ${formatNumber(toS.coins || 0)}</div>
+                                            <div style="font-size: 9px; color: #3fb950; font-weight: 800;">NEUER FOKUS</div>
+                                            <div style="color: #f0f6fc;">@${escapeHtml(toS.username || '')}</div>
+                                            <div class="mono" style="font-size: 10px; color: var(--warn); font-weight: 800;">${formatNumber(toS.coins || 0)} COINS</div>
                                         </div>
-                                        <img src="${escapeHtml(toS.avatar_url || 'static/avatar_default.png')}" class="ma-shifter-streamer-av" style="border-color: #38bdf8;" onerror="this.src='static/avatar_default.png'" />
+                                        <img src="${escapeHtml(toS.avatar_url || 'static/avatar_default.png')}" class="ma-shifter-streamer-av" style="border-color: #f0f6fc;" onerror="this.src='static/avatar_default.png'" />
                                     </div>
                                 </div>
                             </div>
@@ -2221,7 +2222,7 @@
                 if (!overlaps.length) {
                     elements.overlapMatrixContainer.innerHTML = `
                         <div class="ma-empty-state">
-                            <div class="ma-empty-icon">⚡</div>
+                            <div class="ma-empty-icon">···</div>
                             <div>Keine Überschneidungs-Paare gefunden.</div>
                         </div>
                     `;
@@ -2241,8 +2242,8 @@
                                     <div style="font-size: 12px; font-weight: 800; color: var(--text-strong);">
                                         <span>@${sA}</span> <span class="muted">&amp;</span> <span>@${sB}</span>
                                     </div>
-                                    <span class="mono" style="font-size: 10.5px; color: #fbbf24; font-weight: 800;">
-                                        💎 ${totalCoins}
+                                    <span class="mono" style="font-size: 10.5px; color: #f59e0b; font-weight: 800;">
+                                        ${totalCoins} COINS
                                     </span>
                                 </div>
                                 <div class="ma-overlap-split-bar">
@@ -2250,9 +2251,9 @@
                                     <div class="ma-split-seg-b" style="width: ${pctB}%;"></div>
                                 </div>
                                 <div class="ma-overlap-meta">
-                                    <span style="color: #c084fc;">@${sA}: ${pctA}%</span>
-                                    <span class="muted">👥 ${sharedCount} Spender geteilt</span>
-                                    <span style="color: #38bdf8;">@${sB}: ${pctB}%</span>
+                                    <span style="color: #8b949e;">@${sA}: ${pctA}%</span>
+                                    <span class="muted">${sharedCount} SPENDER GETEILT</span>
+                                    <span style="color: #f0f6fc;">@${sB}: ${pctB}%</span>
                                 </div>
                             </div>
                         `;
@@ -2278,7 +2279,7 @@
         elements.dossierTierBadge.innerHTML = "";
         elements.dossierBody.innerHTML = `
             <div class="ma-empty-state">
-                <div class="ma-empty-icon">⏳</div>
+                <div class="ma-empty-icon">···</div>
                 <div>Lade Spender-Dossier für @${escapeHtml(username)}...</div>
             </div>
         `;
@@ -2339,7 +2340,7 @@
                                 <img src="${escapeHtml(sAvatar)}" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" onerror="this.src='static/avatar_default.png'" />
                                 <strong>@${escapeHtml(sUsername)}</strong>
                             </div>
-                            <div class="mono" style="color: #fbbf24; font-weight: 700;">💎 ${formatNumber(sCoins)} (${pct}%)</div>
+                            <div class="mono" style="color: var(--warn); font-weight: 700;">${formatNumber(sCoins)} (${pct}%)</div>
                         </div>
                         <div class="ma-dossier-bar-wrap">
                             <div class="ma-dossier-bar" style="width: ${pct}%;"></div>
@@ -2356,10 +2357,10 @@
                 const gIcon = g.gift_icon_url || "";
                 gHtml += `
                     <div style="display: inline-flex; align-items: center; gap: 5px; background: var(--bg-surface); border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 6px; font-size: 11px;">
-                        ${gIcon ? `<img src="${escapeHtml(gIcon)}" style="width: 16px; height: 16px; object-fit: contain;" onerror="this.style.display='none'" />` : `<span>🎁</span>`}
+                        ${gIcon ? `<img src="${escapeHtml(gIcon)}" style="width: 16px; height: 16px; object-fit: contain;" onerror="this.style.display='none'" />` : `<span>GIFT</span>`}
                         <strong>${escapeHtml(g.gift_name || 'Geschenk')}</strong>
                         <span class="muted">(${gCount}x)</span>
-                        <span style="color: #fbbf24; font-weight: 700;">💎 ${gCoins}</span>
+                        <span style="color: var(--warn); font-weight: 700;">${gCoins}</span>
                     </div>
                 `;
             });
@@ -2368,7 +2369,7 @@
             let loyaltyHtml = "";
             if (loyalty && (loyalty.score !== undefined || loyalty.primary_streamer)) {
                 const lScore = loyalty.score || 0;
-                const lColor = loyalty.color || "#38bdf8";
+                const lColor = loyalty.color || "#f0f6fc";
                 const lLabel = escapeHtml(loyalty.label || "Supporter");
                 const lBadge = escapeHtml(loyalty.badge || `${lScore}% Treue`);
                 const lPrimary = escapeHtml(loyalty.primary_streamer || "");
@@ -2380,10 +2381,10 @@
                             <div style="font-size: 11.5px; font-weight: 700; color: ${lColor};">${lBadge}</div>
                             <span class="mono muted" style="font-size: 10px;">${lLabel}</span>
                         </div>
-                        ${lPrimary ? `<div style="font-size: 10.5px; color: var(--text-muted);">Stamm-Kanal: <strong style="color: var(--text-main);">@${lPrimary}</strong> (💎 ${lCoins})</div>` : ''}
+                        ${lPrimary ? `<div style="font-size: 10.5px; color: var(--text-muted);">Stamm-Kanal: <strong style="color: var(--text-main);">@${lPrimary}</strong> (${lCoins} COINS)</div>` : ''}
                         ${(frontenwechsel && frontenwechsel.is_shifted) ? `
                             <div style="margin-top: 5px; font-size: 10px; color: #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 3px 6px; border-radius: 4px;">
-                                ⚠️ Frontenwechsel: Von @${escapeHtml(frontenwechsel.from_streamer)} ➔ Neuer Fokus @${escapeHtml(frontenwechsel.to_streamer)}
+                                ! Frontenwechsel: Von @${escapeHtml(frontenwechsel.from_streamer)} → Neuer Fokus @${escapeHtml(frontenwechsel.to_streamer)}
                             </div>
                         ` : ''}
                     </div>
@@ -2400,7 +2401,7 @@
                     const cTime = c.created_at ? getRelativeTime(c.created_at) : "";
                     chatRows += `
                         <div style="font-size: 11px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 2px;">
-                            <div style="color: var(--text-main); line-height: 1.35;">💬 "${cText}"</div>
+                            <div style="color: var(--text-main); line-height: 1.35;">"${cText}"</div>
                             <div class="muted" style="font-size: 9.5px;">bei @${cStreamer} · ${cTime}</div>
                         </div>
                     `;
@@ -2448,12 +2449,12 @@
                             <span>@${escapeHtml(finalUsername)}</span>
                             ${canEditCrm ? `
                             <button type="button" class="ma-vip-star-btn ${isVip ? 'is-vip' : ''}" id="maModalVipBtn" style="font-size: 18px;" title="VIP Status umschalten">
-                                ⭐
+                                ★
                             </button>` : ""}
                         </div>
                         ${displayNick ? `<div class="ma-dossier-nick">${displayNick}</div>` : ""}
                         <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
-                            ${profile.is_cross_streamer ? '<span class="ma-cross-tag">⚡ Multi-Streamer Spender</span>' : ''}
+                            ${profile.is_cross_streamer ? '<span class="ma-cross-tag">MULTI-STREAMER</span>' : ''}
                         </div>
                     </div>
                 </div>
@@ -2465,11 +2466,11 @@
                 <div class="ma-dossier-kpi-grid">
                     <div class="ma-dossier-kpi-box">
                         <span class="ma-dossier-kpi-lbl">Gesamt-Spenden</span>
-                        <span class="ma-dossier-kpi-val" style="color: #fbbf24;">💎 ${coins}</span>
+                        <span class="ma-dossier-kpi-val" style="color: #f59e0b;">${coins}</span>
                     </div>
                     <div class="ma-dossier-kpi-box">
                         <span class="ma-dossier-kpi-lbl">Netto (EUR)</span>
-                        <span class="ma-dossier-kpi-val" style="color: #10b981;">+${eurNet}</span>
+                        <span class="ma-dossier-kpi-val" style="color: #3fb950;">+${eurNet}</span>
                     </div>
                     <div class="ma-dossier-kpi-box">
                         <span class="ma-dossier-kpi-lbl">Geschenke-Anzahl</span>
@@ -2487,7 +2488,7 @@
                 ${canEditCrm ? `
                 <div class="ma-dossier-crm-box">
                     <div class="ma-crm-header">
-                        <span class="ma-crm-title">⭐ Spender-CRM &amp; Tags</span>
+                        <span class="ma-crm-title">SPENDER-CRM &amp; TAGS</span>
                         <span class="muted" style="font-size: 10px;">Tap auf Tag zum Umschalten</span>
                     </div>
                     <div class="ma-crm-tags-wrap" id="maDossierTagsWrap">
@@ -2499,7 +2500,7 @@
                     </div>
                     <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
                         <button type="button" class="ma-btn ma-btn-primary" id="maBtnSaveDossierNotes" style="font-size: 11px; padding: 5px 12px;">
-                            💾 Notiz speichern
+                            Notiz speichern
                         </button>
                     </div>
                 </div>` : ""}
@@ -2568,10 +2569,10 @@
                     triggerHaptic("medium");
                     const notesVal = document.getElementById("maDossierNotesInput")?.value || "";
                     btnSaveNotes.disabled = true;
-                    btnSaveNotes.textContent = "⏳...";
+                    btnSaveNotes.textContent = "...";
                     const success = await saveDonorCRM(finalUsername, currentDossierData.is_vip, currentDossierData.tags || [], notesVal);
                     btnSaveNotes.disabled = false;
-                    btnSaveNotes.textContent = "💾 Notiz speichern";
+                    btnSaveNotes.textContent = "Notiz speichern";
                     if (success) {
                         showToast(`Notizen für @${finalUsername} gespeichert!`);
                     }
@@ -2582,7 +2583,7 @@
             console.error("Dossier Fetch Error:", e);
             elements.dossierBody.innerHTML = `
                 <div class="ma-empty-state">
-                    <div class="ma-empty-icon">⚠️</div>
+                    <div class="ma-empty-icon">···</div>
                     <div>Fehler beim Laden des Spender-Dossiers</div>
                 </div>
             `;
@@ -2627,7 +2628,7 @@
                 }
             }
 
-            showToast(isVip ? `⭐ @${username} zur VIP-Watchlist hinzugefügt!` : `@${username} von VIP-Watchlist entfernt.`);
+            showToast(isVip ? `@${username} zur VIP-Watchlist hinzugefügt.` : `@${username} von VIP-Watchlist entfernt.`);
             // Update KPI count
             fetchRadarData(true);
         } catch (e) {
@@ -2715,7 +2716,7 @@
                         <div class="ma-admin-streamer-meta">
                             <img src="${escapeHtml(avatar)}" class="ma-admin-streamer-avatar" onerror="this.src='static/avatar_default.png'">
                             <div>
-                                <div class="ma-admin-streamer-title">${escapeHtml(name)} ${isLive ? '🟢' : '⚪'}</div>
+                                <div class="ma-admin-streamer-title">${escapeHtml(name)} ${isLive ? '●' : '○'}</div>
                                 <div class="ma-admin-streamer-sub">@${escapeHtml(uname)}</div>
                             </div>
                         </div>
@@ -2727,10 +2728,10 @@
                     </div>
                     <div class="ma-admin-streamer-actions">
                         <button type="button" class="ma-btn ma-btn-secondary" style="font-size: 10px; padding: 4px 8px;" data-action="refresh" data-username="${escapeHtml(uname)}">
-                            🔄 Sync
+                            SYNC
                         </button>
                         <button type="button" class="ma-btn ma-btn-danger" style="font-size: 10px; padding: 4px 8px;" data-action="delete" data-username="${escapeHtml(uname)}" data-id="${s.id}">
-                            🗑️ Löschen
+                            LÖSCHEN
                         </button>
                     </div>
                 </div>
@@ -2765,7 +2766,7 @@
                     }
                 } else if (action === "refresh") {
                     triggerHaptic("light");
-                    btn.textContent = "⏳...";
+                    btn.textContent = "...";
                     try {
                         const res = await fetch(`api/streamers/${encodeURIComponent(username)}/refresh`, {
                             method: "POST",
@@ -2782,7 +2783,7 @@
                     }
                 } else if (action === "delete") {
                     triggerHaptic("warning");
-                    if (confirm(`Streamer @${username} wirklich komplett aus dem TokTracker löschen?`)) {
+                    if (confirm(`Streamer @${username} wirklich komplett aus TT-INTELLIGENCE löschen?`)) {
                         try {
                             const res = await fetch(`api/streamers/${encodeURIComponent(streamerId || username)}`, {
                                 method: "DELETE",
@@ -2806,7 +2807,7 @@
     async function fetchSystemStatus(forceRefresh = false) {
         if (elements.btnMaRefreshHealth) {
             elements.btnMaRefreshHealth.disabled = true;
-            elements.btnMaRefreshHealth.textContent = "⏳ Lade...";
+            elements.btnMaRefreshHealth.textContent = "Lade...";
         }
         try {
             const url = forceRefresh ? "api/system/health?force_refresh=true" : "api/system/status";
@@ -2829,10 +2830,10 @@
             }
             if (elements.diagBotStatus && data.telegram_bot) {
                 const b = data.telegram_bot || {};
-                elements.diagBotStatus.textContent = `${b.state || 'ok'} (${b.username || '@toktrackeragent'})`;
+                elements.diagBotStatus.textContent = `${b.state || 'ok'} (${b.username || '@tt-intelligence'})`;
             }
             if (elements.diagTiktokSession && data.has_tiktok_session !== undefined) {
-                elements.diagTiktokSession.textContent = data.has_tiktok_session ? "✅ Aktiv" : "⚪ Keine Session";
+                elements.diagTiktokSession.textContent = data.has_tiktok_session ? "● Aktiv" : "○ Keine Session";
             }
 
             if (health) {
@@ -2843,7 +2844,7 @@
         } finally {
             if (elements.btnMaRefreshHealth) {
                 elements.btnMaRefreshHealth.disabled = false;
-                elements.btnMaRefreshHealth.textContent = "🔄 Aktualisieren";
+                elements.btnMaRefreshHealth.textContent = "Aktualisieren";
             }
         }
     }
@@ -2882,15 +2883,15 @@
         const diskPct = typeof disk.percent === "number" ? disk.percent : 0;
         if (elements.healthDiskPercent) {
             elements.healthDiskPercent.textContent = `${diskPct.toFixed(1)}%`;
-            if (disk.status === "critical" || diskPct >= 85) elements.healthDiskPercent.style.color = "#ef4444";
+            if (disk.status === "critical" || diskPct >= 85) elements.healthDiskPercent.style.color = "#f85149";
             else if (disk.status === "warning" || diskPct >= 75) elements.healthDiskPercent.style.color = "#f59e0b";
-            else elements.healthDiskPercent.style.color = "#10b981";
+            else elements.healthDiskPercent.style.color = "#3fb950";
         }
         if (elements.healthDiskBar) {
             elements.healthDiskBar.style.width = `${Math.min(diskPct, 100)}%`;
-            if (disk.status === "critical" || diskPct >= 85) elements.healthDiskBar.style.background = "#ef4444";
+            if (disk.status === "critical" || diskPct >= 85) elements.healthDiskBar.style.background = "#f85149";
             else if (disk.status === "warning" || diskPct >= 75) elements.healthDiskBar.style.background = "#f59e0b";
-            else elements.healthDiskBar.style.background = "#10b981";
+            else elements.healthDiskBar.style.background = "#3fb950";
         }
         if (elements.healthDiskUsed) elements.healthDiskUsed.textContent = `${disk.used_gb || 0} GB`;
         if (elements.healthDiskFree) elements.healthDiskFree.textContent = `${disk.free_gb || 0} GB`;
@@ -2900,15 +2901,15 @@
         const memPct = typeof mem.percent === "number" ? mem.percent : 0;
         if (elements.healthRamPercent) {
             elements.healthRamPercent.textContent = `${memPct.toFixed(1)}%`;
-            if (memPct >= 90) elements.healthRamPercent.style.color = "#ef4444";
+            if (memPct >= 90) elements.healthRamPercent.style.color = "#f85149";
             else if (memPct >= 75) elements.healthRamPercent.style.color = "#f59e0b";
-            else elements.healthRamPercent.style.color = "#3b82f6";
+            else elements.healthRamPercent.style.color = "#8b949e";
         }
         if (elements.healthRamBar) {
             elements.healthRamBar.style.width = `${Math.min(memPct, 100)}%`;
-            if (memPct >= 90) elements.healthRamBar.style.background = "#ef4444";
+            if (memPct >= 90) elements.healthRamBar.style.background = "#f85149";
             else if (memPct >= 75) elements.healthRamBar.style.background = "#f59e0b";
-            else elements.healthRamBar.style.background = "#3b82f6";
+            else elements.healthRamBar.style.background = "#8b949e";
         }
         if (elements.healthRamUsed) elements.healthRamUsed.textContent = fmtMbOrGb(mem.used_mb);
         if (elements.healthRamFree) elements.healthRamFree.textContent = fmtMbOrGb(mem.free_mb);
@@ -2918,15 +2919,15 @@
         const cpuPct = typeof cpu.percent === "number" ? cpu.percent : 0;
         if (elements.healthCpuPercent) {
             elements.healthCpuPercent.textContent = `${cpuPct.toFixed(1)}%`;
-            if (cpuPct >= 85) elements.healthCpuPercent.style.color = "#ef4444";
+            if (cpuPct >= 85) elements.healthCpuPercent.style.color = "#f85149";
             else if (cpuPct >= 65) elements.healthCpuPercent.style.color = "#f59e0b";
-            else elements.healthCpuPercent.style.color = "#8b5cf6";
+            else elements.healthCpuPercent.style.color = "#8b949e";
         }
         if (elements.healthCpuBar) {
             elements.healthCpuBar.style.width = `${Math.min(cpuPct, 100)}%`;
-            if (cpuPct >= 85) elements.healthCpuBar.style.background = "#ef4444";
+            if (cpuPct >= 85) elements.healthCpuBar.style.background = "#f85149";
             else if (cpuPct >= 65) elements.healthCpuBar.style.background = "#f59e0b";
-            else elements.healthCpuBar.style.background = "#8b5cf6";
+            else elements.healthCpuBar.style.background = "#8b949e";
         }
         if (elements.healthCpuLoad) {
             const l1 = typeof cpu.load_1m === "number" ? cpu.load_1m.toFixed(2) : "-";
@@ -2967,7 +2968,7 @@
                         <div class="ma-container-item">
                             <div class="ma-container-top">
                                 <div class="ma-container-name">
-                                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${isRunning ? '#10b981' : '#ef4444'};"></span>
+                                    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${isRunning ? '#3fb950' : '#f85149'};"></span>
                                     <span>${escapeHtml(c.name)}</span>
                                 </div>
                                 <div style="display:flex;align-items:center;gap:6px;">
@@ -2977,7 +2978,7 @@
                             </div>
                             <div class="ma-container-bottom">
                                 <span>RAM: <strong>${ramUsed} MB</strong> (${ramPct})</span>
-                                <span>Layer: <strong style="color:#38bdf8;">${rwSize}</strong></span>
+                                <span>Layer: <strong style="color:#f0f6fc;">${rwSize}</strong></span>
                             </div>
                         </div>
                     `;
@@ -3150,10 +3151,10 @@
             const users = await res.json();
 
             const roleLabels = {
-                viewer: "👁️ Gast",
-                user: "🟢 Nutzer",
-                moderator: "🛡️ Moderator",
-                admin: "👑 Admin",
+                viewer: "GAST",
+                user: "NUTZER",
+                moderator: "MODERATOR",
+                admin: "ADMIN",
             };
             let html = "";
             users.forEach(u => {
@@ -3163,7 +3164,7 @@
                 const roleOptions = Object.keys(roleLabels)
                     .map(role => `<option value="${role}" ${role === currentRole ? "selected" : ""}>${roleLabels[role]}</option>`)
                     .join("");
-                const badge = isAllowed ? roleLabels[currentRole] : "🔴 Gesperrt";
+                const badge = isAllowed ? roleLabels[currentRole] : "GESPERRT";
 
                 html += `
                     <div class="ma-whitelist-item">
@@ -3565,7 +3566,7 @@
             whaleSoundEnabled = !whaleSoundEnabled;
             triggerHaptic("medium");
             if (elements.whaleSoundIcon) {
-                elements.whaleSoundIcon.textContent = whaleSoundEnabled ? "🔊" : "🔇";
+                elements.whaleSoundIcon.textContent = whaleSoundEnabled ? "TON AN" : "MUTE";
             }
             if (elements.btnToggleWhaleSound) {
                 elements.btnToggleWhaleSound.classList.toggle("active", whaleSoundEnabled);

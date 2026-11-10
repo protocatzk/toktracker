@@ -38,9 +38,36 @@
     }
 
     /**
+     * Liefert den konfigurierten Unterpfad (z.B. "/track") ohne trailing slash.
+     * Basis ist das <base href="...">-Tag, das der Server pro Request setzt.
+     */
+    function appBasePath() {
+        var base = document.querySelector("base");
+        if (!base) return "";
+        try {
+            var path = new URL(base.href, window.location.href).pathname || "/";
+            path = path.replace(/\/+$/, "");
+            return path === "/" ? "" : path;
+        } catch (e) {
+            return "";
+        }
+    }
+
+    /** Aktueller App-Pfad inkl. Query, aber ohne einen gesetzten Unterpfad. */
+    function currentAppPath() {
+        var path = window.location.pathname || "/";
+        var base = appBasePath();
+        if (base && (path === base || path.indexOf(base + "/") === 0)) {
+            path = path.slice(base.length) || "/";
+        }
+        return path + (window.location.search || "");
+    }
+
+    /**
      * Macht einen serverseitig gelieferten absoluten Pfad (z.B. "/admin")
      * relativ zum <base>-Tag. So funktioniert die App sowohl unter "/" als
-     * auch unter einem Unterpfad wie "/track".
+     * auch unter einem Unterpfad wie "/track". Ein bereits enthaltener
+     * Unterpfad wird entfernt, damit er nicht doppelt angehängt wird.
      */
     function appUrl(path) {
         if (!path) return path;
@@ -48,7 +75,19 @@
         if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(value) || value.charAt(0) === "#") {
             return value;
         }
+        var base = appBasePath();
+        if (base && (value === base || value.indexOf(base + "/") === 0)) {
+            value = value.slice(base.length) || "/";
+        }
         return value.replace(/^\/+/, "");
+    }
+
+    /**
+     * Baut eine Login-URL, die nach erfolgreicher Anmeldung zum aktuellen
+     * (oder einem explizit übergebenen) App-Pfad zurückspringt.
+     */
+    function loginUrl(nextPath) {
+        return "login?next=" + encodeURIComponent(nextPath || currentAppPath());
     }
 
     /** Setzt das Theme und aktualisiert einen vorhandenen Theme-Button. */
@@ -69,5 +108,8 @@
     global.fmtUSD = fmtUSD;
     global.fmtNum = fmtNum;
     global.applyTheme = applyTheme;
+    global.appBasePath = appBasePath;
+    global.currentAppPath = currentAppPath;
     global.appUrl = appUrl;
+    global.loginUrl = loginUrl;
 })(window);
