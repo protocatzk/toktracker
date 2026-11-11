@@ -4,7 +4,7 @@
 {% block title %}{{ brand_name }} – Spender-Radar &amp; Chatlog Übersicht{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="static/donor_radar.css?v=2.0.0" />
+    <link rel="stylesheet" href="static/donor_radar.css?v=2.0.1" />
     
 {% endblock %}
 
@@ -161,8 +161,8 @@
     </div>
 
     <!-- View Mode Switcher -->
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-        <div style="display: flex; gap: 8px;">
+    <div class="radar-viewbar">
+        <div class="radar-viewbar-tabs" role="tablist" aria-label="Spender-Radar Ansichten">
             <button type="button" class="hub-nav-btn active" id="btnTabLeaderboard">
                 🐋 Spender-Leaderboard &amp; Chat
             </button>
@@ -170,7 +170,7 @@
                 🔀 Loyalitäts- &amp; Frontenwechsler-Hub
             </button>
         </div>
-        <div id="loyaltyHubControls" style="display: none; align-items: center; gap: 10px;">
+        <div id="loyaltyHubControls" class="radar-viewbar-controls" style="display: none;">
             <span class="mono muted" style="font-size: 11.5px;">Zeitraum für Loyalitäts-Wechsel:</span>
             <select id="selLoyaltyDays" style="padding: 4px 8px; font-size: 11.5px; background: var(--bg-subtle); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 0;">
                 <option value="1">Letzte 24 Stunden</option>

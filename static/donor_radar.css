@@ -54,6 +54,55 @@
 }
 
 /* ---------------------------------------------------------
+   Ansichts-Umschalter (Leaderboard / Loyalitäts-Hub)
+   --------------------------------------------------------- */
+.radar-viewbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-bottom: 16px;
+}
+
+.radar-viewbar-tabs {
+    display: flex;
+    flex: 0 1 auto;
+    gap: 8px;
+    max-width: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+}
+
+.radar-viewbar-tabs .hub-nav-btn {
+    flex: 0 0 auto;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+.radar-viewbar-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.radar-viewbar-controls select,
+.radar-viewbar-controls span,
+.radar-viewbar-controls button {
+    max-width: 100%;
+}
+
+/* ---------------------------------------------------------
    Tier-Badges
    --------------------------------------------------------- */
 .tier-badge {
@@ -596,5 +645,21 @@
 @media (max-width: 768px) {
     .chatlog-box {
         height: 460px;
+    }
+}
+
+@media (max-width: 900px) {
+    .radar-viewbar {
+        align-items: stretch;
+    }
+
+    .radar-viewbar-tabs {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .radar-viewbar-controls {
+        flex: 1 1 100%;
+        width: 100%;
     }
 }
