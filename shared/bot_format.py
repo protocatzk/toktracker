@@ -29,6 +29,12 @@ def esc(value: object) -> str:
     return html.escape(str(value))
 
 
+def handle(username: object) -> str:
+    """Streamer-Handle als Inline-Code – konsistent zur Command-Darstellung."""
+    clean = str(username or "").strip().lstrip("@")
+    return f"<code>@{esc(clean)}</code>"
+
+
 def header(index: int, title: str) -> str:
     """Abschnitts-Eyebrow im Stil der Startseite."""
     return f"<code>// {BRAND} · {index:02d} / {esc(title).upper()}</code>"

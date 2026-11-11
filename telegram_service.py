@@ -190,7 +190,7 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
             f"   • All-Time: {c['alltime_eur_net']:,.2f} € ({c['alltime_coins']:,} Coins)"
         )
         html_lines.append(
-            f"<b>{idx:02d}  {html.escape(str(c['display_name']))}</b> (@{html.escape(str(c['username']))}) {status_dot}\n"
+            f"<b>{idx:02d}  {html.escape(str(c['display_name']))}</b> {bf.handle(c['username'])} {status_dot}\n"
             f"▪ {hours}H: <b>{c['period_eur_net']:,.2f} €</b> (<code>${c['period_usd_net']:,.2f}</code>) · <code>{c['period_coins']:,}</code> Coins\n"
             f"▪ TOP: {html.escape(top_g)} · {html.escape(top_u)}\n"
             f"▪ ALL: {c['alltime_eur_net']:,.2f} € · {c['alltime_coins']:,} Coins"
@@ -552,7 +552,7 @@ class TelegramBotService:
         stream_url = f"https://www.tiktok.com/@{username}/live"
         text_lines = [
             bf.eyebrow("🔴 LIVE-ALERT"),
-            f"{bf.LIVE} · <b>@{html.escape(username)}</b>",
+            f"{bf.LIVE} · {bf.handle(username)}",
             f"<b>{html.escape(display_name)}</b>",
         ]
         if title:
@@ -1554,7 +1554,7 @@ class TelegramBotService:
 
         msg = (
             bf.header(8, f"📊 STREAMER · {card['display_name']}")
-            + f"\n<b>@{html.escape(uname)}</b> · {live_str} · {card['current_viewers']:,} Viewer\n"
+            + f"\n{bf.handle(uname)} · {live_str} · {card['current_viewers']:,} Viewer\n"
             + bf.kv_table(
                 [
                     ("NETTO", f"€ {card['period_eur_net']:,.2f}"),
@@ -1820,7 +1820,7 @@ class TelegramBotService:
                 a_eur = float(a.get("eur_net") or 0.0)
                 repeat = f" ×{a['repeat_count']}" if int(a.get("repeat_count") or 1) > 1 else ""
                 lines.append(
-                    f"<b>@{html.escape(a['sender_username'])}</b>{vip_star} → <b>@{html.escape(a['streamer_username'])}</b>\n"
+                    f"<b>@{html.escape(a['sender_username'])}</b>{vip_star} → {bf.handle(a['streamer_username'])}\n"
                     f"    {html.escape(a['gift_name'])}{repeat} · <code>{a_coins:,}</code> Coins · <code>{a_eur:,.2f} €</code> · {rel}"
                 )
 
@@ -1925,7 +1925,7 @@ class TelegramBotService:
                 c_given = int(s.get("coins_given") or 0)
                 pct = round((c_given / total_coins) * 100, 1)
                 lines.append(
-                    f"▪ @{html.escape(s['streamer_username'])} · <code>{c_given:,}</code> Coins ({pct}%) · "
+                    f"▪ {bf.handle(s['streamer_username'])} · <code>{c_given:,}</code> Coins ({pct}%) · "
                     f"<code>{float(s.get('eur_net') or 0.0):,.2f} €</code>"
                 )
 
@@ -2091,7 +2091,7 @@ class TelegramBotService:
                 vip = " · VIP" if s.get("is_vip") else ""
                 lines.append(
                     f"▪ <b>@{html.escape(s['username'])}</b>{vip} · <code>{html.escape(str(s.get('migration_type', 'Wechsel')))}</code>\n"
-                    f"    @{html.escape(old_s)} → <b>@{html.escape(new_s)}</b> · <code>{vol_coins:,}</code> Coins · <code>{vol_eur:,.2f} €</code>"
+                    f"    {bf.handle(old_s)} → {bf.handle(new_s)} · <code>{vol_coins:,}</code> Coins · <code>{vol_eur:,.2f} €</code>"
                 )
 
         lines.append("\n" + bf.eyebrow("🤝 STREAMER-OVERLAPS"))
@@ -2104,7 +2104,7 @@ class TelegramBotService:
                 count = int(o.get("shared_donors_count") or 0)
                 vol = float(o.get("shared_volume_eur") or 0.0)
                 lines.append(
-                    f"▪ @{html.escape(s1)} &amp; @{html.escape(s2)} · <b>{count}</b> geteilte Spender · <code>{vol:,.2f} €</code>"
+                    f"▪ {bf.handle(s1)} &amp; {bf.handle(s2)} · <b>{count}</b> geteilte Spender · <code>{vol:,.2f} €</code>"
                 )
 
         lines.append("\n" + bf.footer())
@@ -2198,7 +2198,7 @@ class TelegramBotService:
                 viewers = int(streamer.get("current_viewers") or 0)
                 safe_uname = html.escape(uname, quote=True)
                 lines.append(
-                    f"{bf.LIVE} · <b>{html.escape(display)}</b> (@{html.escape(uname)})\n"
+                    f"{bf.LIVE} · <b>{html.escape(display)}</b> {bf.handle(uname)}\n"
                     f"    👀 <code>{viewers:,}</code> Viewer · "
                     f'<a href="https://www.tiktok.com/@{safe_uname}/live">Stream öffnen →</a>'
                 )
@@ -2244,7 +2244,7 @@ class TelegramBotService:
                 coins = int(s.get("today_coins") or 0)
                 eur = float(s.get("today_eur_net") or 0.0)
                 lines.append(
-                    f"{status_icon}{viewers} · <b>{html.escape(s.get('display_name') or s['username'])}</b> (@{html.escape(s['username'])})\n"
+                    f"{status_icon}{viewers} · <b>{html.escape(s.get('display_name') or s['username'])}</b> {bf.handle(s['username'])}\n"
                     f"    Heute: <code>{coins:,}</code> Coins · <code>{eur:,.2f} €</code>"
                 )
 
@@ -2284,7 +2284,7 @@ class TelegramBotService:
             gifts = get_recent_whale_gifts(min_coins=1, streamer_id=s_id, limit=10)
             header = (
                 bf.eyebrow("🎁 GIFT-TICKER")
-                + f"\n<b>@{html.escape(streamer_row['username'])}</b> · {html.escape(streamer_row.get('display_name') or streamer_row['username'])}"
+                + f"\n{bf.handle(streamer_row['username'])} · {html.escape(streamer_row.get('display_name') or streamer_row['username'])}"
             )
         else:
             gifts = get_recent_whale_gifts(min_coins=100, limit=10)
@@ -2305,7 +2305,7 @@ class TelegramBotService:
                 eur = float(g.get("eur_net") or 0.0)
                 repeat = f" ×{g['repeat_count']}" if int(g.get("repeat_count") or 1) > 1 else ""
                 lines.append(
-                    f"<b>@{html.escape(g['sender_username'])}</b>{vip} → <b>@{html.escape(g['streamer_username'])}</b>\n"
+                    f"<b>@{html.escape(g['sender_username'])}</b>{vip} → {bf.handle(g['streamer_username'])}\n"
                     f"    {html.escape(g['gift_name'])}{repeat} · <code>{coins:,}</code> Coins · <code>{eur:,.2f} €</code> · {rel}"
                 )
 
@@ -2467,7 +2467,7 @@ class TelegramBotService:
         )
         monitor_manager.start_tracking(streamer["id"], streamer["username"], auto_reconnect=True)
         await update.effective_message.reply_text(
-            f"Streamer <b>@{html.escape(streamer['username'])}</b> gespeichert; Live-Worker gestartet.",
+            f"Streamer {bf.handle(streamer['username'])} gespeichert; Live-Worker gestartet.",
             parse_mode=ParseMode.HTML,
         )
 
@@ -2527,7 +2527,7 @@ class TelegramBotService:
             worker_state = str(w["state"]).lower()
             state_glyph = bf.worker_status(worker_state)
             lines.append(
-                f"{state_glyph} · <b>@{html.escape(w['username'])}</b> · "
+                f"{state_glyph} · {bf.handle(w['username'])} · "
                 f"{w['current_viewers']} Viewer · {w['coins_received_session']:,} Coins"
             )
 
@@ -2721,7 +2721,7 @@ class TelegramBotService:
             for sub in subscriptions:
                 uname = str(sub.get("streamer_username") or "").lstrip("@")
                 live_tag = " " + bf.LIVE if int(sub.get("streamer_is_live") or 0) else ""
-                lines.append(f"▪ <b>@{html.escape(uname)}</b>{live_tag}")
+                lines.append(f"▪ {bf.handle(uname)}{live_tag}")
             lines.append(
                 "\nEntfernen mit <code>/alert off &lt;@username&gt;</code>.\n" + bf.footer()
             )
@@ -2772,9 +2772,9 @@ class TelegramBotService:
                 chat_id,
             )
             if removed:
-                msg = f"Live-Alert für <b>@{html.escape(uname)}</b> deaktiviert."
+                msg = f"Live-Alert für {bf.handle(uname)} deaktiviert."
             else:
-                msg = f"Für <b>@{html.escape(uname)}</b> war kein Live-Alert aktiv."
+                msg = f"Für {bf.handle(uname)} war kein Live-Alert aktiv."
             await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
             return
 
@@ -2793,7 +2793,7 @@ class TelegramBotService:
                 f"Überwachung starten mit</i> <code>/track @{html.escape(uname)}</code>."
             )
         await update.effective_message.reply_text(
-            f"Live-Alert für <b>@{html.escape(uname)}</b> aktiviert."
+            f"Live-Alert für {bf.handle(uname)} aktiviert."
             f"{warning}",
             parse_mode=ParseMode.HTML,
         )
