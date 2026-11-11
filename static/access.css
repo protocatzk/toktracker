@@ -103,7 +103,86 @@
     font-size: 12.5px;
 }
 
+.access-dialog {
+    width: min(900px, calc(100vw - 2 * var(--space-4)));
+    max-height: min(88vh, 900px);
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-md);
+}
+
+.access-dialog::backdrop {
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+}
+
+.access-dialog-card {
+    display: flex;
+    flex-direction: column;
+    max-height: min(88vh, 900px);
+}
+
+.access-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
+
+.access-dialog-header h2 {
+    margin: 2px 0 0;
+}
+
+.access-permission-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.access-permission-body {
+    overflow-y: auto;
+    padding: var(--space-4);
+}
+
+.access-permission-body .access-subtitle {
+    margin-top: var(--space-2);
+}
+
+.access-permission-table select {
+    min-width: 150px;
+    max-width: 100%;
+}
+
+.access-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border);
+}
+
 @media (max-width: 700px) {
+    .access-dialog {
+        width: calc(100vw - 2 * var(--space-2));
+    }
+
+    .access-dialog-header {
+        flex-direction: column;
+    }
+
+    .access-permission-table select {
+        min-width: 0;
+        width: 100%;
+    }
+
     .access-mode-row select {
         min-width: 0;
         width: 100%;

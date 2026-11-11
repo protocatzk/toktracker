@@ -196,6 +196,22 @@ def _init_mysql_schema() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS telegram_user_permissions (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                permission VARCHAR(64) NOT NULL,
+                effect VARCHAR(8) NOT NULL DEFAULT 'grant',
+                created_by VARCHAR(191) DEFAULT '',
+                created_at VARCHAR(64) NOT NULL,
+                UNIQUE KEY uq_telegram_user_permission (user_id, permission),
+                KEY idx_telegram_user_permissions_user (user_id),
+                CONSTRAINT fk_tg_user_permissions_user
+                    FOREIGN KEY (user_id) REFERENCES telegram_users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS tiktok_battles (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 streamer_id BIGINT NOT NULL,
@@ -537,6 +553,20 @@ def _init_sqlite_schema() -> None:
                 created_at TEXT NOT NULL,
                 last_seen_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS telegram_user_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                permission TEXT NOT NULL,
+                effect TEXT NOT NULL DEFAULT 'grant',
+                created_by TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, permission),
+                FOREIGN KEY(user_id) REFERENCES telegram_users(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_telegram_user_permissions_user
+                ON telegram_user_permissions(user_id);
 
             CREATE TABLE IF NOT EXISTS tiktok_battles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

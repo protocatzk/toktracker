@@ -134,7 +134,12 @@ from shared.db.streamers import (  # noqa: F401
 from shared.db.users import (  # noqa: F401
     check_telegram_user_access,
     delete_telegram_user,
+    get_telegram_user_by_id,
+    get_telegram_user_by_identifier,
+    get_telegram_user_permission_overrides,
+    get_telegram_user_permissions,
     list_telegram_users,
+    replace_telegram_user_permissions,
     upsert_telegram_user_permission,
 )
 from shared.db.web_analytics import (  # noqa: F401
@@ -179,6 +184,11 @@ __all__ = [
     "upsert_telegram_user_permission",
     "delete_telegram_user",
     "check_telegram_user_access",
+    "get_telegram_user_by_id",
+    "get_telegram_user_by_identifier",
+    "get_telegram_user_permission_overrides",
+    "get_telegram_user_permissions",
+    "replace_telegram_user_permissions",
     "get_streamer_by_id_or_username",
     "get_active_stream_session",
     "get_previous_stream_session",

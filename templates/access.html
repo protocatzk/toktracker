@@ -4,7 +4,7 @@
 {% block title %}{{ brand_name }} – Zugriff, Whitelist &amp; Rollen{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" href="static/access.css?v=2.0.1" />
+    <link rel="stylesheet" href="static/access.css?v=2.1.0" />
 {% endblock %}
 
 {% block content %}
@@ -123,6 +123,8 @@
                 <div class="section-hint">
                     Rolle ändern wirkt sofort auf Web-Sitzung und Bot-Befehle. Gesperrte
                     Personen verlieren alle Rechte, auch bereits erteilte Bot-Capabilities.
+                    Über <strong>Rechte</strong> lassen sich einzelne Capabilities pro Konto
+                    zusätzlich erteilen oder entziehen.
                 </div>
             </div>
             <span class="mono muted" id="accessAllowedMeta">0 Einträge</span>
@@ -301,9 +303,28 @@
     </section>
 </main>
 
+<dialog id="accessPermissionDialog" class="access-dialog" aria-labelledby="accessPermissionTitle">
+    <div class="access-dialog-card">
+        <header class="access-dialog-header">
+            <div>
+                <div class="section-hint">PERSÖNLICHE RECHTE</div>
+                <h2 id="accessPermissionTitle">Rechte</h2>
+                <p id="accessPermissionSub" class="section-hint"></p>
+            </div>
+            <button type="button" class="sm" id="btnClosePermissions">Schließen</button>
+        </header>
+        <div id="accessPermissionSummary" class="access-permission-summary"></div>
+        <div id="accessPermissionBody" class="access-permission-body"></div>
+        <footer class="access-dialog-actions">
+            <button type="button" class="sm" id="btnResetPermissions">Alle zurücksetzen</button>
+            <button type="button" class="primary sm" id="btnSavePermissions">Speichern</button>
+        </footer>
+    </div>
+</dialog>
+
 {% include "partials/footer.html" %}
 {% endblock %}
 
 {% block scripts %}
-<script src="static/access.js?v=2.0.0"></script>
+<script src="static/access.js?v=2.1.0"></script>
 {% endblock %}

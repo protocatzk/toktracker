@@ -236,6 +236,7 @@ class AdminAuthManager:
         admin_label: str = "telegram_admin",
         role: str = ROLE_ADMIN,
         is_allowed: bool = True,
+        telegram_id: Optional[int] = None,
     ) -> str:
         # Unbekannte Rollen werden fail-closed als Viewer behandelt.
         clean_role = normalize_role(role) if is_valid_role(role) else ROLE_VIEWER
@@ -247,6 +248,11 @@ class AdminAuthManager:
             "exp": int(time.time()) + self.session_ttl_seconds(),
             "nonce": secrets.token_hex(8),
         }
+        if telegram_id is not None:
+            try:
+                payload["telegram_id"] = int(telegram_id)
+            except (TypeError, ValueError):
+                pass
         raw_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         b64_payload = base64.urlsafe_b64encode(raw_bytes).decode("ascii").rstrip("=")
         sig = hmac.new(

@@ -157,6 +157,29 @@ dass jeder registrierte `CommandHandler` eine Capability besitzt und der
 Handler sie tatsächlich prüft. `/id` bleibt bewusst ohne Prüfung, weil der
 Befehl nur den eigenen Status anzeigt.
 
+### Persönliche Rechte (Overrides)
+
+Zusätzlich zur Rolle kann jedes Konto einzelne Capabilities persönlich
+erhalten oder verlieren. Die Auflösung erfolgt zentral in
+[`shared/permissions.py`](./shared/permissions.py):
+
+```text
+Effektive Rechte = Rollenrechte + persönliche Grants - persönliche Denies
+```
+
+- **Deny gewinnt** immer, danach Grant, danach Rolle.
+- Gesperrte Konten (`is_allowed <= 0`) haben weiterhin keine Rechte.
+- Es zählen nur Capabilities aus `ALL_PERMISSIONS`; `bot.*` ist inklusive.
+- Die Overrides liegen in `telegram_user_permissions` und werden pro Request
+  in die Session aufgelöst (`_verify_session_token` in `app.py`), damit
+  Änderungen ohne erneuten Login wirken.
+- Verwaltet wird die Schicht unter `/access` über **Rechte** pro Konto sowie
+  `GET/PUT /api/telegram/users/{id}/permissions`.
+- Niemand darf die eigenen Rechte ändern. Es können nur Rechte vergeben oder
+  entzogen werden, die das handelnde Konto selbst besitzt. Kritische Rechte
+  (`users.manage`, `settings.manage`, `system.manage`) bleiben Admins
+  vorbehalten.
+
 Die dedizierte Verwaltungsoberfläche unter `/access` bündelt Whitelist, offene
 Anfragen, Sperren und die Rollen-/Rechte-Matrix. Sie erfordert
 `users.manage`; Änderungen laufen über die bestehenden Telegram-Nutzer-APIs.

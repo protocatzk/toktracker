@@ -11,6 +11,8 @@
     var state = {
         users: [],
         accessMode: "whitelist",
+        permissionUserId: null,
+        permissionData: null,
     };
 
     var ROLE_LABELS = {
@@ -153,15 +155,21 @@
         tbody.innerHTML = rows
             .map(function (u) {
                 var ident = esc(identOf(u));
+                var directCount =
+                    (u.permission_grants || []).length + (u.permission_denies || []).length;
+                var directBadge = directCount
+                    ? ' <span class="status-tag polling">' + directCount + " DIREKT</span>"
+                    : "";
                 return (
                     "<tr>" +
                     "<td>" + idCell(u) + "</td>" +
                     "<td>" + userCell(u) + "</td>" +
-                    '<td><select class="sm" data-action="role" data-ident="' + ident + '" aria-label="Rolle ändern">' + roleOptions(u.role || "viewer") + "</select></td>" +
+                    '<td><select class="sm" data-action="role" data-ident="' + ident + '" aria-label="Rolle ändern">' + roleOptions(u.role || "viewer") + "</select>" + directBadge + "</td>" +
                     '<td><span class="status-tag live">FREIGESCHALTET</span></td>' +
                     "<td>" + noteCell(u) + "</td>" +
                     "<td>" + lastSeenCell(u) + "</td>" +
                     '<td><div class="action-group">' +
+                    '<button type="button" class="sm" data-action="permissions" data-id="' + esc(u.id) + '">Rechte</button>' +
                     '<button type="button" class="sm danger" data-action="block" data-ident="' + ident + '">Sperren</button>' +
                     '<button type="button" class="sm" data-action="delete" data-id="' + esc(u.id) + '">Entfernen</button>' +
                     "</div></td>" +
@@ -258,6 +266,143 @@
         await load();
     }
 
+    function permissionUserLabel(user) {
+        if (user.username) return "@" + user.username;
+        if (user.first_name) return user.first_name;
+        return "ID " + (user.telegram_id || user.id);
+    }
+
+    function permissionRow(perm, data) {
+        var key = perm.key;
+        var inherited = (data.role_permissions || []).indexOf(key) !== -1;
+        var effective =
+            (data.effective_permissions || []).indexOf(key) !== -1
+                ? '<span class="status-tag live">AKTIV</span>'
+                : '<span class="muted">–</span>';
+        var grantSelected = (data.grants || []).indexOf(key) !== -1 ? " selected" : "";
+        var denySelected = (data.denies || []).indexOf(key) !== -1 ? " selected" : "";
+        var inheritedLabel = inherited ? "Rolle (aktiv)" : "Rolle (inaktiv)";
+        return (
+            "<tr>" +
+            '<td><strong>' + esc(perm.label) + '</strong><span class="access-perm-key mono muted">' + esc(key) + "</span></td>" +
+            "<td>" + effective + "</td>" +
+            '<td><select class="sm" data-perm-key="' + esc(key) + '" aria-label="' + esc(perm.label) + '">' +
+            '<option value="inherit"' + (grantSelected || denySelected ? "" : " selected") + ">" + esc(inheritedLabel) + "</option>" +
+            '<option value="grant"' + grantSelected + ">Erteilen</option>" +
+            '<option value="deny"' + denySelected + ">Entziehen</option>" +
+            "</select></td>" +
+            "</tr>"
+        );
+    }
+
+    function renderPermissionDialog() {
+        var data = state.permissionData;
+        if (!data) return;
+        var user = data.user || {};
+        var title = el("accessPermissionTitle");
+        var sub = el("accessPermissionSub");
+        if (title) title.textContent = "Rechte · " + permissionUserLabel(user);
+        if (sub) {
+            sub.textContent =
+                "Rolle: " + (ROLE_LABELS[data.role] || data.role || "–") +
+                " · Persönliche Overrides werden beim nächsten Request wirksam.";
+        }
+
+        var web = [];
+        var bot = [];
+        (data.permissions || []).forEach(function (perm) {
+            if (perm.scope === "bot") bot.push(perm);
+            else web.push(perm);
+        });
+
+        function table(titleText, items) {
+            if (!items.length) return "";
+            return (
+                '<h3 class="access-subtitle">' + esc(titleText) + "</h3>" +
+                '<div class="table-wrap"><table class="access-matrix access-permission-table">' +
+                "<thead><tr><th>Capability</th><th>Effektiv</th><th>Persönlich</th></tr></thead>" +
+                "<tbody>" +
+                items
+                    .map(function (perm) {
+                        return permissionRow(perm, data);
+                    })
+                    .join("") +
+                "</tbody></table></div>"
+            );
+        }
+
+        var body = el("accessPermissionBody");
+        if (body) {
+            body.innerHTML = table("Web-Capabilities", web) + table("Bot-Capabilities", bot);
+        }
+        updatePermissionSummary();
+    }
+
+    function updatePermissionSummary() {
+        var summary = el("accessPermissionSummary");
+        if (!summary) return;
+        var grants = 0;
+        var denies = 0;
+        document.querySelectorAll("#accessPermissionBody select[data-perm-key]").forEach(function (select) {
+            if (select.value === "grant") grants += 1;
+            else if (select.value === "deny") denies += 1;
+        });
+        summary.innerHTML =
+            '<span class="status-tag live">' + grants + " ERTEILT</span> " +
+            '<span class="status-tag danger">' + denies + " ENTZOGEN</span>" +
+            ' <span class="muted">Alle anderen Rechte kommen aus der Rolle.</span>';
+    }
+
+    function collectPermissionOverrides() {
+        var grants = [];
+        var denies = [];
+        document.querySelectorAll("#accessPermissionBody select[data-perm-key]").forEach(function (select) {
+            var key = select.getAttribute("data-perm-key");
+            if (select.value === "grant") grants.push(key);
+            else if (select.value === "deny") denies.push(key);
+        });
+        return { grants: grants, denies: denies };
+    }
+
+    async function openPermissions(recordId) {
+        state.permissionUserId = String(recordId);
+        state.permissionData = await fetchJSON(
+            "api/v1/telegram/users/" + encodeURIComponent(recordId) + "/permissions"
+        );
+        renderPermissionDialog();
+        var dialog = el("accessPermissionDialog");
+        if (dialog && typeof dialog.showModal === "function") dialog.showModal();
+        else if (dialog) dialog.setAttribute("open", "open");
+    }
+
+    function closePermissions() {
+        var dialog = el("accessPermissionDialog");
+        if (dialog && typeof dialog.close === "function") dialog.close();
+        else if (dialog) dialog.removeAttribute("open");
+    }
+
+    async function savePermissions(reset) {
+        if (!state.permissionUserId) return;
+        if (reset) {
+            document.querySelectorAll("#accessPermissionBody select[data-perm-key]").forEach(function (select) {
+                select.value = "inherit";
+            });
+            updatePermissionSummary();
+        }
+        var payload = collectPermissionOverrides();
+        await fetchJSON(
+            "api/v1/telegram/users/" + encodeURIComponent(state.permissionUserId) + "/permissions",
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            }
+        );
+        closePermissions();
+        await load();
+        showToast("Persönliche Rechte gespeichert.");
+    }
+
     function bindEvents() {
         var refresh = el("btnAccessRefresh");
         if (refresh) {
@@ -268,9 +413,37 @@
             });
         }
 
+        var closePermissionsBtn = el("btnClosePermissions");
+        if (closePermissionsBtn) {
+            closePermissionsBtn.addEventListener("click", closePermissions);
+        }
+        var savePermissionsBtn = el("btnSavePermissions");
+        if (savePermissionsBtn) {
+            savePermissionsBtn.addEventListener("click", function () {
+                savePermissions(false).catch(function (err) {
+                    showToast(err.message, true);
+                });
+            });
+        }
+        var resetPermissionsBtn = el("btnResetPermissions");
+        if (resetPermissionsBtn) {
+            resetPermissionsBtn.addEventListener("click", function () {
+                if (!window.confirm("Alle persönlichen Rechte dieses Kontos zurücksetzen?")) return;
+                savePermissions(true).catch(function (err) {
+                    showToast(err.message, true);
+                });
+            });
+        }
+        var permissionDialog = el("accessPermissionDialog");
+        if (permissionDialog) {
+            permissionDialog.addEventListener("close", function () {
+                state.permissionUserId = null;
+                state.permissionData = null;
+            });
+        }
+
         var saveMode = el("btnSaveAccessMode");
-        if (saveMode) {
-            saveMode.addEventListener("click", async function () {
+        if (saveMode) {            saveMode.addEventListener("click", async function () {
                 var select = el("accessModeSelect");
                 if (!select) return;
                 try {
@@ -319,7 +492,12 @@
 
         document.addEventListener("change", async function (event) {
             var target = event.target;
-            if (!target || target.getAttribute("data-action") !== "role") return;
+            if (!target) return;
+            if (target.matches && target.matches("#accessPermissionBody select[data-perm-key]")) {
+                updatePermissionSummary();
+                return;
+            }
+            if (target.getAttribute("data-action") !== "role") return;
             try {
                 await updateUser(target.getAttribute("data-ident"), 1, target.value);
                 showToast("Rolle aktualisiert.");
@@ -348,6 +526,8 @@
                 } else if (action === "delete") {
                     await deleteUser(button.getAttribute("data-id"));
                     showToast("Eintrag entfernt.");
+                } else if (action === "permissions") {
+                    await openPermissions(button.getAttribute("data-id"));
                 }
             } catch (err) {
                 showToast(err.message, true);

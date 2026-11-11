@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from shared.permissions import is_valid_role, normalize_role
+from shared.permissions import is_valid_permission, is_valid_role, normalize_role
 
 
 class StreamerCreateRequest(BaseModel):
@@ -78,6 +78,29 @@ class TelegramUserPermissionRequest(BaseModel):
                 "Ungültige Rolle. Erlaubt sind: viewer, user, moderator, admin."
             )
         return normalize_role(value)
+
+
+class TelegramUserPermissionsUpdateRequest(BaseModel):
+    grants: List[str] = Field(
+        default_factory=list,
+        description="Persönlich erteilte Capabilities (zusätzlich zur Rolle)",
+    )
+    denies: List[str] = Field(
+        default_factory=list,
+        description="Persönlich entzogene Capabilities (überstimmen Rolle und Grants)",
+    )
+
+    @field_validator("grants", "denies")
+    @classmethod
+    def _validate_permissions(cls, values: List[str]) -> List[str]:
+        cleaned: List[str] = []
+        for value in values or []:
+            key = str(value or "").strip()
+            if not is_valid_permission(key):
+                raise ValueError(f"Unbekanntes Recht: {key}")
+            if key not in cleaned:
+                cleaned.append(key)
+        return cleaned
 
 
 class GiftStatItem(BaseModel):

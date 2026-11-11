@@ -51,6 +51,9 @@ from database import (
     get_streamer_by_id_or_username,
     get_streamer_detail,
     get_telegram_access_mode,
+    get_telegram_user_by_id,
+    get_telegram_user_by_identifier,
+    get_telegram_user_permission_overrides,
     import_from_sqlite_database,
     init_db,
     inspect_sqlite_database,
@@ -60,6 +63,7 @@ from database import (
     record_bot_session,
     record_gift_event,
     record_page_view,
+    replace_telegram_user_permissions,
     revenue_profile_summary,
     save_donor_crm,
     seed_demo_data,
@@ -80,6 +84,7 @@ from schemas import (
     StreamerCreateRequest,
     StreamerReportCard,
     TelegramUserPermissionRequest,
+    TelegramUserPermissionsUpdateRequest,
     TrackActionRequest,
 )
 from shared.access_gate import is_exempt_path, session_grants_access, wants_json
@@ -118,6 +123,7 @@ from shared.permissions import (
     has_permission,
     is_blocked,
     normalize_role,
+    resolve_permissions,
     role_label,
     session_permissions,
 )
@@ -658,6 +664,33 @@ def _extract_session_token(
     return token
 
 
+def _enrich_session_permissions(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Ergänzt die Session um persönliche Rechte-Overrides aus der Datenbank."""
+    if not payload:
+        return payload
+
+    grants: List[str] = []
+    denies: List[str] = []
+    try:
+        identifier = payload.get("telegram_id") or payload.get("sub")
+        user_row = get_telegram_user_by_identifier(identifier) if identifier else None
+        if user_row:
+            overrides = get_telegram_user_permission_overrides(int(user_row["id"]))
+            grants = list(overrides.get("grants") or [])
+            denies = list(overrides.get("denies") or [])
+    except Exception as exc:  # pragma: no cover - DB-Ausfall darf Login nicht blockieren
+        logger.debug("Persönliche Rechte konnten nicht geladen werden: %s", exc)
+
+    payload["permission_grants"] = grants
+    payload["permission_denies"] = denies
+    return payload
+
+
+def _verify_session_token(token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Verifiziert ein Session-Token und reichert es mit effektiven Rechten an."""
+    return _enrich_session_permissions(admin_auth_manager.verify_session_token(token))
+
+
 def _session_payload_from_request(request: Request) -> Optional[Dict[str, Any]]:
     """Liest die Session aus Cookie/Header einer normalen Browser-Anfrage."""
     token = _extract_session_token(
@@ -665,7 +698,7 @@ def _session_payload_from_request(request: Request) -> Optional[Dict[str, Any]]:
         request.headers.get("x-admin-session"),
         request.headers.get("authorization"),
     )
-    return admin_auth_manager.verify_session_token(token)
+    return _verify_session_token(token)
 
 
 def _api_key_payload() -> Dict[str, Any]:
@@ -686,7 +719,7 @@ def _resolve_access_payload(
     permission: Optional[str] = None,
 ) -> Dict[str, Any]:
     token = _extract_session_token(toktracker_admin_session, x_admin_session, authorization)
-    session_payload = admin_auth_manager.verify_session_token(token)
+    session_payload = _verify_session_token(token)
     if session_payload:
         if permission and not has_permission(session_payload, permission):
             raise HTTPException(
@@ -823,11 +856,13 @@ def _set_admin_session_cookie(
     token: Optional[str] = None,
     role: str = ROLE_ADMIN,
     is_allowed: bool = True,
+    telegram_id: Optional[int] = None,
 ) -> None:
     session_token = token or admin_auth_manager.create_session_token(
         admin_label=admin_label,
         role=role,
         is_allowed=is_allowed,
+        telegram_id=telegram_id,
     )
     response.set_cookie(
         key=AdminAuthManager.COOKIE_NAME,
@@ -973,7 +1008,7 @@ async def admin_login_page(
     Login-Seite (/login) für die Telegram-basierte Admin-Authentifizierung.
     """
     next_value = request.query_params.get("next")
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if session_payload:
         return RedirectResponse(
             url=_resolve_post_login_redirect(next_value, session_payload.get("role")),
@@ -1038,7 +1073,7 @@ async def admin_console(
     """
     Geschütztes Admin-Panel (/admin). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/admin"), status_code=302)
     if normalize_role(session_payload.get("role")) != ROLE_ADMIN or is_blocked(session_payload.get("is_allowed", True)):
@@ -1076,7 +1111,7 @@ async def access_page(
     zentrale Rechte-Matrix inklusive der bot.*-Capabilities an. Schreibzugriffe
     laufen weiterhin über die serverseitig geschützten APIs.
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/access"), status_code=302)
     if not has_permission(session_payload, PERM_USERS_MANAGE):
@@ -1151,7 +1186,7 @@ async def site_analytics_page(
     """
     Geschützte Analyse-Seite (/site-analytics). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/site-analytics"), status_code=302)
     if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
@@ -1184,7 +1219,7 @@ async def stats_page(
     Read-only Statistik-Dashboard fuer Moderatoren und Administratoren.
     Enthaelt bewusst keine Verwaltungs-, Loesch- oder Buchungsfunktionen.
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/stats"), status_code=302)
     if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
@@ -1222,7 +1257,7 @@ async def donor_radar_page(
     """
     Geschützte Spender-Radar & Chatlog-Seite (/donor-radar). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/donor-radar"), status_code=302)
     if not has_permission(session_payload, PERM_RADAR_VIEW):
@@ -1256,7 +1291,7 @@ async def chat_intelligence_page(
     Chat-Intelligence & Wortwolken-Viewer (/chat-intelligence).
     Exklusiv hinter der Whitelist-Funktion geschützt.
     """
-    session_payload = admin_auth_manager.verify_session_token(toktracker_admin_session)
+    session_payload = _verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/chat-intelligence"), status_code=302)
 
@@ -1445,6 +1480,7 @@ async def api_auth_telegram_widget(
         request=request,
         role=role,
         is_allowed=True,
+        telegram_id=int(payload.id),
     )
     return resp
 
@@ -1490,6 +1526,7 @@ async def api_auth_telegram_widget_callback(request: Request):
         request=request,
         role=role,
         is_allowed=True,
+        telegram_id=tg_id,
     )
     return resp
 
@@ -2104,6 +2141,7 @@ async def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, respon
             admin_label=user_label,
             role=role,
             is_allowed=True,
+            telegram_id=int(tg_id) if tg_id else None,
         )
         # Auch Viewer und Whitelist-Nutzer erhalten ein Cookie, damit serverseitig
         # geschützte Seiten per Browser-Navigation funktionieren.
@@ -2114,6 +2152,7 @@ async def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, respon
             token=token,
             role=role,
             is_allowed=True,
+            telegram_id=int(tg_id) if tg_id else None,
         )
 
     try:
@@ -2163,7 +2202,7 @@ async def api_miniapp_auth_status(
 ):
     token = _extract_session_token(toktracker_admin_session, x_admin_session, authorization)
 
-    session_payload = admin_auth_manager.verify_session_token(token)
+    session_payload = _verify_session_token(token)
     if session_payload:
         role = normalize_role(session_payload.get("role"))
         is_admin = role == ROLE_ADMIN and not is_blocked(session_payload.get("is_allowed", True))
@@ -2418,6 +2457,144 @@ async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
         return {"ok": True, "user": user_row, "access_mode": get_telegram_access_mode()}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+_CRITICAL_PERMISSIONS = frozenset({
+    PERM_USERS_MANAGE,
+    PERM_SETTINGS_MANAGE,
+    PERM_SYSTEM_MANAGE,
+})
+
+
+def _permission_definitions() -> List[Dict[str, str]]:
+    return [
+        {
+            "key": permission,
+            "label": PERMISSION_LABELS.get(permission, permission),
+            "scope": "bot" if permission.startswith("bot.") else "web",
+        }
+        for permission in sorted(ALL_PERMISSIONS)
+    ]
+
+
+def _telegram_user_permission_payload(user_row: Dict[str, Any]) -> Dict[str, Any]:
+    role = normalize_role(user_row.get("role"))
+    overrides = get_telegram_user_permission_overrides(int(user_row["id"]))
+    grants = list(overrides.get("grants") or [])
+    denies = list(overrides.get("denies") or [])
+    effective = sorted(
+        resolve_permissions(
+            role,
+            user_row.get("is_allowed", 0),
+            grants,
+            denies,
+        )
+    )
+    return {
+        "user": user_row,
+        "role": role,
+        "role_permissions": sorted(ROLE_PERMISSIONS.get(role, frozenset())),
+        "grants": grants,
+        "denies": denies,
+        "effective_permissions": effective,
+        "permissions": _permission_definitions(),
+    }
+
+
+def _session_user_id(payload: Optional[Dict[str, Any]]) -> Optional[int]:
+    if not payload:
+        return None
+    try:
+        identifier = payload.get("telegram_id") or payload.get("sub")
+        user_row = get_telegram_user_by_identifier(identifier) if identifier else None
+        return int(user_row["id"]) if user_row else None
+    except Exception:
+        return None
+
+
+@app.get(
+    "/api/telegram/users/{record_id}/permissions",
+    tags=["Telegram Bot API"],
+    summary="Liefert Rolle, persönliche Overrides und effektive Rechte eines Kontos",
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
+)
+@app.get(
+    "/api/v1/telegram/users/{record_id}/permissions",
+    tags=["Telegram Bot API"],
+    summary="Liefert Rolle, persönliche Overrides und effektive Rechte eines Kontos",
+    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
+)
+async def api_get_telegram_user_permissions(record_id: int):
+    init_db()
+    user_row = get_telegram_user_by_id(record_id)
+    if not user_row:
+        raise HTTPException(status_code=404, detail="Telegram-Nutzer nicht gefunden.")
+    return _telegram_user_permission_payload(user_row)
+
+
+@app.put(
+    "/api/telegram/users/{record_id}/permissions",
+    tags=["Telegram Bot API"],
+    summary="Ersetzt die persönlichen Rechte-Overrides eines Kontos",
+)
+@app.put(
+    "/api/v1/telegram/users/{record_id}/permissions",
+    tags=["Telegram Bot API"],
+    summary="Ersetzt die persönlichen Rechte-Overrides eines Kontos",
+)
+async def api_update_telegram_user_permissions(
+    record_id: int,
+    payload: TelegramUserPermissionsUpdateRequest,
+    session_payload: Dict[str, Any] = Depends(require_permission(PERM_USERS_MANAGE)),
+):
+    init_db()
+    user_row = get_telegram_user_by_id(record_id)
+    if not user_row:
+        raise HTTPException(status_code=404, detail="Telegram-Nutzer nicht gefunden.")
+
+    if _session_user_id(session_payload) == record_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Eigene Rechte können nicht geändert werden. Bitte einen anderen Admin verwenden.",
+        )
+
+    if (
+        normalize_role(user_row.get("role")) == ROLE_ADMIN
+        and normalize_role(session_payload.get("role")) != ROLE_ADMIN
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Rechte von Administratoren dürfen nur Administratoren ändern.",
+        )
+
+    requested = set(payload.grants) | set(payload.denies)
+    actor_permissions = session_permissions(session_payload)
+    if not requested.issubset(actor_permissions):
+        raise HTTPException(
+            status_code=403,
+            detail="Es können nur Rechte vergeben oder entzogen werden, die das eigene Konto besitzt.",
+        )
+
+    if requested & _CRITICAL_PERMISSIONS and normalize_role(session_payload.get("role")) != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Kritische Rechte dürfen nur Administratoren vergeben oder entziehen.",
+        )
+
+    try:
+        replace_telegram_user_permissions(
+            record_id,
+            payload.grants,
+            payload.denies,
+            created_by=str(session_payload.get("sub") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    updated_row = get_telegram_user_by_id(record_id) or user_row
+    result = _telegram_user_permission_payload(updated_row)
+    result["ok"] = True
+    return result
 
 
 @app.delete(

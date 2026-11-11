@@ -826,6 +826,8 @@ class TelegramBotService:
         access_perms = permissions_for(
             normalize_role(access.get("role")),
             1 if access.get("allowed") else 0,
+            access.get("permission_grants") or (),
+            access.get("permission_denies") or (),
         )
         if not access.get("allowed") or PERM_BOT_ADMIN_LOGIN not in access_perms:
             await query.answer("⛔ Nur Administratoren dürfen Logins freigeben.", show_alert=True)
@@ -932,7 +934,14 @@ class TelegramBotService:
             return None
 
         access["role"] = normalize_role(access.get("role"))
-        access["permissions"] = set(permissions_for(access["role"], 1 if access["allowed"] else 0))
+        access["permissions"] = set(
+            permissions_for(
+                access["role"],
+                1 if access["allowed"] else 0,
+                access.get("permission_grants") or (),
+                access.get("permission_denies") or (),
+            )
+        )
 
         if require_admin and not access["is_admin"]:
             self._log(
@@ -2361,7 +2370,14 @@ class TelegramBotService:
         val = parts[1] if len(parts) > 1 else ""
 
         access_role = normalize_role(access.get("role"))
-        access_perms = set(permissions_for(access_role, 1))
+        access_perms = set(
+            permissions_for(
+                access_role,
+                1 if access.get("allowed") else 0,
+                access.get("permission_grants") or (),
+                access.get("permission_denies") or (),
+            )
+        )
 
         async def _deny_permission(permission: str) -> None:
             await query.answer(

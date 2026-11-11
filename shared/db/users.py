@@ -3,7 +3,7 @@ TokTracker - Telegram-Nutzer, Rollen und Whitelist-Berechtigungen.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import pymysql
@@ -18,7 +18,11 @@ from shared.config import config
 from shared.db._base import get_db
 from shared.db.settings import get_telegram_access_mode
 from shared.permissions import (
+    ALL_PERMISSIONS,
     DEFAULT_ROLE,
+    PERMISSION_EFFECT_DENY,
+    PERMISSION_EFFECT_GRANT,
+    PERMISSION_EFFECTS,
     ROLE_ADMIN,
     ROLE_MODERATOR,
     ROLE_USER,
@@ -26,6 +30,7 @@ from shared.permissions import (
     highest_role,
     is_valid_role,
     normalize_role,
+    resolve_permissions,
 )
 
 
@@ -44,7 +49,172 @@ def list_telegram_users() -> List[Dict[str, Any]]:
                      id DESC
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+        permission_rows = conn.execute(
+            """
+            SELECT user_id, permission, effect
+            FROM telegram_user_permissions
+            ORDER BY user_id ASC, permission ASC
+            """
+        ).fetchall()
+
+    overrides: Dict[int, Dict[str, List[str]]] = {}
+    for perm_row in permission_rows:
+        user_id = int(perm_row["user_id"])
+        effect = str(perm_row["effect"] or "").strip().lower()
+        permission = str(perm_row["permission"] or "").strip()
+        if effect not in PERMISSION_EFFECTS or permission not in ALL_PERMISSIONS:
+            continue
+        bucket = overrides.setdefault(user_id, {"grants": [], "denies": []})
+        if effect == PERMISSION_EFFECT_GRANT:
+            bucket["grants"].append(permission)
+        else:
+            bucket["denies"].append(permission)
+
+    users: List[Dict[str, Any]] = []
+    for row in rows:
+        user = dict(row)
+        user_id = int(user.get("id") or 0)
+        bucket = overrides.get(user_id, {"grants": [], "denies": []})
+        user["permission_grants"] = list(bucket["grants"])
+        user["permission_denies"] = list(bucket["denies"])
+        user["effective_permissions"] = sorted(
+            resolve_permissions(
+                user.get("role"),
+                user.get("is_allowed", 0),
+                bucket["grants"],
+                bucket["denies"],
+            )
+        )
+        users.append(user)
+    return users
+
+
+def get_telegram_user_by_id(record_id: int) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM telegram_users WHERE id = ?", (int(record_id),)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_telegram_user_by_identifier(identifier: str | int) -> Optional[Dict[str, Any]]:
+    """
+    Findet einen Telegram-Nutzer anhand von DB-ID, Telegram-ID, ``@username``,
+    ``id:123`` oder ``tg_123`` (Mini-App-Label).
+    """
+    raw = str(identifier or "").strip()
+    if not raw:
+        return None
+    clean = raw
+    if clean.startswith("tg_"):
+        clean = clean[3:]
+    if clean.startswith("id:"):
+        clean = clean[3:]
+    clean = clean.lstrip("@").strip()
+    if not clean:
+        return None
+
+    with get_db() as conn:
+        if clean.lstrip("-").isdigit():
+            numeric = int(clean)
+            row = conn.execute(
+                "SELECT * FROM telegram_users WHERE telegram_id = ? OR id = ?",
+                (numeric, numeric),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM telegram_users WHERE LOWER(username) = LOWER(?)",
+                (clean,),
+            ).fetchone()
+        return dict(row) if row else None
+
+
+def get_telegram_user_permissions(user_id: int) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT permission, effect, created_by, created_at
+            FROM telegram_user_permissions
+            WHERE user_id = ?
+            ORDER BY permission ASC
+            """,
+            (int(user_id),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_telegram_user_permission_overrides(user_id: int) -> Dict[str, List[str]]:
+    grants: List[str] = []
+    denies: List[str] = []
+    for row in get_telegram_user_permissions(user_id):
+        effect = str(row.get("effect") or "").strip().lower()
+        permission = str(row.get("permission") or "").strip()
+        if effect not in PERMISSION_EFFECTS or permission not in ALL_PERMISSIONS:
+            continue
+        if effect == PERMISSION_EFFECT_GRANT:
+            grants.append(permission)
+        else:
+            denies.append(permission)
+    return {"grants": sorted(grants), "denies": sorted(denies)}
+
+
+def replace_telegram_user_permissions(
+    user_id: int,
+    grants: List[str] | Tuple[str, ...] = (),
+    denies: List[str] | Tuple[str, ...] = (),
+    created_by: str = "",
+) -> Dict[str, List[str]]:
+    """
+    Ersetzt alle persönlichen Overrides eines Kontos atomar.
+
+    Unbekannte Capabilities oder gleichzeitig erteilte/entzogene Rechte werden
+    mit ``ValueError`` abgelehnt.
+    """
+    grant_set = {str(permission or "").strip() for permission in grants}
+    deny_set = {str(permission or "").strip() for permission in denies}
+    grant_set.discard("")
+    deny_set.discard("")
+
+    unknown = sorted((grant_set | deny_set) - ALL_PERMISSIONS)
+    if unknown:
+        raise ValueError("Unbekannte Rechte: " + ", ".join(unknown))
+    overlap = sorted(grant_set & deny_set)
+    if overlap:
+        raise ValueError(
+            "Rechte können nicht gleichzeitig erteilt und entzogen werden: "
+            + ", ".join(overlap)
+        )
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_db() as conn:
+        user_row = conn.execute(
+            "SELECT id FROM telegram_users WHERE id = ?", (int(user_id),)
+        ).fetchone()
+        if not user_row:
+            raise ValueError("Telegram-Nutzer nicht gefunden.")
+
+        conn.execute(
+            "DELETE FROM telegram_user_permissions WHERE user_id = ?",
+            (int(user_id),),
+        )
+        for permission in sorted(grant_set | deny_set):
+            effect = (
+                PERMISSION_EFFECT_GRANT if permission in grant_set else PERMISSION_EFFECT_DENY
+            )
+            conn.execute(
+                """
+                INSERT INTO telegram_user_permissions (
+                    user_id, permission, effect, created_by, created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(user_id), permission, effect, created_by or "", now),
+            )
+
+    return {
+        "grants": sorted(grant_set),
+        "denies": sorted(deny_set),
+    }
 
 
 def upsert_telegram_user_permission(
@@ -267,6 +437,27 @@ def check_telegram_user_access(
             if grp_row and int(grp_row["is_allowed"]) == 1:
                 group_whitelisted = True
 
+        permission_grants: List[str] = []
+        permission_denies: List[str] = []
+        if not in_env_admin and row_id:
+            for perm_row in conn.execute(
+                """
+                SELECT permission, effect
+                FROM telegram_user_permissions
+                WHERE user_id = ?
+                ORDER BY permission ASC
+                """,
+                (int(row_id),),
+            ).fetchall():
+                effect = str(perm_row["effect"] or "").strip().lower()
+                permission = str(perm_row["permission"] or "").strip()
+                if effect not in PERMISSION_EFFECTS or permission not in ALL_PERMISSIONS:
+                    continue
+                if effect == PERMISSION_EFFECT_GRANT:
+                    permission_grants.append(permission)
+                else:
+                    permission_denies.append(permission)
+
     is_allowed_flag = int(user_row.get("is_allowed", 0))
     role_val = normalize_role(user_row.get("role", DEFAULT_ROLE))
 
@@ -291,6 +482,14 @@ def check_telegram_user_access(
     is_whitelisted = bool(
         allowed and effective_role in (ROLE_USER, ROLE_MODERATOR, ROLE_ADMIN)
     )
+    effective_permissions = sorted(
+        resolve_permissions(
+            effective_role,
+            1 if allowed else 0,
+            permission_grants,
+            permission_denies,
+        )
+    )
 
     return {
         "allowed": allowed,
@@ -300,4 +499,7 @@ def check_telegram_user_access(
         "mode": mode,
         "is_group": is_group,
         "user": user_row,
+        "permission_grants": sorted(permission_grants),
+        "permission_denies": sorted(permission_denies),
+        "permissions": effective_permissions,
     }

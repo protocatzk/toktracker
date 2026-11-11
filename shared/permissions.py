@@ -11,7 +11,7 @@ isoliert testbar.
 
 from __future__ import annotations
 
-from typing import Any, Dict, FrozenSet, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Rollen
@@ -91,6 +91,14 @@ PERM_BOT_STREAMERS_MANAGE = "bot.streamers.manage"
 PERM_BOT_USERS_MANAGE = "bot.users.manage"
 PERM_BOT_SETTINGS_MANAGE = "bot.settings.manage"
 PERM_BOT_ADMIN_LOGIN = "bot.admin.login"
+
+# Persönliche Rechte-Overrides
+PERMISSION_EFFECT_GRANT = "grant"
+PERMISSION_EFFECT_DENY = "deny"
+PERMISSION_EFFECTS: FrozenSet[str] = frozenset({
+    PERMISSION_EFFECT_GRANT,
+    PERMISSION_EFFECT_DENY,
+})
 
 ALL_PERMISSIONS: FrozenSet[str] = frozenset({
     PERM_PUBLIC_VIEW,
@@ -342,11 +350,46 @@ def is_blocked(is_allowed: Any) -> bool:
         return is_allowed is None
 
 
-def permissions_for(role: Optional[str], is_allowed: Any = 1) -> FrozenSet[str]:
-    """Rechte einer Rolle. Gesperrte Nutzer erhalten keinerlei Rechte."""
+def is_valid_permission(permission: Any) -> bool:
+    """True, wenn der Wert eine bekannte Capability ist."""
+    return str(permission or "").strip() in ALL_PERMISSIONS
+
+
+def resolve_permissions(
+    role: Optional[str],
+    is_allowed: Any = 1,
+    grants: Iterable[str] = (),
+    denies: Iterable[str] = (),
+) -> FrozenSet[str]:
+    """
+    Effektive Rechte aus Rolle, persönlichen Grants und persönlichen Denies.
+
+    Reihenfolge: Rolle -> Grants -> Denies. Ein Deny gewinnt damit immer.
+    Unbekannte Capabilities werden ignoriert, gesperrte Konten erhalten nichts.
+    """
     if is_blocked(is_allowed):
         return frozenset()
-    return ROLE_PERMISSIONS.get(normalize_role(role), frozenset())
+
+    effective = set(ROLE_PERMISSIONS.get(normalize_role(role), frozenset()))
+    for permission in grants or ():
+        clean = str(permission or "").strip()
+        if clean in ALL_PERMISSIONS:
+            effective.add(clean)
+    for permission in denies or ():
+        clean = str(permission or "").strip()
+        if clean in ALL_PERMISSIONS:
+            effective.discard(clean)
+    return frozenset(effective)
+
+
+def permissions_for(
+    role: Optional[str],
+    is_allowed: Any = 1,
+    grants: Iterable[str] = (),
+    denies: Iterable[str] = (),
+) -> FrozenSet[str]:
+    """Rechte einer Rolle inklusive persönlicher Overrides."""
+    return resolve_permissions(role, is_allowed, grants, denies)
 
 
 def has_permission(payload: Optional[Dict[str, Any]], permission: str) -> bool:
@@ -357,8 +400,7 @@ def has_permission(payload: Optional[Dict[str, Any]], permission: str) -> bool:
     if is_blocked(payload.get("is_allowed", 1)):
         return False
 
-    role = normalize_role(payload.get("role"))
-    return permission in ROLE_PERMISSIONS.get(role, frozenset())
+    return permission in session_permissions(payload)
 
 
 def has_any_permission(payload: Optional[Dict[str, Any]], permissions: Any) -> bool:
@@ -366,12 +408,17 @@ def has_any_permission(payload: Optional[Dict[str, Any]], permissions: Any) -> b
 
 
 def session_permissions(payload: Optional[Dict[str, Any]]) -> FrozenSet[str]:
-    """Alle Rechte eines Session-Payloads (fuer Frontend/Mini-App)."""
+    """Alle effektiven Rechte eines Session-Payloads (fuer Frontend/Mini-App)."""
     if not payload:
         return frozenset()
     if is_blocked(payload.get("is_allowed", 1)):
         return frozenset()
-    return ROLE_PERMISSIONS.get(normalize_role(payload.get("role")), frozenset())
+    return resolve_permissions(
+        payload.get("role"),
+        1,
+        payload.get("permission_grants") or (),
+        payload.get("permission_denies") or (),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +446,13 @@ def bot_command_permission(command: Optional[str]) -> Optional[str]:
     return BOT_COMMAND_PERMISSIONS.get(canonical)
 
 
-def bot_command_allowed(command: Optional[str], role: Optional[str], is_allowed: Any = 1) -> bool:
+def bot_command_allowed(
+    command: Optional[str],
+    role: Optional[str],
+    is_allowed: Any = 1,
+    grants: Iterable[str] = (),
+    denies: Iterable[str] = (),
+) -> bool:
     """True, wenn die Rolle den Bot-Befehl ausfuehren darf. Unbekannte Befehle: False."""
     canonical = normalize_bot_command(command)
     if canonical is None:
@@ -407,12 +460,17 @@ def bot_command_allowed(command: Optional[str], role: Optional[str], is_allowed:
     required = BOT_COMMAND_PERMISSIONS.get(canonical)
     if required is None:
         return True
-    return required in permissions_for(role, is_allowed)
+    return required in permissions_for(role, is_allowed, grants, denies)
 
 
-def bot_commands_for(role: Optional[str], is_allowed: Any = 1) -> Tuple[str, ...]:
+def bot_commands_for(
+    role: Optional[str],
+    is_allowed: Any = 1,
+    grants: Iterable[str] = (),
+    denies: Iterable[str] = (),
+) -> Tuple[str, ...]:
     """Alle kanonischen Bot-Befehle, die eine Rolle ausfuehren darf."""
-    perms = permissions_for(role, is_allowed)
+    perms = permissions_for(role, is_allowed, grants, denies)
     return tuple(
         command
         for command, required in BOT_COMMAND_PERMISSIONS.items()
