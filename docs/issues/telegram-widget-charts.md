@@ -49,19 +49,27 @@ Zeitraum- und Metrik-Umschaltung; überall sonst ein sauberer Text-Fallback.
 Umgesetzt:
 
 - `shared/widget_chart.py`
-  - statischer SVG-Renderer (`WIDGET_HTML`) mit Telegram-Theme-Variablen
-  - kompakte uint16-Base64-Kodierung der Zeitreihe (`encode_series`)
-  - `chat_data`-State inkl. Labels, Summe, Peak und Metrik
-  - Größenprüfung gegen 32 KB / 4 KB / 1 KB (`ensure_widget_limits`)
-  - deutsche Formatierung (`format_eur`, `format_coins`)
+  - **serverseitig gerendertes SVG** (kein JS-DOM-Rendering); die Grafik ist
+    auch sichtbar, wenn die Widget-Sandbox JS/DOM einschränkt
+  - Telegram-Theme-Variablen, deutsche Formatierung (`format_eur`,
+    `format_coins`), Zeitlabels und Peak-Marker
+  - optionale Progressive Enhancement: Tap auf den Chart zeigt den Bucket-Wert
+  - Größenprüfung gegen 32 KB / 4 KB (`ensure_widget_limits`)
+- `shared/db/analytics.py`
+  - neue leichte `get_chart_timeline()`-Query (nur `gift_events`) mit
+    Kurzzeit-Cache: 30 s für Today/24h, 2–5 Minuten für 7d/30d
+  - Cache wird bei Revenue-/Migrationsänderungen über
+    `invalidate_overview_cache()` mit geleert
 - `telegram_service.py`
   - neuer Befehl `/chart [today|24h|7d|30d] [eur|coins]` (Aliase: `charts`,
     `graph`, `diagramm`)
   - Widget-Versand über `bot.do_api_request("sendWidget", …)`, weil PTB 22.8
     die Bot-API-10.4-Methoden noch nicht kennt
+  - sofortige Chat-Action (`upload_photo`) als Lade-Feedback
   - Inline-Keyboard mit Zeitraum-, Metrik- und Refresh-Buttons
-  - Callback `chart_view:<period>:<metric>` aktualisiert das Widget still über
-    `editMessageWidgetData` + `edit_message_reply_markup`
+  - Callback `chart_view:<period>:<metric>:<refresh>` sendet ein neues Widget
+    und löscht das alte (Widget-HTML ist unveränderlich; `chat_data` wird nicht
+    benötigt)
   - **Fallback:** in Gruppen/Channels, bei deaktiviertem Feature-Flag oder bei
     API-Fehlern werden die Kennzahlen als Text gesendet
 - `shared/permissions.py`
@@ -69,8 +77,8 @@ Umgesetzt:
 - `shared/config.py` + `.env.example`
   - `TELEGRAM_WIDGET_CHARTS=1` (Default an, per Env abschaltbar)
 - `tests/test_widget_chart.py`
-  - Größenbudgets, Offline-/Library-Freiheit, Theme-Nutzung, Encoder-Roundtrip,
-    State-Limit, alle Zeiträume, leere Zeitreihe
+  - Größenbudgets, Offline-/Library-Freiheit, serverseitiges SVG,
+    Theme-Nutzung, alle Zeiträume, leere Zeitreihe, Label-Escaping
 
 **Bewusst nicht enthalten:**
 
@@ -78,14 +86,18 @@ Umgesetzt:
 - kein Gruppen-/Inline-/Forward-Versand
 - kein Chart im automatischen 24h-Report (Zielchat ist in Produktion meist eine Gruppe)
 - keine Balkendiagramme / Radar-Charts
+- kein `chat_data`-State und kein `editMessageWidgetData` im Phase-A-Flow
 
 **Akzeptanzkriterien (erfüllt):**
 
 - `/chart` funktioniert im Privatchat und zeigt 24h/7d/30d/heute.
-- Periode und Metrik lassen sich ohne neue Nachricht umschalten.
+- Periode und Metrik lassen sich über Buttons umschalten (neues Widget,
+  altes wird entfernt).
+- Das Chart ist auch ohne funktionierendes Widget-JS sichtbar (SVG im HTML).
 - In Gruppen erscheint ein verständlicher Text statt eines Fehlers.
 - Bei API-Fehlern bricht der Befehl nicht ab.
-- Widget-HTML bleibt unter 4.096 Bytes komprimiert; State unter 1.024 Bytes.
+- Widget-HTML bleibt unter 4.096 Bytes komprimiert.
+- Die Datenabfrage liegt nach dem Umbau bei ~0,3–2 s statt 22–55 s.
 - `pytest`/`unittest` der Bot-, Config- und Widget-Tests ist grün.
 
 ---
@@ -165,24 +177,29 @@ Alle Typen können denselben Renderer erweitern; der Chart-Typ steckt im
 
 ```text
 /chart 7d coins
-  → get_analytics_data(period="7d")
+  → get_chart_timeline(period="7d")   # leicht, gecacht (2–5 min)
   → timeline (EUR net / Coins) + totals
-  → encode_series() → uint16-Base64
-  → chat_data (JSON, < 1 KB)
-  → sendWidget(html=WIDGET_HTML, caption, height, reply_markup)
-  → Callback chart_view:30d:eur
-  → build_chart_widget()
-  → editMessageWidgetData(chat_data=…)
+  → serverseitiges SVG + Labels
+  → sendWidget(html, caption, height, reply_markup)
+  → Callback chart_view:30d:eur:0
+  → build_chart_widget() (Cache)
+  → sendWidget(neues Chart) + deleteMessage(altes Chart)
 ```
+
+Die normale `get_analytics_data()`-Aggregation wird für Charts **nicht** mehr
+verwendet: Sie berechnet zusätzlich Top-Spender, Sessions, Streamer-Rankings
+und braucht auf Produktionsdaten 22 s (24h) bis 55 s (30d). Die neue
+`get_chart_timeline()` aggregiert nur `gift_events` und liegt bei 0,3–2 s
+(cold) bzw. ~0 s (Cache-Hit).
 
 ### Sicherheit & Datenschutz
 
-- Keine Secrets, Tokens oder Nutzernamen im Widget-HTML oder State.
+- Keine Secrets, Tokens oder Nutzernamen im Widget-HTML.
 - Labels stammen aus DB-generierten Zeitbucket-Labels, keine freien
-  Nutzereingaben.
-- Caption ist immer gesetzt (Notifications, Suche, Clients ohne Widget-Support).
-- Widgets sind nicht kopierbar/forwardbar (Produktion), State ist öffentlich
-  behandelbar.
+  Nutzereingaben; sie werden HTML-escaped.
+- Caption ist immer gesetzt und enthält Summe + Peak (Notifications, Suche,
+  Clients ohne Widget-Support).
+- Widgets sind nicht kopierbar/forwardbar (Produktion).
 
 ### Betrieb
 
@@ -190,8 +207,13 @@ Alle Typen können denselben Renderer erweitern; der Chart-Typ steckt im
   antwortet dann mit einem Hinweis.
 - Fehler werden geloggt (`Chart-Widget fehlgeschlagen: …`) und führen zum
   Text-Fallback, nie zu einem stillen Verlust der Antwort.
-- `editMessageWidgetData` zählt als gesendete Nachricht; im Phase-A-Flow
-  entsteht nur bei Button-Klicks ein Edit.
+- Der Chart-Cache läuft per TTL aus (30 s für Today/24h, 2–5 Minuten für
+  7d/30d); der 🔄-Button erzwingt mit `force_refresh` frische Daten. Bei
+  Revenue-Profil-/Migrationsänderungen wird er über
+  `invalidate_overview_cache()` mit geleert.
+- Jeder Perioden-/Metrikwechsel sendet eine neue Widget-Nachricht und löscht
+  die alte. Das zählt als gesendete Nachricht, ist aber durch die
+  Cache-Trefferquote selten und schnell.
 
 ---
 

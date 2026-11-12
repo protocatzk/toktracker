@@ -1790,7 +1790,7 @@ class TelegramBotService:
         period_buttons = [
             InlineKeyboardButton(
                 ("✅ " if key == period else "") + label,
-                callback_data=f"chart_view:{key}:{metric}",
+                callback_data=f"chart_view:{key}:{metric}:0",
             )
             for key, label in (
                 ("today", "HEUTE"),
@@ -1802,13 +1802,13 @@ class TelegramBotService:
         metric_buttons = [
             InlineKeyboardButton(
                 ("✅ " if metric == "eur" else "") + "€ NETTO",
-                callback_data=f"chart_view:{period}:eur",
+                callback_data=f"chart_view:{period}:eur:0",
             ),
             InlineKeyboardButton(
                 ("✅ " if metric == "coins" else "") + "🪙 COINS",
-                callback_data=f"chart_view:{period}:coins",
+                callback_data=f"chart_view:{period}:coins:0",
             ),
-            InlineKeyboardButton("🔄", callback_data=f"chart_view:{period}:{metric}"),
+            InlineKeyboardButton("🔄", callback_data=f"chart_view:{period}:{metric}:1"),
         ]
         return InlineKeyboardMarkup([period_buttons, metric_buttons])
 
@@ -1866,34 +1866,21 @@ class TelegramBotService:
             return int(result["message_id"])
         return None
 
-    async def _update_chart_widget(
+    async def _replace_chart_widget(
         self,
         bot: Any,
         chat_id: int,
-        message_id: int,
+        old_message_id: int,
         chart: Any,
         keyboard: InlineKeyboardMarkup,
     ) -> None:
+        new_message_id = await self._send_chart_widget(bot, chat_id, chart, keyboard)
+        if not new_message_id or not old_message_id:
+            return
         try:
-            await bot.do_api_request(
-                "editMessageWidgetData",
-                api_kwargs={
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "chat_data": chart.state,
-                },
-            )
+            await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
         except Exception as exc:
-            if "not modified" not in str(exc).lower():
-                raise
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=keyboard,
-            )
-        except Exception as exc:
-            self._log("DEBUG", f"Chart-Keyboard konnte nicht aktualisiert werden: {exc}")
+            self._log("DEBUG", f"Altes Chart-Widget konnte nicht gelöscht werden: {exc}")
 
     def _parse_chart_args(self, args: Optional[List[str]]) -> Tuple[str, str]:
         period = "24h"
@@ -1959,7 +1946,21 @@ class TelegramBotService:
             return
 
         try:
+            try:
+                await context.bot.send_chat_action(
+                    chat_id=int(update.effective_chat.id),
+                    action="upload_photo",
+                )
+            except Exception:
+                pass
+            started_at = time.perf_counter()
             chart = await asyncio.to_thread(build_chart_widget, period, metric)
+            elapsed = time.perf_counter() - started_at
+            self._log(
+                "DEBUG",
+                f"Chart-Widget {period}/{metric} geladen in {elapsed:.2f}s "
+                f"({chart.points} Punkte).",
+            )
             await self._send_chart_widget(
                 context.bot,
                 int(update.effective_chat.id),
@@ -2675,7 +2676,12 @@ class TelegramBotService:
             period = val or "today"
             text, markup = await asyncio.to_thread(self._format_overview_view, period)
         elif action == "chart_view":
-            await query.answer()
+            try:
+                await query.answer()
+            except Exception as exc:
+                # Callback-Queries verfallen; ein verspäteter Klick darf keinen
+                # unhandled BadRequest im Bot-Log erzeugen.
+                self._log("DEBUG", f"Chart-Callback konnte nicht bestätigt werden: {exc}")
             if not config.telegram_widget_charts:
                 return
             if not query.message:
@@ -2683,9 +2689,12 @@ class TelegramBotService:
             parts = (val or "").split(":")
             period = parts[0] if parts and parts[0] else "24h"
             metric = parts[1] if len(parts) > 1 and parts[1] else "eur"
+            force_refresh = len(parts) > 2 and parts[2] == "1"
             try:
-                chart = await asyncio.to_thread(build_chart_widget, period, metric)
-                await self._update_chart_widget(
+                chart = await asyncio.to_thread(
+                    build_chart_widget, period, metric, force_refresh
+                )
+                await self._replace_chart_widget(
                     context.bot,
                     int(query.message.chat_id),
                     int(query.message.message_id),

@@ -29,10 +29,18 @@ _overview_cache_lock = threading.Lock()
 
 _OVERVIEW_CACHE_TTL = 6.0  # verhindert Doppel-Berechnungen bei raschen/parallelen Polls
 
+# Leichtgewichtiger Cache nur für Chart-Zeitreihen. Die normale Analytics-
+# Aggregation ist mit 20-55 s zu teuer für interaktive Bot-Charts.
+_chart_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_chart_cache_lock = threading.Lock()
+_CHART_CACHE_TTL = {"today": 30.0, "24h": 30.0, "7d": 120.0, "30d": 300.0}
+
 
 def invalidate_overview_cache() -> None:
     with _overview_cache_lock:
         _overview_cache.clear()
+    with _chart_cache_lock:
+        _chart_cache.clear()
 
 
 def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> Dict[str, Any]:
@@ -1146,3 +1154,86 @@ def build_streamer_bot_report(
         "top_gifters": top_gifters,
         "telegram_text": telegram_text,
     }
+
+
+def get_chart_timeline(period: str = "24h", force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Leichtgewichtige Zeitreihe nur für Bot-Charts.
+
+    Anders als ``get_analytics_data`` aggregiert diese Funktion ausschließlich
+    ``gift_events`` und liefert Summen + Buckets in unter einer Sekunde.
+    Ergebnisse werden pro Zeitraum kurz gecacht (30 s für Today/24h,
+    2-5 Minuten für 7d/30d).
+    """
+    norm = period if period in ("today", "24h", "7d", "30d") else "24h"
+    ttl = _CHART_CACHE_TTL.get(norm, 60.0)
+    now = time.monotonic()
+
+    if not force_refresh:
+        with _chart_cache_lock:
+            cached = _chart_cache.get(norm)
+            if cached and (now - cached[0]) < ttl:
+                return dict(cached[1])
+
+    cutoff = _get_period_cutoff(norm)
+    hourly = norm in ("today", "24h")
+    substr_len = 13 if hourly else 10
+
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                SUBSTR(created_at, 1, {substr_len}) AS bucket,
+                COALESCE(SUM(eur_net), 0) AS eur_net_sum,
+                COALESCE(SUM(total_coins), 0) AS coins_sum,
+                COUNT(id) AS events_count
+            FROM gift_events
+            WHERE created_at >= ?
+            GROUP BY SUBSTR(created_at, 1, {substr_len})
+            ORDER BY bucket ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+        total_row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(eur_net), 0) AS eur_net_sum,
+                COALESCE(SUM(total_coins), 0) AS coins_sum,
+                COUNT(id) AS events_count
+            FROM gift_events
+            WHERE created_at >= ?
+            """,
+            (cutoff,),
+        ).fetchone()
+
+    timeline: List[Dict[str, Any]] = []
+    for row in rows:
+        bucket = str(row["bucket"])
+        if hourly:
+            parts = bucket.replace("T", " ").split(" ")
+            time_part = f"{parts[1]}:00" if len(parts) > 1 else bucket
+            label = time_part if norm == "today" else f"{parts[0][5:]} {time_part}"
+        else:
+            label = f"{bucket[8:10]}.{bucket[5:7]}." if len(bucket) >= 10 else bucket
+        timeline.append(
+            {
+                "bucket": bucket,
+                "label": label,
+                "eur_net": round(float(row["eur_net_sum"] or 0.0), 2),
+                "coins": int(row["coins_sum"] or 0),
+                "events_count": int(row["events_count"] or 0),
+            }
+        )
+
+    result: Dict[str, Any] = {
+        "period": norm,
+        "timeline": timeline,
+        "totals": {
+            "eur_net": round(float(total_row["eur_net_sum"] or 0.0), 2),
+            "total_coins": int(total_row["coins_sum"] or 0),
+            "gift_events_count": int(total_row["events_count"] or 0),
+        },
+    }
+    with _chart_cache_lock:
+        _chart_cache[norm] = (time.monotonic(), result)
+    return dict(result)
