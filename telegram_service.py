@@ -94,6 +94,52 @@ WELCOME_BANNER_PATH = os.path.join(PICTURES_DIR, "welcome_banner.jpg")
 DAILY_REPORT_BANNER_PATH = os.path.join(PICTURES_DIR, "daily_report_banner.jpg")
 BOT_AVATAR_PATH = os.path.join(PICTURES_DIR, "bot_avatar.jpg")
 
+# Text-Befehle, die der Gruppen-Handler (Mention/Reply ohne Slash) ausführt.
+# Alles andere wird bei einer Reply auf den Bot still ignoriert.
+GROUP_TEXT_COMMANDS = frozenset(
+    {
+        "help",
+        "start",
+        "report",
+        "bericht",
+        "overview",
+        "dashboard",
+        "finanzen",
+        "radar",
+        "whales_radar",
+        "whales",
+        "whale_alerts",
+        "alerts",
+        "donor",
+        "dossier",
+        "spender",
+        "vip",
+        "vips",
+        "loyalty",
+        "switchers",
+        "frontenwechsler",
+        "streamers",
+        "channels",
+        "liste",
+        "gifts",
+        "geschenke",
+        "ticker",
+        "streamer",
+        "stats",
+        "info",
+        "status",
+        "worker",
+        "workers",
+        "id",
+        "whoami",
+        "login",
+        "allow",
+        "revoke",
+        "users",
+        "mode",
+    }
+)
+
 logger = logging.getLogger("telegram_service")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -1194,6 +1240,13 @@ class TelegramBotService:
         parts = cleaned.split()
         cmd = parts[0].lower().lstrip("/") if parts else "help"
         context.args = parts[1:] if len(parts) > 1 else []
+
+        if cmd not in GROUP_TEXT_COMMANDS:
+            # Replies auf Bot-Nachrichten ohne echten Befehl bleiben stumm.
+            if is_reply_to_bot:
+                return
+            await self._cmd_help(update, context)
+            return
 
         if cmd in ("report", "bericht"):
             await self._cmd_report(update, context)
