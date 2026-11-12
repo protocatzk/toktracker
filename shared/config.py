@@ -142,6 +142,12 @@ class AppConfig:
     telegram_allowed_users_raw: str = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
     # Optionale externe WebApp / Mini-App URL für Telegram
     telegram_webapp_url: str = os.getenv("TELEGRAM_WEBAPP_URL", os.getenv("WEBAPP_URL", "")).strip()
+    # HTML-Widget-Charts (Bot API 10.4). In Produktion funktionieren Widgets
+    # ausschliesslich im Privatchat mit dem Bot; Gruppen/Inline/Forwards sind
+    # noch Testserver-only. Der Bot faellt sonst automatisch auf Text zurueck.
+    telegram_widget_charts: bool = os.getenv(
+        "TELEGRAM_WIDGET_CHARTS", "1"
+    ).strip().lower() in ("1", "true", "yes", "on")
     # Mini-App ist eingefroren (Legacy). Bei 0 werden /miniapp, /app und /webapp
     # auf das responsive Web-Panel umgeleitet und alle UI-/Bot-Einstiege ausgeblendet.
     miniapp_enabled: bool = os.getenv("MINIAPP_ENABLED", "0").strip().lower() in (

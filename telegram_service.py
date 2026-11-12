@@ -87,6 +87,7 @@ from shared.permissions import (
     permissions_for,
     role_label,
 )
+from shared.widget_chart import build_chart_widget, format_coins, format_eur
 from tiktok_service import fetch_tiktok_user_info
 
 PICTURES_DIR = os.path.join(BASE_DIR, "pictures")
@@ -105,6 +106,10 @@ GROUP_TEXT_COMMANDS = frozenset(
         "overview",
         "dashboard",
         "finanzen",
+        "chart",
+        "charts",
+        "graph",
+        "diagramm",
         "radar",
         "whales_radar",
         "whales",
@@ -360,6 +365,9 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler(["app", "miniapp"], self._cmd_miniapp))
             self._app.add_handler(CommandHandler(["id", "whoami"], self._cmd_whoami))
             self._app.add_handler(CommandHandler(["overview", "dashboard", "finanzen"], self._cmd_overview))
+            self._app.add_handler(
+                CommandHandler(["chart", "charts", "graph", "diagramm"], self._cmd_chart)
+            )
             self._app.add_handler(CommandHandler(["radar", "whales_radar"], self._cmd_radar))
             self._app.add_handler(CommandHandler(["whales", "whale_alerts", "alerts"], self._cmd_whales))
             self._app.add_handler(CommandHandler(["donor", "dossier", "spender"], self._cmd_donor))
@@ -391,7 +399,7 @@ class TelegramBotService:
             self._app.add_handler(
                 CallbackQueryHandler(
                     self._on_interactive_callback,
-                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
+                    pattern=r"^(overview_period|chart_view|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
                 )
             )
 
@@ -465,6 +473,7 @@ class TelegramBotService:
         commands = [
             BotCommand("start", "🏠 Hauptmenü & Befehlsübersicht öffnen"),
             BotCommand("overview", "📊 Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
+            BotCommand("chart", "📈 Einnahmen-Chart als interaktives Widget (Privatchat)"),
             BotCommand("radar", "🎯 Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
             BotCommand("whales", "🐋 Live-Stream der neuesten Großspenden"),
             BotCommand("donor", "👤 Spender-Dossier, Stammkanal & VIP (<username>)"),
@@ -1252,6 +1261,8 @@ class TelegramBotService:
             await self._cmd_report(update, context)
         elif cmd in ("overview", "dashboard", "finanzen"):
             await self._cmd_overview(update, context)
+        elif cmd in ("chart", "charts", "graph", "diagramm"):
+            await self._cmd_chart(update, context)
         elif cmd in ("radar", "whales_radar"):
             await self._cmd_radar(update, context)
         elif cmd in ("whales", "whale_alerts", "alerts"):
@@ -1363,6 +1374,7 @@ class TelegramBotService:
             sections.append(
                 bf.eyebrow("📊 02 / STATISTIK") + "\n"
                 "▪ 📊 <code>/overview [heute|24h|7d|30d|all]</code> — Finanz-Dashboard\n"
+                "▪ 📈 <code>/chart [24h|7d|30d] [eur|coins]</code> — interaktiver Chart (Privatchat)\n"
                 "▪ 📋 <code>/report [stunden]</code> — Gesamtbericht aller Streamer\n"
                 "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
                 "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
@@ -1770,6 +1782,213 @@ class TelegramBotService:
             reply_markup=markup,
             disable_web_page_preview=True,
         )
+
+    # -----------------------------------------------------------------
+    # EINNAHMEN-CHART ALS TELEGRAM-HTML-WIDGET (/chart)
+    # -----------------------------------------------------------------
+    def _chart_keyboard(self, period: str, metric: str) -> InlineKeyboardMarkup:
+        period_buttons = [
+            InlineKeyboardButton(
+                ("✅ " if key == period else "") + label,
+                callback_data=f"chart_view:{key}:{metric}",
+            )
+            for key, label in (
+                ("today", "HEUTE"),
+                ("24h", "24H"),
+                ("7d", "7 TAGE"),
+                ("30d", "30 TAGE"),
+            )
+        ]
+        metric_buttons = [
+            InlineKeyboardButton(
+                ("✅ " if metric == "eur" else "") + "€ NETTO",
+                callback_data=f"chart_view:{period}:eur",
+            ),
+            InlineKeyboardButton(
+                ("✅ " if metric == "coins" else "") + "🪙 COINS",
+                callback_data=f"chart_view:{period}:coins",
+            ),
+            InlineKeyboardButton("🔄", callback_data=f"chart_view:{period}:{metric}"),
+        ]
+        return InlineKeyboardMarkup([period_buttons, metric_buttons])
+
+    def _format_chart_summary(self, chart: Any, note: str = "") -> str:
+        metric_value = (
+            f"€ {format_eur(chart.total)}"
+            if chart.metric == "eur"
+            else f"{format_coins(chart.total)} Coins"
+        )
+        peak_value = (
+            f"€ {format_eur(chart.peak)}"
+            if chart.metric == "eur"
+            else f"{format_coins(chart.peak)} Coins"
+        )
+        lines = [
+            bf.header(1, "📈 EINNAHMEN-CHART"),
+            bf.kv_table(
+                [
+                    ("ZEITRAUM", chart.period_label),
+                    ("METRIK", chart.metric_label),
+                    ("SUMME", metric_value),
+                    ("PEAK", peak_value),
+                    ("PUNKTE", str(chart.points)),
+                ]
+            ),
+        ]
+        if note:
+            lines.extend([bf.rule(), note])
+        lines.extend(["\n" + bf.footer()])
+        return "\n".join(lines)
+
+    def _build_chart_summary(self, period: str, metric: str, note: str = "") -> str:
+        return self._format_chart_summary(build_chart_widget(period, metric), note)
+
+    async def _send_chart_widget(
+        self,
+        bot: Any,
+        chat_id: int,
+        chart: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Optional[int]:
+        # PTB 22.8 kennt sendWidget (Bot API 10.4) noch nicht; do_api_request
+        # ist der offizielle Weg für neue Methoden.
+        result = await bot.do_api_request(
+            "sendWidget",
+            api_kwargs={
+                "chat_id": chat_id,
+                "html": chart.html,
+                "caption": chart.caption,
+                "height": chart.height,
+                "reply_markup": keyboard,
+            },
+        )
+        if isinstance(result, dict) and result.get("message_id"):
+            return int(result["message_id"])
+        return None
+
+    async def _update_chart_widget(
+        self,
+        bot: Any,
+        chat_id: int,
+        message_id: int,
+        chart: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> None:
+        try:
+            await bot.do_api_request(
+                "editMessageWidgetData",
+                api_kwargs={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "chat_data": chart.state,
+                },
+            )
+        except Exception as exc:
+            if "not modified" not in str(exc).lower():
+                raise
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=keyboard,
+            )
+        except Exception as exc:
+            self._log("DEBUG", f"Chart-Keyboard konnte nicht aktualisiert werden: {exc}")
+
+    def _parse_chart_args(self, args: Optional[List[str]]) -> Tuple[str, str]:
+        period = "24h"
+        metric = "eur"
+        for raw in args or []:
+            arg = str(raw).strip().lower()
+            if arg in ("today", "heute", "day"):
+                period = "today"
+            elif arg in ("24h", "24"):
+                period = "24h"
+            elif arg in ("7d", "woche", "week"):
+                period = "7d"
+            elif arg in ("30d", "monat", "month"):
+                period = "30d"
+            elif arg in ("eur", "euro", "€", "netto"):
+                metric = "eur"
+            elif arg in ("coins", "coin", "diamonds"):
+                metric = "coins"
+        return period, metric
+
+    async def _cmd_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message or not update.effective_chat:
+            return
+        if not await self._authorize(update, require_permission=PERM_BOT_ANALYTICS_VIEW):
+            return
+
+        period, metric = self._parse_chart_args(context.args)
+        chat_type = getattr(update.effective_chat, "type", "")
+
+        if not config.telegram_widget_charts:
+            await update.effective_message.reply_text(
+                "<b>CHART-WIDGET DEAKTIVIERT</b>\n"
+                "Aktiviere <code>TELEGRAM_WIDGET_CHARTS=1</code>, um interaktive Charts zu nutzen.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        # Widgets sind in Produktion ausschliesslich im Privatchat verfuegbar.
+        # In Gruppen/Channels liefern wir bewusst einen Text-Fallback.
+        if str(chat_type) != "private":
+            try:
+                chart = await asyncio.to_thread(build_chart_widget, period, metric)
+                text = self._format_chart_summary(
+                    chart,
+                    "<i>Interaktive Widget-Charts sind in Produktion nur im "
+                    "Privatchat mit dem Bot verfügbar. Öffne <code>/chart</code> "
+                    "dort für die grafische Ansicht.</i>",
+                )
+            except Exception as exc:
+                self._log("ERROR", f"Chart-Fallback fehlgeschlagen: {type(exc).__name__}: {exc}")
+                try:
+                    text = await asyncio.to_thread(self._format_overview_view, period)
+                except Exception:
+                    text = (
+                        "<b>CHART NICHT VERFÜGBAR</b>\n"
+                        "Die Kennzahlen konnten aktuell nicht geladen werden."
+                    )
+            await update.effective_message.reply_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            return
+
+        try:
+            chart = await asyncio.to_thread(build_chart_widget, period, metric)
+            await self._send_chart_widget(
+                context.bot,
+                int(update.effective_chat.id),
+                chart,
+                self._chart_keyboard(period, metric),
+            )
+        except Exception as exc:
+            self._log("ERROR", f"Chart-Widget fehlgeschlagen: {type(exc).__name__}: {exc}")
+            try:
+                text = await asyncio.to_thread(
+                    self._build_chart_summary,
+                    period,
+                    metric,
+                    "<i>Das Widget konnte nicht gesendet werden. "
+                    "Hier die Kennzahlen als Text.</i>",
+                )
+            except Exception:
+                try:
+                    text = await asyncio.to_thread(self._format_overview_view, period)
+                except Exception:
+                    text = (
+                        "<b>CHART NICHT VERFÜGBAR</b>\n"
+                        "Die Kennzahlen konnten aktuell nicht geladen werden."
+                    )
+            await update.effective_message.reply_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
 
     # -----------------------------------------------------------------
     # SPENDER-RADAR & CRM (/radar)
@@ -2441,7 +2660,7 @@ class TelegramBotService:
         text = None
         markup = None
 
-        if action in ("overview_period", "overview_streamer") and PERM_BOT_ANALYTICS_VIEW not in access_perms:
+        if action in ("overview_period", "overview_streamer", "chart_view") and PERM_BOT_ANALYTICS_VIEW not in access_perms:
             await _deny_permission(PERM_BOT_ANALYTICS_VIEW)
             return
         if action in ("radar_tier", "whales_min", "donor_refresh", "loyalty_days") and PERM_BOT_RADAR_VIEW not in access_perms:
@@ -2455,6 +2674,27 @@ class TelegramBotService:
             await query.answer()
             period = val or "today"
             text, markup = await asyncio.to_thread(self._format_overview_view, period)
+        elif action == "chart_view":
+            await query.answer()
+            if not config.telegram_widget_charts:
+                return
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            period = parts[0] if parts and parts[0] else "24h"
+            metric = parts[1] if len(parts) > 1 and parts[1] else "eur"
+            try:
+                chart = await asyncio.to_thread(build_chart_widget, period, metric)
+                await self._update_chart_widget(
+                    context.bot,
+                    int(query.message.chat_id),
+                    int(query.message.message_id),
+                    chart,
+                    self._chart_keyboard(chart.period, chart.metric),
+                )
+            except Exception as exc:
+                self._log("ERROR", f"Chart-Update fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
         elif action == "radar_tier":
             await query.answer()
             tier = val or "all"
