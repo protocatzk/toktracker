@@ -169,6 +169,12 @@ class TestChartTimeline(unittest.TestCase):
             beta_data["totals"]["total_coins"],
         )
 
+        from shared.database import list_streamers_for_picker
+
+        names = {row["username"] for row in list_streamers_for_picker()}
+        self.assertIn("chart_alpha", names)
+        self.assertIn("chart_beta", names)
+
 
 class TestChartWidget(unittest.TestCase):
     def test_builds_valid_widget_for_all_periods(self):

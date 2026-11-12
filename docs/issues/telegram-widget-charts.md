@@ -68,7 +68,10 @@ Umgesetzt:
   - Widget-Versand über `bot.do_api_request("sendWidget", …)`, weil PTB 22.8
     die Bot-API-10.4-Methoden noch nicht kennt
   - sofortige Chat-Action (`upload_photo`) als Lade-Feedback
-  - Inline-Keyboard mit Zeitraum-, Metrik-, Refresh- und „ALLE STREAMER“-Buttons
+  - Inline-Keyboard mit Zeitraum-, Metrik-, Refresh-, „📺 STREAMER“- und
+    „🌐 ALLE“-Buttons
+  - paginierter Streamer-Picker (8 Streamer pro Seite, ◀️/▶️, Abbrechen);
+    Auswahl sendet den Streamer-Chart und räumt Picker + alten Chart auf
   - Callback `chart_view:<period>:<metric>:<refresh>` sendet ein neues Widget
     und löscht das alte (Widget-HTML ist unveränderlich; `chat_data` wird nicht
     benötigt)
@@ -94,7 +97,9 @@ Umgesetzt:
 
 - `/chart` funktioniert im Privatchat und zeigt 24h/7d/30d/heute.
 - `/chart @streamer` filtert die Zeitreihe auf einen Streamer; ein
-  „ALLE STREAMER“-Button führt zurück zur Gesamtansicht.
+  „🌐 ALLE“-Button führt zurück zur Gesamtansicht.
+- Der „📺 STREAMER“-Button öffnet einen paginierten Picker (8 pro Seite);
+  Auswahl und Abbruch funktionieren ohne Chat-Müll (Picker wird gelöscht).
 - Periode und Metrik lassen sich über Buttons umschalten (neues Widget,
   altes wird entfernt).
 - Das Chart ist auch ohne funktionierendes Widget-JS sichtbar (SVG im HTML).
@@ -189,6 +194,12 @@ Alle Typen können denselben Renderer erweitern; der Chart-Typ steckt im
   → build_chart_widget() (Cache)
   → sendWidget(neues Chart) + deleteMessage(altes Chart)
 ```
+
+Zusätzlich öffnet der Button „📺 STREAMER“ den Picker über
+`chart_pick:<period>:<metric>`. Die Seitenwechsel laufen über
+`chart_page:<page>:<period>:<metric>:<chart_id>`, die Auswahl über
+`chart_stream:<streamer_id>:<period>:<metric>:<chart_id>`; danach werden
+Picker und altes Chart gelöscht.
 
 Die normale `get_analytics_data()`-Aggregation wird für Charts **nicht** mehr
 verwendet: Sie berechnet zusätzlich Top-Spender, Sessions, Streamer-Rankings

@@ -45,6 +45,7 @@ from database import (
     build_streamer_bot_report,
     check_telegram_user_access,
     get_all_streamers_summary,
+    list_streamers_for_picker,
     get_dashboard_overview,
     get_db,
     get_donor_details,
@@ -399,7 +400,7 @@ class TelegramBotService:
             self._app.add_handler(
                 CallbackQueryHandler(
                     self._on_interactive_callback,
-                    pattern=r"^(overview_period|chart_view|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
+                    pattern=r"^(overview_period|chart_view|chart_pick|chart_page|chart_stream|chart_cancel|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
                 )
             )
 
@@ -473,7 +474,7 @@ class TelegramBotService:
         commands = [
             BotCommand("start", "🏠 Hauptmenü & Befehlsübersicht öffnen"),
             BotCommand("overview", "📊 Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
-            BotCommand("chart", "📈 Einnahmen-Chart als Widget (global oder @streamer)"),
+            BotCommand("chart", "📈 Einnahmen-Chart (global, @streamer oder Picker)"),
             BotCommand("radar", "🎯 Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
             BotCommand("whales", "🐋 Live-Stream der neuesten Großspenden"),
             BotCommand("donor", "👤 Spender-Dossier, Stammkanal & VIP (<username>)"),
@@ -1374,7 +1375,7 @@ class TelegramBotService:
             sections.append(
                 bf.eyebrow("📊 02 / STATISTIK") + "\n"
                 "▪ 📊 <code>/overview [heute|24h|7d|30d|all]</code> — Finanz-Dashboard\n"
-                "▪ 📈 <code>/chart [@streamer] [24h|7d|30d] [eur|coins]</code> — Chart (Privatchat)\n"
+                "▪ 📈 <code>/chart [@streamer] [24h|7d|30d] [eur|coins]</code> — Chart (Privatchat, Picker via 📺)\n"
                 "▪ 📋 <code>/report [stunden]</code> — Gesamtbericht aller Streamer\n"
                 "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
                 "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
@@ -1814,16 +1815,99 @@ class TelegramBotService:
             InlineKeyboardButton("🔄", callback_data=f"chart_view:{sid}:{period}:{metric}:1"),
         ]
         rows = [period_buttons, metric_buttons]
-        if sid:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        "🌐 ALLE STREAMER",
-                        callback_data=f"chart_view:0:{period}:{metric}:0",
-                    )
-                ]
+        picker_row = [
+            InlineKeyboardButton(
+                "📺 STREAMER",
+                callback_data=f"chart_pick:{period}:{metric}",
             )
+        ]
+        if sid:
+            picker_row.append(
+                InlineKeyboardButton(
+                    "🌐 ALLE",
+                    callback_data=f"chart_view:0:{period}:{metric}:0",
+                )
+            )
+        rows.append(picker_row)
         return InlineKeyboardMarkup(rows)
+
+    def _format_chart_picker(
+        self,
+        period: str,
+        metric: str,
+        page: int = 0,
+        chart_message_id: int = 0,
+    ) -> Tuple[str, InlineKeyboardMarkup]:
+        streamers = list_streamers_for_picker()
+        page_size = 8
+        total_pages = max(1, (len(streamers) + page_size - 1) // page_size)
+        page = max(0, min(int(page), total_pages - 1))
+        start = page * page_size
+        visible = streamers[start : start + page_size]
+
+        period_label = {
+            "today": "HEUTE",
+            "24h": "24 H",
+            "7d": "7 TAGE",
+            "30d": "30 TAGE",
+        }.get(period, period.upper())
+        metric_label = "NETTO (EUR)" if metric == "eur" else "COINS"
+
+        text = "\n".join(
+            [
+                bf.header(3, "📺 STREAMER"),
+                "<b>CHART NACH STREAMER</b>",
+                bf.kv_table(
+                    [
+                        ("ZEITRAUM", period_label),
+                        ("METRIK", metric_label),
+                        ("STREAMER", str(len(streamers))),
+                        ("SEITE", f"{page + 1}/{total_pages}"),
+                    ]
+                ),
+                "<i>Wähle einen Streamer für die grafische Ansicht.</i>",
+            ]
+        )
+
+        buttons: List[List[InlineKeyboardButton]] = []
+        row: List[InlineKeyboardButton] = []
+        for streamer in visible:
+            sid = int(streamer.get("id") or 0)
+            username = str(streamer.get("username") or "").strip()
+            label = ("🟢 " if streamer.get("is_live") else "") + f"@{username}"
+            if len(label) > 30:
+                label = label[:29] + "…"
+            row.append(
+                InlineKeyboardButton(
+                    label,
+                    callback_data=f"chart_stream:{sid}:{period}:{metric}:{chart_message_id}",
+                )
+            )
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+
+        nav: List[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(
+                    "◀️",
+                    callback_data=f"chart_page:{page - 1}:{period}:{metric}:{chart_message_id}",
+                )
+            )
+        if page < total_pages - 1:
+            nav.append(
+                InlineKeyboardButton(
+                    "▶️",
+                    callback_data=f"chart_page:{page + 1}:{period}:{metric}:{chart_message_id}",
+                )
+            )
+        if nav:
+            buttons.append(nav)
+        buttons.append([InlineKeyboardButton("✖️ ABBRECHEN", callback_data="chart_cancel:0")])
+        return text, InlineKeyboardMarkup(buttons)
 
     def _format_chart_summary(self, chart: Any, note: str = "") -> str:
         metric_value = (
@@ -2715,7 +2799,15 @@ class TelegramBotService:
         text = None
         markup = None
 
-        if action in ("overview_period", "overview_streamer", "chart_view") and PERM_BOT_ANALYTICS_VIEW not in access_perms:
+        if action in (
+            "overview_period",
+            "overview_streamer",
+            "chart_view",
+            "chart_pick",
+            "chart_page",
+            "chart_stream",
+            "chart_cancel",
+        ) and PERM_BOT_ANALYTICS_VIEW not in access_perms:
             await _deny_permission(PERM_BOT_ANALYTICS_VIEW)
             return
         if action in ("radar_tier", "whales_min", "donor_refresh", "loyalty_days") and PERM_BOT_RADAR_VIEW not in access_perms:
@@ -2779,6 +2871,136 @@ class TelegramBotService:
                 )
             except Exception as exc:
                 self._log("ERROR", f"Chart-Update fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
+        elif action == "chart_pick":
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            period = parts[0] if parts and parts[0] else "24h"
+            metric = parts[1] if len(parts) > 1 and parts[1] else "eur"
+            chart_message_id = int(query.message.message_id)
+            try:
+                picker_text, picker_markup = await asyncio.to_thread(
+                    self._format_chart_picker,
+                    period,
+                    metric,
+                    0,
+                    chart_message_id,
+                )
+                await context.bot.send_message(
+                    chat_id=int(query.message.chat_id),
+                    text=picker_text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=picker_markup,
+                    disable_web_page_preview=True,
+                )
+            except Exception as exc:
+                self._log("ERROR", f"Streamer-Picker fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
+        elif action == "chart_page":
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            try:
+                page = int(parts[0]) if parts and parts[0] else 0
+            except ValueError:
+                page = 0
+            period = parts[1] if len(parts) > 1 and parts[1] else "24h"
+            metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
+            chart_message_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+            try:
+                picker_text, picker_markup = await asyncio.to_thread(
+                    self._format_chart_picker,
+                    period,
+                    metric,
+                    page,
+                    chart_message_id,
+                )
+                await query.edit_message_text(
+                    text=picker_text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=picker_markup,
+                    disable_web_page_preview=True,
+                )
+            except Exception as exc:
+                if "not modified" not in str(exc).lower():
+                    self._log("ERROR", f"Streamer-Picker-Seite fehlgeschlagen: {exc}")
+            return
+        elif action == "chart_stream":
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            try:
+                streamer_id = int(parts[0]) if parts and parts[0].isdigit() else 0
+            except ValueError:
+                streamer_id = 0
+            period = parts[1] if len(parts) > 1 and parts[1] else "24h"
+            metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
+            chart_message_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+            streamer_row = await asyncio.to_thread(
+                get_streamer_by_id_or_username, streamer_id
+            )
+            if not streamer_row:
+                try:
+                    await query.answer(
+                        "Streamer nicht gefunden. Bitte /streamers prüfen.",
+                        show_alert=True,
+                    )
+                except Exception:
+                    pass
+                return
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            streamer_name = str(streamer_row.get("username") or "")
+            try:
+                chart = await asyncio.to_thread(
+                    build_chart_widget,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    False,
+                )
+                await self._replace_chart_widget(
+                    context.bot,
+                    int(query.message.chat_id),
+                    chart_message_id,
+                    chart,
+                    self._chart_keyboard(chart.period, chart.metric, chart.streamer_id),
+                )
+                try:
+                    await context.bot.delete_message(
+                        chat_id=int(query.message.chat_id),
+                        message_id=int(query.message.message_id),
+                    )
+                except Exception as exc:
+                    self._log("DEBUG", f"Streamer-Picker konnte nicht gelöscht werden: {exc}")
+            except Exception as exc:
+                self._log("ERROR", f"Streamer-Chart fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
+        elif action == "chart_cancel":
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            if query.message:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=int(query.message.chat_id),
+                        message_id=int(query.message.message_id),
+                    )
+                except Exception as exc:
+                    self._log("DEBUG", f"Streamer-Picker konnte nicht geschlossen werden: {exc}")
             return
         elif action == "radar_tier":
             await query.answer()
