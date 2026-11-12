@@ -92,6 +92,8 @@ class ChartWidget:
     total: float
     peak: float
     points: int
+    streamer_id: Optional[int] = None
+    streamer_name: str = ""
     height: int = WIDGET_HEIGHT
 
     @property
@@ -192,26 +194,37 @@ def _render_ticks(labels: Sequence[str]) -> str:
 
 
 def _load_timeline(
-    period: str, force_refresh: bool = False
+    period: str,
+    streamer_id: Optional[int] = None,
+    force_refresh: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     # Lazy import: haelt das Modul unabhaengig von der DB-Fassade und
     # vermeidet Zyklen beim App-Import.
     from database import get_chart_timeline
 
-    data = get_chart_timeline(period=period, force_refresh=force_refresh)
+    data = get_chart_timeline(
+        period=period,
+        streamer_id=streamer_id,
+        force_refresh=force_refresh,
+    )
     timeline = data.get("timeline") or []
     totals = data.get("totals") or {}
     return list(timeline), dict(totals)
 
 
 def build_chart_widget(
-    period: str = "24h", metric: str = "eur", force_refresh: bool = False
+    period: str = "24h",
+    metric: str = "eur",
+    streamer_id: Optional[int] = None,
+    streamer_name: str = "",
+    force_refresh: bool = False,
 ) -> ChartWidget:
     """Lädt die leichte Chart-Zeitreihe und rendert das Widget serverseitig."""
     norm_period = normalize_period(period)
     norm_metric = normalize_metric(metric)
+    clean_streamer = str(streamer_name or "").strip().lstrip("@")[:32]
 
-    timeline, totals = _load_timeline(norm_period, force_refresh)
+    timeline, totals = _load_timeline(norm_period, streamer_id, force_refresh)
     metric_key = "coins" if norm_metric == "coins" else "eur_net"
     total_key = "total_coins" if norm_metric == "coins" else "eur_net"
 
@@ -244,11 +257,16 @@ def build_chart_widget(
     )
     info_text = f"PEAK {peak_text} · {len(values)} PUNKTE" if values else "Keine Daten im Zeitraum."
 
+    if clean_streamer:
+        title_text = f"@{clean_streamer} · {period_label} · {metric_label}"
+    else:
+        title_text = f"{period_label} · {metric_label}"
+
     html_source = (
         "<!doctype html><html><head><style>"
         + _CSS
         + "</style></head><body>"
-        + f'<div class="tt">{html.escape(period_label)} · {html.escape(metric_label)}</div>'
+        + f'<div class="tt">{html.escape(title_text)}</div>'
         + f'<div class="vv">{html.escape(value_text)}</div>'
         + f'<div class="ii" id="info">{html.escape(info_text)}</div>'
         + svg
@@ -258,10 +276,16 @@ def build_chart_widget(
     )
     ensure_widget_limits(html_source)
 
-    caption = (
-        f"📈 TT-INTELLIGENCE · {period_label} · {metric_label}\n"
-        f"{value_text} · Peak {peak_text}"
-    )
+    if clean_streamer:
+        caption = (
+            f"📈 TT-INTELLIGENCE · @{clean_streamer}\n"
+            f"{period_label} · {metric_label} · {value_text} · Peak {peak_text}"
+        )
+    else:
+        caption = (
+            f"📈 TT-INTELLIGENCE · {period_label} · {metric_label}\n"
+            f"{value_text} · Peak {peak_text}"
+        )
     return ChartWidget(
         html=html_source,
         caption=caption,
@@ -270,4 +294,6 @@ def build_chart_widget(
         total=total,
         peak=peak,
         points=len(values),
+        streamer_id=streamer_id,
+        streamer_name=clean_streamer,
     )

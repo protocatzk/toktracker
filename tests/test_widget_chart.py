@@ -115,11 +115,19 @@ class TestFormatting(unittest.TestCase):
         self.assertEqual(wc._tick_indices(24), [0, 8, 15, 23])
 
 
-def _build(points: int = 24, period: str = "24h", metric: str = "eur"):
+def _build(
+    points: int = 24,
+    period: str = "24h",
+    metric: str = "eur",
+    streamer_id: int | None = None,
+    streamer_name: str = "",
+):
     timeline = _fake_timeline(points)
     totals = {"eur_net": 1234.56, "total_coins": 987654}
     with patch.object(wc, "_load_timeline", return_value=(timeline, totals)):
-        return wc.build_chart_widget(period, metric)
+        return wc.build_chart_widget(
+            period, metric, streamer_id, streamer_name
+        )
 
 
 class TestChartTimeline(unittest.TestCase):
@@ -135,6 +143,31 @@ class TestChartTimeline(unittest.TestCase):
             self.assertIn("label", row)
             self.assertIn("eur_net", row)
             self.assertIn("coins", row)
+
+    def test_streamer_filter(self):
+        from datetime import datetime
+
+        from shared.database import (
+            get_chart_timeline,
+            record_gift_event,
+            upsert_streamer,
+        )
+
+        alpha = upsert_streamer("chart_alpha")
+        beta = upsert_streamer("chart_beta")
+        now = datetime.now().isoformat(timespec="seconds")
+        record_gift_event(alpha["id"], "fan", "Rose", 1, repeat_count=10, created_at=now)
+        record_gift_event(beta["id"], "fan", "Rose", 1, repeat_count=5, created_at=now)
+
+        alpha_data = get_chart_timeline("24h", streamer_id=alpha["id"], force_refresh=True)
+        beta_data = get_chart_timeline("24h", streamer_id=beta["id"], force_refresh=True)
+        self.assertEqual(alpha_data["streamer_id"], alpha["id"])
+        self.assertGreaterEqual(alpha_data["totals"]["total_coins"], 10)
+        self.assertGreaterEqual(beta_data["totals"]["total_coins"], 5)
+        self.assertNotEqual(
+            alpha_data["totals"]["total_coins"],
+            beta_data["totals"]["total_coins"],
+        )
 
 
 class TestChartWidget(unittest.TestCase):
@@ -160,10 +193,17 @@ class TestChartWidget(unittest.TestCase):
         self.assertAlmostEqual(chart.total, 987654.0)
         self.assertIn("Coins", chart.caption)
 
+    def test_streamer_title_and_caption(self):
+        chart = _build(streamer_id=42, streamer_name="alpha")
+        self.assertEqual(chart.streamer_id, 42)
+        self.assertEqual(chart.streamer_name, "alpha")
+        self.assertIn("@alpha", chart.html)
+        self.assertIn("@alpha", chart.caption)
+
     def test_force_refresh_is_forwarded(self):
         with patch.object(wc, "_load_timeline", return_value=([], {})) as loader:
-            wc.build_chart_widget("7d", "eur", True)
-        loader.assert_called_once_with("7d", True)
+            wc.build_chart_widget("7d", "eur", streamer_id=42, force_refresh=True)
+        loader.assert_called_once_with("7d", 42, True)
 
     def test_period_and_metric_normalization(self):
         self.assertEqual(wc.normalize_period("Woche"), "7d")

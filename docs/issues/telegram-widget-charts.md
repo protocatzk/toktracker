@@ -57,16 +57,18 @@ Umgesetzt:
   - Größenprüfung gegen 32 KB / 4 KB (`ensure_widget_limits`)
 - `shared/db/analytics.py`
   - neue leichte `get_chart_timeline()`-Query (nur `gift_events`) mit
-    Kurzzeit-Cache: 30 s für Today/24h, 2–5 Minuten für 7d/30d
+    optionalem Streamer-Filter und Kurzzeit-Cache: 30 s für Today/24h,
+    2–5 Minuten für 7d/30d
   - Cache wird bei Revenue-/Migrationsänderungen über
     `invalidate_overview_cache()` mit geleert
 - `telegram_service.py`
-  - neuer Befehl `/chart [today|24h|7d|30d] [eur|coins]` (Aliase: `charts`,
-    `graph`, `diagramm`)
+  - neuer Befehl `/chart [@streamer] [today|24h|7d|30d] [eur|coins]`
+    (Aliase: `charts`, `graph`, `diagramm`); ohne Streamer global,
+    mit `@username` auf einen Streamer gefiltert
   - Widget-Versand über `bot.do_api_request("sendWidget", …)`, weil PTB 22.8
     die Bot-API-10.4-Methoden noch nicht kennt
   - sofortige Chat-Action (`upload_photo`) als Lade-Feedback
-  - Inline-Keyboard mit Zeitraum-, Metrik- und Refresh-Buttons
+  - Inline-Keyboard mit Zeitraum-, Metrik-, Refresh- und „ALLE STREAMER“-Buttons
   - Callback `chart_view:<period>:<metric>:<refresh>` sendet ein neues Widget
     und löscht das alte (Widget-HTML ist unveränderlich; `chat_data` wird nicht
     benötigt)
@@ -91,6 +93,8 @@ Umgesetzt:
 **Akzeptanzkriterien (erfüllt):**
 
 - `/chart` funktioniert im Privatchat und zeigt 24h/7d/30d/heute.
+- `/chart @streamer` filtert die Zeitreihe auf einen Streamer; ein
+  „ALLE STREAMER“-Button führt zurück zur Gesamtansicht.
 - Periode und Metrik lassen sich über Buttons umschalten (neues Widget,
   altes wird entfernt).
 - Das Chart ist auch ohne funktionierendes Widget-JS sichtbar (SVG im HTML).
@@ -176,12 +180,12 @@ Alle Typen können denselben Renderer erweitern; der Chart-Typ steckt im
 ### Datenfluss Phase A
 
 ```text
-/chart 7d coins
-  → get_chart_timeline(period="7d")   # leicht, gecacht (2–5 min)
+/chart @streamer 7d coins
+  → get_chart_timeline(period="7d", streamer_id=…)   # leicht, gecacht
   → timeline (EUR net / Coins) + totals
   → serverseitiges SVG + Labels
   → sendWidget(html, caption, height, reply_markup)
-  → Callback chart_view:30d:eur:0
+  → Callback chart_view:<streamer_id>:30d:eur:0
   → build_chart_widget() (Cache)
   → sendWidget(neues Chart) + deleteMessage(altes Chart)
 ```

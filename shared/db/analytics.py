@@ -1156,28 +1156,39 @@ def build_streamer_bot_report(
     }
 
 
-def get_chart_timeline(period: str = "24h", force_refresh: bool = False) -> Dict[str, Any]:
+def get_chart_timeline(
+    period: str = "24h",
+    streamer_id: Optional[int] = None,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
     """
     Leichtgewichtige Zeitreihe nur für Bot-Charts.
 
     Anders als ``get_analytics_data`` aggregiert diese Funktion ausschließlich
     ``gift_events`` und liefert Summen + Buckets in unter einer Sekunde.
-    Ergebnisse werden pro Zeitraum kurz gecacht (30 s für Today/24h,
-    2-5 Minuten für 7d/30d).
+    Optional lässt sich auf einen Streamer filtern. Ergebnisse werden pro
+    Zeitraum/Streamer kurz gecacht (30 s für Today/24h, 2-5 Minuten für 7d/30d).
     """
     norm = period if period in ("today", "24h", "7d", "30d") else "24h"
+    sid = int(streamer_id) if streamer_id else None
+    cache_key = f"{norm}:{sid or 0}"
     ttl = _CHART_CACHE_TTL.get(norm, 60.0)
     now = time.monotonic()
 
     if not force_refresh:
         with _chart_cache_lock:
-            cached = _chart_cache.get(norm)
+            cached = _chart_cache.get(cache_key)
             if cached and (now - cached[0]) < ttl:
                 return dict(cached[1])
 
     cutoff = _get_period_cutoff(norm)
     hourly = norm in ("today", "24h")
     substr_len = 13 if hourly else 10
+    where_sql = "created_at >= ?"
+    params: List[Any] = [cutoff]
+    if sid is not None:
+        where_sql += " AND streamer_id = ?"
+        params.append(sid)
 
     with get_db() as conn:
         rows = conn.execute(
@@ -1188,22 +1199,22 @@ def get_chart_timeline(period: str = "24h", force_refresh: bool = False) -> Dict
                 COALESCE(SUM(total_coins), 0) AS coins_sum,
                 COUNT(id) AS events_count
             FROM gift_events
-            WHERE created_at >= ?
+            WHERE {where_sql}
             GROUP BY SUBSTR(created_at, 1, {substr_len})
             ORDER BY bucket ASC
             """,
-            (cutoff,),
+            tuple(params),
         ).fetchall()
         total_row = conn.execute(
-            """
+            f"""
             SELECT
                 COALESCE(SUM(eur_net), 0) AS eur_net_sum,
                 COALESCE(SUM(total_coins), 0) AS coins_sum,
                 COUNT(id) AS events_count
             FROM gift_events
-            WHERE created_at >= ?
+            WHERE {where_sql}
             """,
-            (cutoff,),
+            tuple(params),
         ).fetchone()
 
     timeline: List[Dict[str, Any]] = []
@@ -1227,6 +1238,7 @@ def get_chart_timeline(period: str = "24h", force_refresh: bool = False) -> Dict
 
     result: Dict[str, Any] = {
         "period": norm,
+        "streamer_id": sid,
         "timeline": timeline,
         "totals": {
             "eur_net": round(float(total_row["eur_net_sum"] or 0.0), 2),
@@ -1235,5 +1247,5 @@ def get_chart_timeline(period: str = "24h", force_refresh: bool = False) -> Dict
         },
     }
     with _chart_cache_lock:
-        _chart_cache[norm] = (time.monotonic(), result)
+        _chart_cache[cache_key] = (time.monotonic(), result)
     return dict(result)
