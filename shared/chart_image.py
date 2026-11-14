@@ -113,18 +113,27 @@ def _render_png(series: ChartSeries) -> bytes:
     font_big = _font(False, 88, 700)
     font_muted = _font(False, 26, 500)
     font_axis = _font(False, 28, 500)
+    font_brand = _font(True, 30, 700)
 
     pad_x = 32 * scale
-    draw.text((pad_x, 18 * scale), title, font=font_title, fill=_MUTED)
-    draw.text((pad_x, 36 * scale), total_text, font=font_big, fill=_TEXT)
+    # Grüner Brand-Stripe am linken Rand + Wortmarke.
+    draw.rectangle((0, 0, 4 * scale, height), fill=_ACCENT)
+    draw.text(
+        (pad_x, 14 * scale),
+        "// TT-INTELLIGENCE",
+        font=font_brand,
+        fill=_ACCENT,
+    )
+    draw.text((pad_x, 46 * scale), title, font=font_title, fill=_MUTED)
+    draw.text((pad_x, 68 * scale), total_text, font=font_big, fill=_TEXT)
     if count:
         info = f"PEAK {peak_text} · {count} PUNKTE"
     else:
         info = "Keine Daten im Zeitraum."
-    draw.text((pad_x, 96 * scale), info, font=font_muted, fill=_MUTED)
+    draw.text((pad_x, 126 * scale), info, font=font_muted, fill=_MUTED)
 
     x0, x1 = 64 * scale, width - 32 * scale
-    y0, y1 = 138 * scale, 338 * scale
+    y0, y1 = 166 * scale, 350 * scale
 
     for step in range(3):
         y = y0 + (y1 - y0) * step / 2
@@ -176,7 +185,7 @@ def _render_png(series: ChartSeries) -> bytes:
                 tx = px - text_width / 2
             if tx < last_right + 8 * scale:
                 continue
-            draw.text((tx, 356 * scale), label, font=font_axis, fill=_MUTED)
+            draw.text((tx, 368 * scale), label, font=font_axis, fill=_MUTED)
             last_right = tx + text_width
 
     resample = getattr(Image, "Resampling", Image).LANCZOS

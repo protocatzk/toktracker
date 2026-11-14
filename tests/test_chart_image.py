@@ -39,8 +39,10 @@ class TestChartImageRendering(unittest.TestCase):
         image = Image.open(BytesIO(png))
         self.assertEqual(image.size, (ci.IMAGE_WIDTH, ci.IMAGE_HEIGHT))
         self.assertEqual(image.mode, "RGB")
-        self.assertEqual(image.getpixel((0, 0)), (0, 0, 0))
         self.assertEqual(image.getpixel((ci.IMAGE_WIDTH - 1, ci.IMAGE_HEIGHT - 1)), (0, 0, 0))
+        stripe = image.getpixel((2, ci.IMAGE_HEIGHT // 2))
+        self.assertGreater(stripe[1], stripe[0])
+        self.assertGreater(stripe[1], 100)
         self.assertLess(len(png), 250_000)
 
     def test_empty_series_still_renders(self):

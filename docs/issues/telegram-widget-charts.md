@@ -92,6 +92,8 @@ Umgesetzt:
   - **eckige schwarze Karte** mit weißen Kennzahlen und grüner Chart-Linie;
     kein Alpha, keine runden Ecken – dadurch unabhängig von der
     Telegram-Kompression identisch
+  - **TT-INTELLIGENCE-Branding**: grüner Brand-Stripe am linken Rand,
+    `// TT-INTELLIGENCE`-Wortmarke in JetBrains Mono und grüner Akzent
   - Inter/JetBrains-Mono-TTFs unter `static/fonts/` (vollständige OFL-Fonts,
     nicht die unvollständigen WOFF2-Subsets)
   - deutsch formatierte Summe/Peak, Zeitlabels, Fläche/Linie/letzter Punkt
