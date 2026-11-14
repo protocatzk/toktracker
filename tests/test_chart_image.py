@@ -33,14 +33,14 @@ def _series(points: int = 24, metric: str = "eur", streamer: str = "") -> ChartS
 
 
 class TestChartImageRendering(unittest.TestCase):
-    def test_renders_rgba_png_with_scrim(self):
+    def test_renders_square_black_card(self):
         png = ci._render_png(_series())
         self.assertTrue(png.startswith(b"\x89PNG"))
         image = Image.open(BytesIO(png))
         self.assertEqual(image.size, (ci.IMAGE_WIDTH, ci.IMAGE_HEIGHT))
-        self.assertEqual(image.mode, "RGBA")
-        self.assertEqual(image.getpixel((0, 0))[3], 0)
-        self.assertGreater(image.getpixel((ci.IMAGE_WIDTH // 2, ci.IMAGE_HEIGHT // 2))[3], 100)
+        self.assertEqual(image.mode, "RGB")
+        self.assertEqual(image.getpixel((0, 0)), (0, 0, 0))
+        self.assertEqual(image.getpixel((ci.IMAGE_WIDTH - 1, ci.IMAGE_HEIGHT - 1)), (0, 0, 0))
         self.assertLess(len(png), 250_000)
 
     def test_empty_series_still_renders(self):

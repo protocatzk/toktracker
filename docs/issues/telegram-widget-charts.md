@@ -89,9 +89,9 @@ Umgesetzt:
 - `shared/chart_image.py` (Default-Renderer)
   - Pillow-Rendering als **800×400-PNG**, intern 2× gerendert (scharfe
     Linien/Text) und per LANCZOS herunterskaliert
-  - **Scrim-Karte**: halbtransparentes dunkles Panel, außen transparent.
-    Bei erhaltenem Alpha verschmilzt sie mit dem Chat, bei Telegram-Flattening
-    bleibt eine dunkle Karte. Weiße Schrift bleibt in Light/Dark lesbar.
+  - **eckige schwarze Karte** mit weißen Kennzahlen und grüner Chart-Linie;
+    kein Alpha, keine runden Ecken – dadurch unabhängig von der
+    Telegram-Kompression identisch
   - Inter/JetBrains-Mono-TTFs unter `static/fonts/` (vollständige OFL-Fonts,
     nicht die unvollständigen WOFF2-Subsets)
   - deutsch formatierte Summe/Peak, Zeitlabels, Fläche/Linie/letzter Punkt
@@ -107,7 +107,7 @@ Umgesetzt:
 - `requirements.txt`
   - `Pillow==13.0.0`
 - `tests/test_chart_image.py`
-  - RGBA/Scrim, Dimensionen, Größe, Cache-Treffer, Streamer-Caption
+  - RGB/schwarze Karte, Dimensionen, Größe, Cache-Treffer, Streamer-Caption
 
 **Bewusst nicht enthalten:**
 
@@ -116,15 +116,16 @@ Umgesetzt:
   der Bild-Renderer funktioniert dagegen in Gruppen
 - kein Chart im automatischen 24h-Report (Zielchat ist in Produktion meist eine Gruppe)
 - keine Balkendiagramme / Radar-Charts
-- kein Theme-Schalter (Dark/Light) im Bild-Renderer; der Scrim funktioniert in beiden
+- kein Theme-Schalter (Dark/Light) im Bild-Renderer; die schwarze Karte
+  funktioniert unabhängig vom Chat-Theme
 - kein `chat_data`-State und kein `editMessageWidgetData` im Phase-A-Flow
 
 **Akzeptanzkriterien (erfüllt):**
 
 - `/chart` funktioniert im Privatchat und (als Bild) auch in Gruppen und
   zeigt 24h/7d/30d/heute.
-- Das Bild ist auch ohne Widget-Unterstützung sichtbar; der Scrim bleibt in
-  Light und Dark lesbar.
+- Das Bild ist auch ohne Widget-Unterstützung sichtbar; die schwarze Karte
+  bleibt unabhängig vom Chat-Theme lesbar.
 - Ein unveränderter Chart wird nicht neu gerendert oder hochgeladen
   (PNG-Cache + Telegram-`file_id`).
 - `/chart @streamer` filtert die Zeitreihe auf einen Streamer; ein

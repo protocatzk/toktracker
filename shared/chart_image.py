@@ -1,10 +1,9 @@
 """
 Serverseitiges Rendering von Chart-Bildern für Telegram.
 
-Die Karte ist bewusst als halbtransparentes „Scrim“ angelegt: Sie verschmilzt
-mit dem Chat-Hintergrund, wenn der Client Alpha unterstützt, und fällt bei
-Telegram-Flattening auf eine normale dunkle Karte zurück. Schrift bleibt weiß
-und damit in Light- wie Dark-Theme lesbar.
+Die Karte ist eine komplett eckige, schwarze Fläche mit weißen Kennzahlen und
+grüner Chart-Linie. Kein Alpha, keine runden Ecken: Das Bild bleibt bei
+Telegram unabhängig von der Kompression identisch.
 
 Das Rendering ist CPU-only (Pillow) und wird über einen LRU-Cache sowie einen
 Telegram-file_id-Cache im Bot extrem günstig gehalten.
@@ -32,13 +31,13 @@ _SUPERSAMPLE = 2
 _CACHE_TTL_SECONDS = 600.0
 _CACHE_MAX_ENTRIES = 96
 
-# Brand-Palette (dark industrial)
-_SCRIM = (16, 21, 28, 188)
+# Brand-Palette (eckige schwarze Karte)
+_BG = (0, 0, 0)
 _TEXT = (244, 248, 252)
 _MUTED = (157, 169, 183)
 _ACCENT = (63, 185, 80)
-_GRID = (255, 255, 255, 30)
-_AREA = (63, 185, 80, 38)
+_GRID = (36, 42, 50)
+_AREA = (20, 42, 25)
 
 _FONT_INTER = os.path.join(BASE_DIR, "static", "fonts", "inter-variable.ttf")
 _FONT_MONO = os.path.join(BASE_DIR, "static", "fonts", "jetbrains-mono-variable.ttf")
@@ -102,15 +101,8 @@ def _render_png(series: ChartSeries) -> bytes:
 
     scale = _SUPERSAMPLE
     width, height = IMAGE_WIDTH * scale, IMAGE_HEIGHT * scale
-    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image, "RGBA")
-
-    # Halbtransparente Karte; bei Alpha-Verlust bleibt eine dunkle Karte.
-    draw.rounded_rectangle(
-        (0, 0, width - 1, height - 1),
-        radius=20 * scale,
-        fill=_SCRIM,
-    )
+    image = Image.new("RGB", (width, height), _BG)
+    draw = ImageDraw.Draw(image)
 
     title = series.title_text
     total_text = series.total_text
