@@ -3,8 +3,9 @@ import html
 import logging
 import os
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timedelta
+from io import BytesIO
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 import httpx
@@ -18,6 +19,7 @@ try:
         BotCommandScopeDefault,
         InlineKeyboardButton,
         InlineKeyboardMarkup,
+        InputMediaPhoto,
         Update,
         WebAppInfo,
     )
@@ -37,6 +39,7 @@ except ImportError:
     ContextTypes = Any  # type: ignore
     InlineKeyboardButton = Any  # type: ignore
     InlineKeyboardMarkup = Any  # type: ignore
+    InputMediaPhoto = Any  # type: ignore
     WebAppInfo = Any  # type: ignore
 
 from config import BASE_DIR, config
@@ -71,6 +74,7 @@ from shared import bot_format as bf
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_format import BRAND as BOT_BRAND
 from shared.bus import get_bus
+from shared.chart_image import build_chart_image
 from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
@@ -292,6 +296,7 @@ class TelegramBotService:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._live_alert_subscribed: bool = False
         self._live_alert_lock: Optional[asyncio.Lock] = None
+        self._chart_file_ids: "OrderedDict[str, str]" = OrderedDict()
 
     def _log(self, level: str, msg: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -1375,7 +1380,7 @@ class TelegramBotService:
             sections.append(
                 bf.eyebrow("📊 02 / STATISTIK") + "\n"
                 "▪ 📊 <code>/overview [heute|24h|7d|30d|all]</code> — Finanz-Dashboard\n"
-                "▪ 📈 <code>/chart [@streamer] [24h|7d|30d] [eur|coins]</code> — Chart (Privatchat, Picker via 📺)\n"
+                "▪ 📈 <code>/chart [@streamer] [24h|7d|30d] [eur|coins]</code> — Chart (Picker via 📺)\n"
                 "▪ 📋 <code>/report [stunden]</code> — Gesamtbericht aller Streamer\n"
                 "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
                 "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
@@ -1787,6 +1792,116 @@ class TelegramBotService:
     # -----------------------------------------------------------------
     # EINNAHMEN-CHART ALS TELEGRAM-HTML-WIDGET (/chart)
     # -----------------------------------------------------------------
+    def _chart_file_id(self, digest: str) -> Optional[str]:
+        file_id = self._chart_file_ids.get(digest)
+        if file_id:
+            self._chart_file_ids.move_to_end(digest)
+        return file_id
+
+    def _remember_chart_file_id(self, digest: str, file_id: Optional[str]) -> None:
+        if not file_id:
+            return
+        self._chart_file_ids[digest] = file_id
+        self._chart_file_ids.move_to_end(digest)
+        while len(self._chart_file_ids) > 128:
+            self._chart_file_ids.popitem(last=False)
+
+    def _chart_bytes_io(self, image: Any) -> BytesIO:
+        buffer = BytesIO(image.png)
+        buffer.name = "chart.png"
+        return buffer
+
+    async def _send_chart_image(
+        self,
+        bot: Any,
+        chat_id: int,
+        image: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Any:
+        cached = self._chart_file_id(image.digest)
+        try:
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=cached or self._chart_bytes_io(image),
+                caption=image.caption,
+                reply_markup=keyboard,
+            )
+        except Exception:
+            if not cached:
+                raise
+            self._chart_file_ids.pop(image.digest, None)
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=self._chart_bytes_io(image),
+                caption=image.caption,
+                reply_markup=keyboard,
+            )
+        photos = getattr(message, "photo", None)
+        if photos:
+            self._remember_chart_file_id(image.digest, photos[-1].file_id)
+        return message
+
+    async def _edit_chart_image(
+        self,
+        bot: Any,
+        chat_id: int,
+        message_id: int,
+        image: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> bool:
+        cached = self._chart_file_id(image.digest)
+        sources: List[Tuple[str, Any]] = []
+        if cached:
+            sources.append(("file_id", cached))
+        sources.append(("bytes", None))
+
+        last_error: Optional[Exception] = None
+        for kind, value in sources:
+            media_source = value if kind == "file_id" else self._chart_bytes_io(image)
+            try:
+                result = await bot.edit_message_media(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    media=InputMediaPhoto(
+                        media=media_source,
+                        caption=image.caption,
+                    ),
+                    reply_markup=keyboard,
+                )
+                photos = getattr(result, "photo", None)
+                if photos:
+                    self._remember_chart_file_id(image.digest, photos[-1].file_id)
+                return True
+            except Exception as exc:
+                if "not modified" in str(exc).lower():
+                    return True
+                if kind == "file_id":
+                    self._chart_file_ids.pop(image.digest, None)
+                last_error = exc
+        if last_error:
+            self._log("DEBUG", f"Chart-Bild konnte nicht editiert werden: {last_error}")
+        return False
+
+    async def _replace_chart_image(
+        self,
+        bot: Any,
+        chat_id: int,
+        old_message_id: int,
+        image: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Any:
+        if old_message_id and await self._edit_chart_image(
+            bot, chat_id, old_message_id, image, keyboard
+        ):
+            return None
+        message = await self._send_chart_image(bot, chat_id, image, keyboard)
+        if old_message_id and message:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
+            except Exception as exc:
+                self._log("DEBUG", f"Altes Chart-Bild konnte nicht gelöscht werden: {exc}")
+        return message
+
     def _chart_keyboard(
         self, period: str, metric: str, streamer_id: Optional[int] = None
     ) -> InlineKeyboardMarkup:
@@ -2046,15 +2161,17 @@ class TelegramBotService:
 
         if not config.telegram_widget_charts:
             await update.effective_message.reply_text(
-                "<b>CHART-WIDGET DEAKTIVIERT</b>\n"
-                "Aktiviere <code>TELEGRAM_WIDGET_CHARTS=1</code>, um interaktive Charts zu nutzen.",
+                "<b>CHARTS DEAKTIVIERT</b>\n"
+                "Aktiviere <code>TELEGRAM_WIDGET_CHARTS=1</code>, um Charts zu nutzen.",
                 parse_mode=ParseMode.HTML,
             )
             return
 
+        use_image = config.telegram_chart_renderer == "image"
+
         # Widgets sind in Produktion ausschliesslich im Privatchat verfuegbar.
-        # In Gruppen/Channels liefern wir bewusst einen Text-Fallback.
-        if str(chat_type) != "private":
+        # Bilder (PNG) funktionieren dagegen in jedem Chat.
+        if not use_image and str(chat_type) != "private":
             try:
                 chart = await asyncio.to_thread(
                     build_chart_widget, period, metric, streamer_id, streamer_name
@@ -2084,24 +2201,44 @@ class TelegramBotService:
             except Exception:
                 pass
             started_at = time.perf_counter()
-            chart = await asyncio.to_thread(
-                build_chart_widget, period, metric, streamer_id, streamer_name
-            )
-            elapsed = time.perf_counter() - started_at
-            self._log(
-                "DEBUG",
-                f"Chart-Widget {period}/{metric} "
-                f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
-                f"geladen in {elapsed:.2f}s ({chart.points} Punkte).",
-            )
-            await self._send_chart_widget(
-                context.bot,
-                int(update.effective_chat.id),
-                chart,
-                self._chart_keyboard(period, metric, streamer_id),
-            )
+            keyboard = self._chart_keyboard(period, metric, streamer_id)
+            if use_image:
+                image = await asyncio.to_thread(
+                    build_chart_image, period, metric, streamer_id, streamer_name
+                )
+                elapsed = time.perf_counter() - started_at
+                self._log(
+                    "DEBUG",
+                    f"Chart-Bild {period}/{metric} "
+                    f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
+                    f"geladen in {elapsed:.2f}s "
+                    f"({image.points} Punkte, {len(image.png)} Bytes).",
+                )
+                await self._send_chart_image(
+                    context.bot,
+                    int(update.effective_chat.id),
+                    image,
+                    keyboard,
+                )
+            else:
+                chart = await asyncio.to_thread(
+                    build_chart_widget, period, metric, streamer_id, streamer_name
+                )
+                elapsed = time.perf_counter() - started_at
+                self._log(
+                    "DEBUG",
+                    f"Chart-Widget {period}/{metric} "
+                    f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
+                    f"geladen in {elapsed:.2f}s ({chart.points} Punkte).",
+                )
+                await self._send_chart_widget(
+                    context.bot,
+                    int(update.effective_chat.id),
+                    chart,
+                    keyboard,
+                )
         except Exception as exc:
-            self._log("ERROR", f"Chart-Widget fehlgeschlagen: {type(exc).__name__}: {exc}")
+            self._log("ERROR", f"Chart-Versand fehlgeschlagen: {type(exc).__name__}: {exc}")
             try:
                 text = await asyncio.to_thread(
                     self._build_chart_summary,
@@ -2109,7 +2246,7 @@ class TelegramBotService:
                     metric,
                     streamer_id,
                     streamer_name,
-                    "<i>Das Widget konnte nicht gesendet werden. "
+                    "<i>Das Chart konnte nicht gesendet werden. "
                     "Hier die Kennzahlen als Text.</i>",
                 )
             except Exception:
@@ -2854,21 +2991,39 @@ class TelegramBotService:
                 if streamer_row:
                     streamer_name = str(streamer_row.get("username") or "")
             try:
-                chart = await asyncio.to_thread(
-                    build_chart_widget,
-                    period,
-                    metric,
-                    streamer_id,
-                    streamer_name,
-                    force_refresh,
-                )
-                await self._replace_chart_widget(
-                    context.bot,
-                    int(query.message.chat_id),
-                    int(query.message.message_id),
-                    chart,
-                    self._chart_keyboard(chart.period, chart.metric, chart.streamer_id),
-                )
+                keyboard = self._chart_keyboard(period, metric, streamer_id)
+                if config.telegram_chart_renderer == "image":
+                    image = await asyncio.to_thread(
+                        build_chart_image,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        force_refresh,
+                    )
+                    await self._replace_chart_image(
+                        context.bot,
+                        int(query.message.chat_id),
+                        int(query.message.message_id),
+                        image,
+                        keyboard,
+                    )
+                else:
+                    chart = await asyncio.to_thread(
+                        build_chart_widget,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        force_refresh,
+                    )
+                    await self._replace_chart_widget(
+                        context.bot,
+                        int(query.message.chat_id),
+                        int(query.message.message_id),
+                        chart,
+                        keyboard,
+                    )
             except Exception as exc:
                 self._log("ERROR", f"Chart-Update fehlgeschlagen: {type(exc).__name__}: {exc}")
             return
@@ -2963,21 +3118,39 @@ class TelegramBotService:
                 pass
             streamer_name = str(streamer_row.get("username") or "")
             try:
-                chart = await asyncio.to_thread(
-                    build_chart_widget,
-                    period,
-                    metric,
-                    streamer_id,
-                    streamer_name,
-                    False,
-                )
-                await self._replace_chart_widget(
-                    context.bot,
-                    int(query.message.chat_id),
-                    chart_message_id,
-                    chart,
-                    self._chart_keyboard(chart.period, chart.metric, chart.streamer_id),
-                )
+                keyboard = self._chart_keyboard(period, metric, streamer_id)
+                if config.telegram_chart_renderer == "image":
+                    image = await asyncio.to_thread(
+                        build_chart_image,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        False,
+                    )
+                    await self._replace_chart_image(
+                        context.bot,
+                        int(query.message.chat_id),
+                        chart_message_id,
+                        image,
+                        keyboard,
+                    )
+                else:
+                    chart = await asyncio.to_thread(
+                        build_chart_widget,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        False,
+                    )
+                    await self._replace_chart_widget(
+                        context.bot,
+                        int(query.message.chat_id),
+                        chart_message_id,
+                        chart,
+                        keyboard,
+                    )
                 try:
                     await context.bot.delete_message(
                         chat_id=int(query.message.chat_id),

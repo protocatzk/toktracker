@@ -12,3 +12,4 @@ PyMySQL==1.2.3
 cryptography==50.0.2
 uvloop==0.23.0; sys_platform != "win32"
 redis==8.1.0
+Pillow==13.0.0

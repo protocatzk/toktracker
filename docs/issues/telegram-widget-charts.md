@@ -41,10 +41,11 @@ native Farben, Dark/Light, Tap-Interaktion und stille In-Place-Updates.
 
 ## Umsetzungsstand
 
-### Phase A – Privatchat-Chart (umgesetzt)
+### Phase A – Chart-Bild als Default (Widget als Rollback)
 
-**Ziel:** `/chart` sendet im Privatchat ein interaktives Einnahmen-Widget mit
-Zeitraum- und Metrik-Umschaltung; überall sonst ein sauberer Text-Fallback.
+**Ziel:** `/chart` sendet ein gerendertes PNG des Einnahmen-Charts; das
+Bot-API-10.4-Widget bleibt per Env-Flag als Rollback verfügbar. Zeitraum-,
+Metrik- und Streamerwechsel funktionieren in beiden Varianten.
 
 Umgesetzt:
 
@@ -80,22 +81,52 @@ Umgesetzt:
 - `shared/permissions.py`
   - `chart` → `bot.analytics.view` (keine neue Capability nötig)
 - `shared/config.py` + `.env.example`
-  - `TELEGRAM_WIDGET_CHARTS=1` (Default an, per Env abschaltbar)
+  - `TELEGRAM_WIDGET_CHARTS=1` (Master-Schalter für `/chart`)
+  - `TELEGRAM_CHART_RENDERER=image` (Default) bzw. `widget` als Rollback
 - `tests/test_widget_chart.py`
   - Größenbudgets, Offline-/Library-Freiheit, serverseitiges SVG,
     Theme-Nutzung, alle Zeiträume, leere Zeitreihe, Label-Escaping
+- `shared/chart_image.py` (Default-Renderer)
+  - Pillow-Rendering als **800×400-PNG**, intern 2× gerendert (scharfe
+    Linien/Text) und per LANCZOS herunterskaliert
+  - **Scrim-Karte**: halbtransparentes dunkles Panel, außen transparent.
+    Bei erhaltenem Alpha verschmilzt sie mit dem Chat, bei Telegram-Flattening
+    bleibt eine dunkle Karte. Weiße Schrift bleibt in Light/Dark lesbar.
+  - Inter/JetBrains-Mono-TTFs unter `static/fonts/` (vollständige OFL-Fonts,
+    nicht die unvollständigen WOFF2-Subsets)
+  - deutsch formatierte Summe/Peak, Zeitlabels, Fläche/Linie/letzter Punkt
+  - **LRU-Cache** für PNG-Bytes (Fingerprint aus Zeitraum, Metrik, Streamer,
+    Werten und Summen; max. 96 Einträge ≈ 5 MB)
+  - **Telegram-file_id-Cache** im Bot: nach dem ersten Upload wird die Datei-ID
+    für weitere Sends/Edits wiederverwendet, kein erneuter Upload
+- `telegram_service.py` (Bildpfad)
+  - `sendPhoto` statt `sendWidget`; Bilder funktionieren auch in Gruppen
+  - Perioden-/Metrik-/Streamerwechsel nutzt `editMessageMedia` in-place
+  - Picker-Auswahl editiert das Chart-Bild und löscht den Picker
+  - Fallback auf Text, wenn Rendering oder Telegram fehlschlägt
+- `requirements.txt`
+  - `Pillow==13.0.0`
+- `tests/test_chart_image.py`
+  - RGBA/Scrim, Dimensionen, Größe, Cache-Treffer, Streamer-Caption
 
 **Bewusst nicht enthalten:**
 
 - keine `allow_queries` / `widget_query`-Verarbeitung
-- kein Gruppen-/Inline-/Forward-Versand
+- Widget-Renderer bleibt auf den Privatchat beschränkt (Telegram-Rollout);
+  der Bild-Renderer funktioniert dagegen in Gruppen
 - kein Chart im automatischen 24h-Report (Zielchat ist in Produktion meist eine Gruppe)
 - keine Balkendiagramme / Radar-Charts
+- kein Theme-Schalter (Dark/Light) im Bild-Renderer; der Scrim funktioniert in beiden
 - kein `chat_data`-State und kein `editMessageWidgetData` im Phase-A-Flow
 
 **Akzeptanzkriterien (erfüllt):**
 
-- `/chart` funktioniert im Privatchat und zeigt 24h/7d/30d/heute.
+- `/chart` funktioniert im Privatchat und (als Bild) auch in Gruppen und
+  zeigt 24h/7d/30d/heute.
+- Das Bild ist auch ohne Widget-Unterstützung sichtbar; der Scrim bleibt in
+  Light und Dark lesbar.
+- Ein unveränderter Chart wird nicht neu gerendert oder hochgeladen
+  (PNG-Cache + Telegram-`file_id`).
 - `/chart @streamer` filtert die Zeitreihe auf einen Streamer; ein
   „🌐 ALLE“-Button führt zurück zur Gesamtansicht.
 - Der „📺 STREAMER“-Button öffnet einen paginierten Picker (8 pro Seite);
@@ -182,18 +213,22 @@ Alle Typen können denselben Renderer erweitern; der Chart-Typ steckt im
 - `Update.ALL_TYPES` enthält `widget_query` nicht. Für Phase A unkritisch, weil
   keine Queries genutzt werden. Für Phase B zwingend erweitern.
 
-### Datenfluss Phase A
+### Datenfluss Phase A (Default: Bild)
 
 ```text
 /chart @streamer 7d coins
   → get_chart_timeline(period="7d", streamer_id=…)   # leicht, gecacht
-  → timeline (EUR net / Coins) + totals
-  → serverseitiges SVG + Labels
-  → sendWidget(html, caption, height, reply_markup)
+  → load_chart_series() → ChartSeries
+  → build_chart_image(): PNG-Cache / Pillow-Render
+  → sendPhoto(photo=file_id|bytes, caption, reply_markup)
   → Callback chart_view:<streamer_id>:30d:eur:0
-  → build_chart_widget() (Cache)
-  → sendWidget(neues Chart) + deleteMessage(altes Chart)
+  → build_chart_image() (Cache)
+  → editMessageMedia(file_id|bytes) in-place
 ```
+
+Mit `TELEGRAM_CHART_RENDERER=widget` läuft derselbe Ablauf über
+`sendWidget` / `editMessageWidgetData`-Ersatz (neues Widget + Löschen des
+alten), wie zuvor.
 
 Zusätzlich öffnet der Button „📺 STREAMER“ den Picker über
 `chart_pick:<period>:<metric>`. Die Seitenwechsel laufen über
@@ -206,6 +241,14 @@ verwendet: Sie berechnet zusätzlich Top-Spender, Sessions, Streamer-Rankings
 und braucht auf Produktionsdaten 22 s (24h) bis 55 s (30d). Die neue
 `get_chart_timeline()` aggregiert nur `gift_events` und liegt bei 0,3–2 s
 (cold) bzw. ~0 s (Cache-Hit).
+
+### Bild-Caching
+
+1. **Daten:** `get_chart_timeline()` (30 s / 2–5 min TTL).
+2. **PNG:** LRU-Cache auf Inhalts-Fingerprint; 96 Bilder ≈ 5 MB. Kaltes
+   Rendering ~0,2 s, Cache-Hit ~0 ms.
+3. **Telegram:** `file_id` pro Bild-Digest; wiederholte Sends/Edits laden
+   nichts erneut hoch. Bei ungültiger ID automatischer Retry mit Bytes.
 
 ### Sicherheit & Datenschutz
 

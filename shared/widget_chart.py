@@ -212,14 +212,58 @@ def _load_timeline(
     return list(timeline), dict(totals)
 
 
-def build_chart_widget(
+@dataclass(frozen=True)
+class ChartSeries:
+    """Aufbereitete Chart-Daten, gemeinsam genutzt von Widget und Bild."""
+
+    period: str
+    metric: str
+    values: Tuple[float, ...]
+    labels: Tuple[str, ...]
+    total: float
+    peak: float
+    streamer_id: Optional[int] = None
+    streamer_name: str = ""
+
+    @property
+    def period_label(self) -> str:
+        return PERIOD_LABELS.get(self.period, self.period.upper())
+
+    @property
+    def metric_label(self) -> str:
+        return METRIC_LABELS.get(self.metric, self.metric.upper())
+
+    @property
+    def total_text(self) -> str:
+        return (
+            f"€ {format_eur(self.total)}"
+            if self.metric == "eur"
+            else f"{format_coins(self.total)} Coins"
+        )
+
+    @property
+    def peak_text(self) -> str:
+        return (
+            f"€ {format_eur(self.peak)}"
+            if self.metric == "eur"
+            else f"{format_coins(self.peak)} Coins"
+        )
+
+    @property
+    def title_text(self) -> str:
+        if self.streamer_name:
+            return f"@{self.streamer_name} · {self.period_label} · {self.metric_label}"
+        return f"{self.period_label} · {self.metric_label}"
+
+
+def load_chart_series(
     period: str = "24h",
     metric: str = "eur",
     streamer_id: Optional[int] = None,
     streamer_name: str = "",
     force_refresh: bool = False,
-) -> ChartWidget:
-    """Lädt die leichte Chart-Zeitreihe und rendert das Widget serverseitig."""
+) -> ChartSeries:
+    """Lädt und normalisiert die Zeitreihe für Widget und Bild."""
     norm_period = normalize_period(period)
     norm_metric = normalize_metric(metric)
     clean_streamer = str(streamer_name or "").strip().lstrip("@")[:32]
@@ -237,37 +281,61 @@ def build_chart_widget(
             values.append(0.0)
         labels.append(str(row.get("label") or "")[:12])
 
-    peak = max(values, default=0.0)
-    total = float(totals.get(total_key) or 0.0)
-
-    period_label = PERIOD_LABELS.get(norm_period, norm_period.upper())
-    metric_label = METRIC_LABELS.get(norm_metric, norm_metric.upper())
-    value_text = (
-        f"€ {format_eur(total)}" if norm_metric == "eur" else f"{format_coins(total)} Coins"
+    return ChartSeries(
+        period=norm_period,
+        metric=norm_metric,
+        values=tuple(values),
+        labels=tuple(labels),
+        total=float(totals.get(total_key) or 0.0),
+        peak=max(values, default=0.0),
+        streamer_id=streamer_id,
+        streamer_name=clean_streamer,
     )
-    peak_text = f"€ {format_eur(peak)}" if norm_metric == "eur" else f"{format_coins(peak)} Coins"
 
-    svg = _render_svg(values)
-    ticks = _render_ticks(labels)
-    labels_attr = html.escape("|".join(labels), quote=True)
+
+def chart_caption(series: ChartSeries) -> str:
+    if series.streamer_name:
+        return (
+            f"📈 TT-INTELLIGENCE · @{series.streamer_name}\n"
+            f"{series.period_label} · {series.metric_label} · "
+            f"{series.total_text} · Peak {series.peak_text}"
+        )
+    return (
+        f"📈 TT-INTELLIGENCE · {series.period_label} · {series.metric_label}\n"
+        f"{series.total_text} · Peak {series.peak_text}"
+    )
+
+
+def build_chart_widget(
+    period: str = "24h",
+    metric: str = "eur",
+    streamer_id: Optional[int] = None,
+    streamer_name: str = "",
+    force_refresh: bool = False,
+) -> ChartWidget:
+    """Lädt die leichte Chart-Zeitreihe und rendert das Widget serverseitig."""
+    series = load_chart_series(period, metric, streamer_id, streamer_name, force_refresh)
+
+    svg = _render_svg(series.values)
+    ticks = _render_ticks(series.labels)
+    labels_attr = html.escape("|".join(series.labels), quote=True)
     svg = (
-        svg.replace("__LABELS__", labels_attr).replace("__METRIC__", norm_metric)
+        svg.replace("__LABELS__", labels_attr).replace("__METRIC__", series.metric)
         if svg
         else ""
     )
-    info_text = f"PEAK {peak_text} · {len(values)} PUNKTE" if values else "Keine Daten im Zeitraum."
-
-    if clean_streamer:
-        title_text = f"@{clean_streamer} · {period_label} · {metric_label}"
-    else:
-        title_text = f"{period_label} · {metric_label}"
+    info_text = (
+        f"PEAK {series.peak_text} · {len(series.values)} PUNKTE"
+        if series.values
+        else "Keine Daten im Zeitraum."
+    )
 
     html_source = (
         "<!doctype html><html><head><style>"
         + _CSS
         + "</style></head><body>"
-        + f'<div class="tt">{html.escape(title_text)}</div>'
-        + f'<div class="vv">{html.escape(value_text)}</div>'
+        + f'<div class="tt">{html.escape(series.title_text)}</div>'
+        + f'<div class="vv">{html.escape(series.total_text)}</div>'
         + f'<div class="ii" id="info">{html.escape(info_text)}</div>'
         + svg
         + ticks
@@ -276,24 +344,14 @@ def build_chart_widget(
     )
     ensure_widget_limits(html_source)
 
-    if clean_streamer:
-        caption = (
-            f"📈 TT-INTELLIGENCE · @{clean_streamer}\n"
-            f"{period_label} · {metric_label} · {value_text} · Peak {peak_text}"
-        )
-    else:
-        caption = (
-            f"📈 TT-INTELLIGENCE · {period_label} · {metric_label}\n"
-            f"{value_text} · Peak {peak_text}"
-        )
     return ChartWidget(
         html=html_source,
-        caption=caption,
-        period=norm_period,
-        metric=norm_metric,
-        total=total,
-        peak=peak,
-        points=len(values),
-        streamer_id=streamer_id,
-        streamer_name=clean_streamer,
+        caption=chart_caption(series),
+        period=series.period,
+        metric=series.metric,
+        total=series.total,
+        peak=series.peak,
+        points=len(series.values),
+        streamer_id=series.streamer_id,
+        streamer_name=series.streamer_name,
     )

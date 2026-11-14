@@ -148,6 +148,11 @@ class AppConfig:
     telegram_widget_charts: bool = os.getenv(
         "TELEGRAM_WIDGET_CHARTS", "1"
     ).strip().lower() in ("1", "true", "yes", "on")
+    # Chart-Renderer: "image" (PNG via Pillow, überall verfügbar) oder
+    # "widget" (Bot API 10.4, derzeit nur Privatchat).
+    telegram_chart_renderer: str = os.getenv(
+        "TELEGRAM_CHART_RENDERER", "image"
+    ).strip().lower()
     # Mini-App ist eingefroren (Legacy). Bei 0 werden /miniapp, /app und /webapp
     # auf das responsive Web-Panel umgeleitet und alle UI-/Bot-Einstiege ausgeblendet.
     miniapp_enabled: bool = os.getenv("MINIAPP_ENABLED", "0").strip().lower() in (
@@ -186,6 +191,12 @@ class AppConfig:
                 "Ungültiger SESSION_COOKIE_SECURE-Wert '%s' – verwende 'auto'.", self.session_cookie_secure
             )
             self.session_cookie_secure = "auto"
+        if self.telegram_chart_renderer not in ("image", "widget"):
+            logger.warning(
+                "Ungültiger TELEGRAM_CHART_RENDERER-Wert '%s' – verwende 'image'.",
+                self.telegram_chart_renderer,
+            )
+            self.telegram_chart_renderer = "image"
 
     def _init_session_secret(self) -> None:
         """
