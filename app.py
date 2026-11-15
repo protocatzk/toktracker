@@ -12,7 +12,7 @@ import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import uvicorn
 from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
@@ -27,7 +27,9 @@ from database import (
     build_streamer_bot_report,
     check_telegram_user_access,
     clear_demo_data,
+    create_streamer_group,
     delete_streamer,
+    delete_streamer_group,
     delete_telegram_user,
     get_analytics_data,
     get_api_analytics_overview,
@@ -41,6 +43,7 @@ from database import (
     get_db,
     get_donor_details,
     get_donor_radar_data,
+    get_group_streamer_ids,
     get_live_streamers,
     get_network_loyalty_and_overlap,
     get_recent_whale_gifts,
@@ -50,6 +53,8 @@ from database import (
     get_stream_sessions,
     get_streamer_by_id_or_username,
     get_streamer_detail,
+    get_streamer_group,
+    get_streamer_group_by_name,
     get_telegram_access_mode,
     get_telegram_user_by_id,
     get_telegram_user_by_identifier,
@@ -58,6 +63,7 @@ from database import (
     init_db,
     inspect_sqlite_database,
     list_revenue_profiles,
+    list_streamer_groups,
     list_telegram_users,
     record_api_call,
     record_bot_session,
@@ -67,12 +73,15 @@ from database import (
     revenue_profile_summary,
     save_donor_crm,
     seed_demo_data,
+    set_streamer_group_members,
     toggle_donor_vip,
     update_revenue_profile,
     update_settings,
+    update_streamer_group,
     upsert_streamer,
     upsert_telegram_user_permission,
 )
+
 from schemas import (
     DailyBotReportResponse,
     DonorCRMUpdateRequest,
@@ -82,6 +91,9 @@ from schemas import (
     SettingsUpdateRequest,
     SqliteImportRequest,
     StreamerCreateRequest,
+    StreamerGroupCreateRequest,
+    StreamerGroupMembersRequest,
+    StreamerGroupUpdateRequest,
     StreamerReportCard,
     TelegramUserPermissionRequest,
     TelegramUserPermissionsUpdateRequest,
@@ -2670,9 +2682,14 @@ async def api_live_streamers():
 
 @app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
-async def api_overview(period: str = Query("all", description="all | today | 24h | 7d | 30d")):
+async def api_overview(
+    period: str = Query("all", description="all | today | 24h | 7d | 30d"),
+    group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
+):
     init_db()
-    data = await asyncio.to_thread(get_dashboard_overview, period=period)
+    data = await asyncio.to_thread(
+        lambda: get_dashboard_overview(period=period, group_id=group_id)
+    )
     for s in data["streamers"]:
         uname = s["username"]
         s["is_tracking_active"] = monitor_manager.is_tracking(uname)
@@ -2692,9 +2709,15 @@ async def api_overview(period: str = Query("all", description="all | today | 24h
 @app.get("/api/v1/analytics", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_analytics(
     streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID für Einzelanalyse (sonst alle Streamer)"),
+    group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
 ):
-    return await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+    return await asyncio.to_thread(
+        get_analytics_data,
+        streamer_id=streamer_id,
+        period=period,
+        group_id=group_id,
+    )
 
 
 @app.get(
@@ -3253,6 +3276,79 @@ async def api_streamer_detail(identifier: str, period: str = Query("all")):
     return detail
 
 
+def _group_http_error(exc: ValueError) -> HTTPException:
+    message = str(exc)
+    status = 409 if "existiert bereits" in message else 400
+    return HTTPException(status_code=status, detail=message)
+
+
+@app.get("/api/streamer-groups", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+@app.get("/api/v1/streamer-groups", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
+async def api_list_streamer_groups():
+    init_db()
+    groups = await asyncio.to_thread(list_streamer_groups)
+    return {"ok": True, "count": len(groups), "groups": groups}
+
+
+@app.post("/api/streamer-groups", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.post("/api/v1/streamer-groups", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+async def api_create_streamer_group(payload: StreamerGroupCreateRequest):
+    init_db()
+    try:
+        group = await asyncio.to_thread(
+            create_streamer_group,
+            payload.name,
+            payload.description or "",
+            payload.color or "",
+            payload.streamer_ids,
+        )
+    except ValueError as exc:
+        raise _group_http_error(exc) from exc
+    return {"ok": True, "group": group}
+
+
+@app.put("/api/streamer-groups/{group_id}", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.put("/api/v1/streamer-groups/{group_id}", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+async def api_update_streamer_group(group_id: int, payload: StreamerGroupUpdateRequest):
+    init_db()
+    if not await asyncio.to_thread(get_streamer_group, group_id):
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden")
+    try:
+        group = await asyncio.to_thread(
+            update_streamer_group,
+            group_id,
+            payload.name,
+            payload.description,
+            payload.color,
+        )
+    except ValueError as exc:
+        raise _group_http_error(exc) from exc
+    return {"ok": True, "group": group}
+
+
+@app.delete("/api/streamer-groups/{group_id}", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.delete("/api/v1/streamer-groups/{group_id}", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+async def api_delete_streamer_group(group_id: int):
+    init_db()
+    deleted = await asyncio.to_thread(delete_streamer_group, group_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden")
+    return {"ok": True, "deleted": group_id}
+
+
+@app.put("/api/streamer-groups/{group_id}/members", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+@app.put("/api/v1/streamer-groups/{group_id}/members", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
+async def api_set_streamer_group_members(group_id: int, payload: StreamerGroupMembersRequest):
+    init_db()
+    if not await asyncio.to_thread(get_streamer_group, group_id):
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden")
+    streamer_ids = await asyncio.to_thread(
+        set_streamer_group_members, group_id, payload.streamer_ids
+    )
+    group = await asyncio.to_thread(get_streamer_group, group_id)
+    return {"ok": True, "streamer_ids": streamer_ids, "group": group}
+
+
 @app.post("/api/streamers", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 @app.post("/api/v1/streamers", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 async def api_add_streamer(payload: StreamerCreateRequest):
@@ -3370,62 +3466,66 @@ async def api_record_gift(payload: GiftCreateRequest):
     return {"ok": True, "created": created, "event": event}
 
 
-def _fetch_gift_export_rows(streamer_id: Optional[int]) -> List[Dict[str, Any]]:
+def _export_scope_clause(
+    column: str, streamer_id: Optional[int], group_id: Optional[int]
+) -> Tuple[str, Tuple[Any, ...]]:
+    """Baut die optionale Scope-Bedingung für CSV-Exporte (Streamer oder Gruppe)."""
+    if streamer_id:
+        return f" WHERE {column} = ?", (int(streamer_id),)
+    if group_id:
+        ids = get_group_streamer_ids(int(group_id))
+        if not ids:
+            return " WHERE 1 = 0", ()
+        placeholders = ",".join("?" for _ in ids)
+        return f" WHERE {column} IN ({placeholders})", tuple(ids)
+    return "", ()
+
+
+def _fetch_gift_export_rows(
+    streamer_id: Optional[int], group_id: Optional[int] = None
+) -> List[Dict[str, Any]]:
     """Synchroner DB-Zugriff für den CSV-Export (läuft via to_thread)."""
+    scope_sql, scope_params = _export_scope_clause("g.streamer_id", streamer_id, group_id)
     with get_db() as conn:
-        if streamer_id:
-            rows = conn.execute(
-                """
-                SELECT g.*, s.username AS streamer_username
-                FROM gift_events g
-                JOIN streamers s ON s.id = g.streamer_id
-                WHERE g.streamer_id = ?
-                ORDER BY g.created_at DESC
-                """,
-                (streamer_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT g.*, s.username AS streamer_username
-                FROM gift_events g
-                JOIN streamers s ON s.id = g.streamer_id
-                ORDER BY g.created_at DESC
-                """
-            ).fetchall()
+        rows = conn.execute(
+            f"""
+            SELECT g.*, s.username AS streamer_username
+            FROM gift_events g
+            JOIN streamers s ON s.id = g.streamer_id
+            {scope_sql}
+            ORDER BY g.created_at DESC
+            """,
+            scope_params,
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
-def _fetch_battle_export_rows(streamer_id: Optional[int]) -> List[Dict[str, Any]]:
+def _fetch_battle_export_rows(
+    streamer_id: Optional[int], group_id: Optional[int] = None
+) -> List[Dict[str, Any]]:
     """Synchroner DB-Zugriff für den Battle-CSV-Export (läuft via to_thread)."""
+    scope_sql, scope_params = _export_scope_clause("b.streamer_id", streamer_id, group_id)
     with get_db() as conn:
-        if streamer_id:
-            rows = conn.execute(
-                """
-                SELECT b.*, s.username AS streamer_username
-                FROM tiktok_battles b
-                JOIN streamers s ON s.id = b.streamer_id
-                WHERE b.streamer_id = ?
-                ORDER BY b.started_at DESC
-                """,
-                (streamer_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT b.*, s.username AS streamer_username
-                FROM tiktok_battles b
-                JOIN streamers s ON s.id = b.streamer_id
-                ORDER BY b.started_at DESC
-                """
-            ).fetchall()
+        rows = conn.execute(
+            f"""
+            SELECT b.*, s.username AS streamer_username
+            FROM tiktok_battles b
+            JOIN streamers s ON s.id = b.streamer_id
+            {scope_sql}
+            ORDER BY b.started_at DESC
+            """,
+            scope_params,
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
 @app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_EXPORT_DOWNLOAD))])
-async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
+async def api_export_gifts_csv(
+    streamer_id: Optional[int] = Query(None),
+    group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
+):
     init_db()
-    rows = await asyncio.to_thread(_fetch_gift_export_rows, streamer_id)
+    rows = await asyncio.to_thread(_fetch_gift_export_rows, streamer_id, group_id)
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
@@ -3481,9 +3581,12 @@ async def api_export_gifts_csv(streamer_id: Optional[int] = Query(None)):
 
 
 @app.get("/api/export/battles.csv", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_EXPORT_DOWNLOAD))])
-async def api_export_battles_csv(streamer_id: Optional[int] = Query(None)):
+async def api_export_battles_csv(
+    streamer_id: Optional[int] = Query(None),
+    group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
+):
     init_db()
-    b_rows = await asyncio.to_thread(_fetch_battle_export_rows, streamer_id)
+    b_rows = await asyncio.to_thread(_fetch_battle_export_rows, streamer_id, group_id)
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")

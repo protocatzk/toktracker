@@ -179,6 +179,8 @@ class ChartViewSeries:
     peak: float
     streamer_id: Optional[int] = None
     streamer_name: str = ""
+    group_id: Optional[int] = None
+    group_name: str = ""
     highlight: int = -1
     caption_override: str = ""
 
@@ -207,15 +209,22 @@ class ChartViewSeries:
         return _format_value(self.peak, self.metric)
 
     @property
+    def scope_prefix(self) -> str:
+        if self.group_name:
+            return f"GRUPPE {self.group_name} · "
+        if self.streamer_name:
+            return f"@{self.streamer_name} · "
+        return ""
+
+    @property
     def title_text(self) -> str:
-        prefix = f"@{self.streamer_name} · " if self.streamer_name else ""
-        return f"{prefix}{self.title} · {self.period_label} · {self.metric_label}"
+        return f"{self.scope_prefix}{self.title} · {self.period_label} · {self.metric_label}"
 
     @property
     def caption(self) -> str:
         if self.caption_override:
             return self.caption_override
-        prefix = f"@{self.streamer_name} · " if self.streamer_name else ""
+        prefix = self.scope_prefix
         return (
             f"📊 TT-INTELLIGENCE · {prefix}{self.title}\n"
             f"{self.period_label} · {self.metric_label} · "
@@ -278,11 +287,21 @@ def _empty_view(
     )
 
 
+def clear_chart_view_cache() -> None:
+    """Leert den Analytics-Cache der Zusatz-Ansichten (z. B. nach Gruppenänderungen)."""
+    with _analytics_cache_lock:
+        _analytics_cache.clear()
+
+
 def _load_analytics(
-    streamer_id: Optional[int], period: str, force_refresh: bool = False
+    streamer_id: Optional[int],
+    period: str,
+    force_refresh: bool = False,
+    group_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     sid = int(streamer_id) if streamer_id else 0
-    cache_key = f"{period}:{sid}"
+    gid = int(group_id) if group_id else 0
+    cache_key = f"{period}:{sid}:g{gid}"
     ttl = _ANALYTICS_TTL.get(period, 60.0)
     now = time.monotonic()
 
@@ -295,7 +314,7 @@ def _load_analytics(
 
     from shared.db import get_analytics_data
 
-    data = get_analytics_data(streamer_id=streamer_id, period=period)
+    data = get_analytics_data(streamer_id=streamer_id, period=period, group_id=group_id)
     with _analytics_cache_lock:
         _analytics_cache[cache_key] = (time.monotonic(), data)
         _analytics_cache.move_to_end(cache_key)
@@ -507,16 +526,25 @@ def load_chart_view(
     streamer_id: Optional[int] = None,
     streamer_name: str = "",
     force_refresh: bool = False,
+    group_id: Optional[int] = None,
+    group_name: str = "",
 ) -> ChartViewSeries:
     """Lädt die Daten einer Chart-Ansicht und normalisiert sie fürs Rendering."""
     norm_view = normalize_view(view)
     norm_period = normalize_period(period)
     norm_metric = normalize_metric(metric)
     clean_name = str(streamer_name or "").strip().lstrip("@")[:32]
+    clean_group = str(group_name or "").strip()[:48]
 
     if norm_view == "timeline":
         series: ChartSeries = load_chart_series(
-            norm_period, norm_metric, streamer_id, clean_name, force_refresh
+            norm_period,
+            norm_metric,
+            streamer_id,
+            clean_name,
+            force_refresh,
+            group_id,
+            clean_group,
         )
         return ChartViewSeries(
             view="timeline",
@@ -532,12 +560,23 @@ def load_chart_view(
             peak=series.peak,
             streamer_id=series.streamer_id,
             streamer_name=series.streamer_name,
+            group_id=series.group_id,
+            group_name=series.group_name,
             caption_override=chart_caption(series),
         )
 
-    data = _load_analytics(streamer_id, norm_period, force_refresh)
+    data = _load_analytics(streamer_id, norm_period, force_refresh, group_id)
     loader = _LOADERS[norm_view]
-    return loader(data, norm_period, norm_metric, streamer_id, clean_name)
+    series = loader(data, norm_period, norm_metric, streamer_id, clean_name)
+    if group_id or clean_group:
+        from dataclasses import replace
+
+        series = replace(
+            series,
+            group_id=group_id,
+            group_name=clean_group,
+        )
+    return series
 
 
 def _widget_ticks(labels: Sequence[str]) -> List[Tuple[int, str]]:
@@ -661,6 +700,8 @@ def build_chart_view_widget(
     streamer_id: Optional[int] = None,
     streamer_name: str = "",
     force_refresh: bool = False,
+    group_id: Optional[int] = None,
+    group_name: str = "",
 ) -> "ChartWidget":
     """Rendert eine zusätzliche Chart-Ansicht als Telegram-HTML-Widget."""
     norm_view = normalize_view(view)
@@ -668,13 +709,27 @@ def build_chart_view_widget(
         from shared.widget_chart import build_chart_widget
 
         return build_chart_widget(
-            period, metric, streamer_id, streamer_name, force_refresh
+            period,
+            metric,
+            streamer_id,
+            streamer_name,
+            force_refresh,
+            "timeline",
+            group_id,
+            group_name,
         )
 
     from shared.widget_chart import ChartWidget
 
     series = load_chart_view(
-        norm_view, period, metric, streamer_id, streamer_name, force_refresh
+        norm_view,
+        period,
+        metric,
+        streamer_id,
+        streamer_name,
+        force_refresh,
+        group_id,
+        group_name,
     )
     html_source, height = _render_widget_body(series)
     ensure_widget_limits(html_source)
@@ -688,6 +743,8 @@ def build_chart_view_widget(
         points=len(series.values),
         streamer_id=series.streamer_id,
         streamer_name=series.streamer_name,
+        group_id=series.group_id,
+        group_name=series.group_name,
         height=height,
         view=series.view,
         view_label=series.view_label,

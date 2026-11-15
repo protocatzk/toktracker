@@ -266,6 +266,31 @@ def _init_mysql_schema() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS streamer_groups (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(191) NOT NULL UNIQUE,
+                description VARCHAR(512) DEFAULT '',
+                color VARCHAR(16) DEFAULT '',
+                created_at VARCHAR(64) NOT NULL,
+                updated_at VARCHAR(64) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS streamer_group_members (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                group_id BIGINT NOT NULL,
+                streamer_id BIGINT NOT NULL,
+                created_at VARCHAR(64) NOT NULL,
+                UNIQUE KEY uq_group_streamer (group_id, streamer_id),
+                CONSTRAINT fk_group_members_group FOREIGN KEY (group_id) REFERENCES streamer_groups(id) ON DELETE CASCADE,
+                CONSTRAINT fk_group_members_streamer FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS page_views (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 path VARCHAR(255) NOT NULL,
@@ -385,6 +410,8 @@ def _init_mysql_schema() -> None:
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_result", "result")
         _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_opponent", "opponent_username")
         _ensure_index_mysql(conn, "streamer_alerts", "idx_streamer_alerts_chat", "chat_id")
+        _ensure_index_mysql(conn, "streamer_group_members", "idx_group_members_group", "group_id")
+        _ensure_index_mysql(conn, "streamer_group_members", "idx_group_members_streamer", "streamer_id")
         _ensure_index_mysql(conn, "page_views", "idx_page_views_created", "created_at")
         _ensure_index_mysql(conn, "page_views", "idx_page_views_path", "path")
         _ensure_index_mysql(conn, "page_views", "idx_page_views_visitor", "visitor_hash, created_at")
@@ -614,6 +641,23 @@ def _init_sqlite_schema() -> None:
                 UNIQUE(streamer_id, chat_id),
                 FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS streamer_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                description TEXT DEFAULT '',
+                color TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS streamer_group_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                streamer_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(group_id, streamer_id),
+                FOREIGN KEY (group_id) REFERENCES streamer_groups(id) ON DELETE CASCADE,
+                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS page_views (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT NOT NULL,
@@ -783,6 +827,10 @@ def _init_sqlite_schema() -> None:
                 ON tiktok_battles(opponent_username);
             CREATE INDEX IF NOT EXISTS idx_streamer_alerts_chat
                 ON streamer_alerts(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_group_members_group
+                ON streamer_group_members(group_id);
+            CREATE INDEX IF NOT EXISTS idx_group_members_streamer
+                ON streamer_group_members(streamer_id);
             CREATE INDEX IF NOT EXISTS idx_page_views_created
                 ON page_views(created_at);
             CREATE INDEX IF NOT EXISTS idx_page_views_path

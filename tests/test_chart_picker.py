@@ -35,7 +35,9 @@ class TestChartPicker(unittest.TestCase):
         self.service = TelegramBotService()
 
     def test_first_page_contains_eight_streamers_and_next(self):
-        with patch("telegram_service.list_streamers_for_picker", return_value=_streamers(10)):
+        with patch("telegram_service.list_streamers_for_picker", return_value=_streamers(10)), patch(
+            "telegram_service.list_streamer_groups", return_value=[]
+        ):
             text, markup = self.service._format_chart_picker("24h", "eur", 0, 999)
 
         self.assertIn("1/2", text)
@@ -51,7 +53,9 @@ class TestChartPicker(unittest.TestCase):
         self.assertTrue(any(b.callback_data == "chart_cancel:0" for b in buttons))
 
     def test_second_page_has_previous_and_last_streamers(self):
-        with patch("telegram_service.list_streamers_for_picker", return_value=_streamers(10)):
+        with patch("telegram_service.list_streamers_for_picker", return_value=_streamers(10)), patch(
+            "telegram_service.list_streamer_groups", return_value=[]
+        ):
             text, markup = self.service._format_chart_picker("7d", "coins", 1, 42)
 
         self.assertIn("2/2", text)
@@ -63,7 +67,9 @@ class TestChartPicker(unittest.TestCase):
         self.assertEqual(prev_buttons[0].text, "◀️")
 
     def test_empty_streamer_list(self):
-        with patch("telegram_service.list_streamers_for_picker", return_value=[]):
+        with patch("telegram_service.list_streamers_for_picker", return_value=[]), patch(
+            "telegram_service.list_streamer_groups", return_value=[]
+        ):
             text, markup = self.service._format_chart_picker("24h", "eur", 0, 0)
 
         self.assertIn("0", text)

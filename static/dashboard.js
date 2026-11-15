@@ -1,5 +1,7 @@
 let currentPeriod = "all";
 let cachedStreamers = [];
+let cachedGroups = [];
+let groupsLoadedOnce = false;
 let cachedGifts = [];
 let cachedWorkers = [];
 let cachedStallTimeout = 120;
@@ -62,6 +64,8 @@ function switchTab(tabId) {
     if (tabId === "tab-workers") {
         renderWorkerHealthTable();
         renderWorkerHealthLogs(cachedWorkers);
+    } else if (tabId === "tab-groups") {
+        loadStreamerGroups();
     } else if (tabId === "tab-analytics") {
         if (!analyticsLoadedOnce) {
             analyticsLoadedOnce = true;
@@ -155,6 +159,10 @@ async function loadOverview() {
         populateSimulatorSelect(cachedStreamers);
         populateAnalyticsStreamerSelect(cachedStreamers);
         populateBattleStreamerSelect(cachedStreamers);
+        if (!groupsLoadedOnce) {
+            groupsLoadedOnce = true;
+            loadStreamerGroups();
+        }
 
         if (data.settings) {
             const activeEl = document.activeElement;
@@ -857,15 +865,204 @@ function populateAnalyticsStreamerSelect(streamers) {
     if (!sel) return;
     const currentVal = sel.value || analyticsStreamerId || "all";
 
-    sel.innerHTML = `<option value="all">Alle überwachten Streamer (Vergleich &amp; Gesamt)</option>` +
-        streamers.map(s => {
-            const liveMarker = s.is_live ? " [LIVE]" : "";
-            const dName = s.display_name && s.display_name !== s.username ? `${s.display_name} (@${s.username})` : `@${s.username}`;
-            return `<option value="${s.id}">${dName}${liveMarker}</option>`;
-        }).join("");
+    const groupOptions = cachedGroups.length
+        ? `<optgroup label="Gruppen">` + cachedGroups.map((g) => {
+            const name = escapeHtml(g.name || "");
+            const count = fmtNum(g.member_count || 0);
+            return `<option value="group:${g.id}">👥 ${name} (${count} Streamer)</option>`;
+        }).join("") + `</optgroup>`
+        : "";
+    const streamerOptions = streamers.map(s => {
+        const liveMarker = s.is_live ? " [LIVE]" : "";
+        const dName = s.display_name && s.display_name !== s.username ? `${s.display_name} (@${s.username})` : `@${s.username}`;
+        return `<option value="${s.id}">${escapeHtml(dName)}${liveMarker}</option>`;
+    }).join("");
 
-    if (currentVal && (currentVal === "all" || streamers.some(s => String(s.id) === String(currentVal)))) {
-        sel.value = currentVal;
+    sel.innerHTML = `<option value="all">Alle überwachten Streamer (Vergleich &amp; Gesamt)</option>` +
+        groupOptions +
+        (streamerOptions ? `<optgroup label="Streamer">${streamerOptions}</optgroup>` : "");
+
+    const stillValid =
+        currentVal === "all" ||
+        (currentVal.startsWith("group:") && cachedGroups.some(g => `group:${g.id}` === currentVal)) ||
+        streamers.some(s => String(s.id) === String(currentVal));
+    sel.value = stillValid ? currentVal : "all";
+}
+
+async function loadStreamerGroups() {
+    try {
+        const res = await fetch("api/streamer-groups");
+        if (!res.ok) return;
+        const data = await res.json();
+        cachedGroups = data.groups || [];
+        renderGroupTable();
+        populateAnalyticsStreamerSelect(cachedStreamers);
+        const badge = document.getElementById("badgeGroups");
+        if (badge) badge.textContent = fmtNum(cachedGroups.length);
+    } catch (e) {
+        console.error("Fehler beim Laden der Streamer-Gruppen:", e);
+    }
+}
+
+function renderGroupTable() {
+    const tbody = document.getElementById("groupTableBody");
+    if (!tbody) return;
+    if (!cachedGroups.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="muted">Noch keine Gruppen angelegt.</td></tr>`;
+        return;
+    }
+    const memberOptions = cachedStreamers
+        .map((s) => {
+            const label = s.display_name && s.display_name !== s.username
+                ? `${s.display_name} (@${s.username})`
+                : `@${s.username}`;
+            return `<option value="${s.id}">${escapeHtml(label)}</option>`;
+        })
+        .join("");
+
+    tbody.innerHTML = cachedGroups.map((g) => {
+        const members = new Set((g.streamer_ids || []).map(Number));
+        const options = cachedStreamers.map((s) => {
+            const label = s.display_name && s.display_name !== s.username
+                ? `${s.display_name} (@${s.username})`
+                : `@${s.username}`;
+            return `<option value="${s.id}"${members.has(Number(s.id)) ? " selected" : ""}>${escapeHtml(label)}</option>`;
+        }).join("") || memberOptions;
+        return `
+            <tr>
+                <td>
+                    <span class="group-color-dot" style="background:${escapeHtml(g.color || "transparent")}"></span>
+                    <input type="text" data-group-name="${g.id}" value="${escapeHtml(g.name || "")}" maxlength="191">
+                    <input type="text" data-group-description="${g.id}" value="${escapeHtml(g.description || "")}" maxlength="512" placeholder="Beschreibung (optional)" class="mono" style="font-size:11px; margin-top:4px;">
+                </td>
+                <td class="num-col"><strong>${fmtNum(g.member_count || 0)}</strong></td>
+                <td>
+                    <select multiple size="4" data-group-members="${g.id}" style="min-width:220px;">
+                        ${options}
+                    </select>
+                </td>
+                <td>
+                    <div class="action-group">
+                        <button type="button" class="sm primary" data-group-save="${g.id}">Speichern</button>
+                        <button type="button" class="sm" data-group-delete="${g.id}">Löschen</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join("");
+
+    tbody.querySelectorAll("[data-group-save]").forEach((btn) => {
+        btn.addEventListener("click", () => saveStreamerGroup(Number(btn.getAttribute("data-group-save"))));
+    });
+    tbody.querySelectorAll("[data-group-delete]").forEach((btn) => {
+        btn.addEventListener("click", () => deleteStreamerGroup(Number(btn.getAttribute("data-group-delete"))));
+    });
+}
+
+function setGroupFormMessage(text, isError = false) {
+    const el = document.getElementById("groupFormMessage");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color = isError ? "var(--danger, #f85149)" : "";
+}
+
+async function createStreamerGroup() {
+    const nameEl = document.getElementById("groupNameInput");
+    const descEl = document.getElementById("groupDescriptionInput");
+    const colorEl = document.getElementById("groupColorInput");
+    const name = (nameEl?.value || "").trim();
+    if (!name) {
+        setGroupFormMessage("Bitte einen Gruppennamen eingeben.", true);
+        return;
+    }
+    try {
+        const res = await fetch("api/streamer-groups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name,
+                description: (descEl?.value || "").trim(),
+                color: (colorEl?.value || "").trim(),
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            setGroupFormMessage(data.detail || "Gruppe konnte nicht angelegt werden.", true);
+            return;
+        }
+        if (nameEl) nameEl.value = "";
+        if (descEl) descEl.value = "";
+        if (colorEl) colorEl.value = "";
+        setGroupFormMessage(`Gruppe "${data.group?.name || name}" angelegt.`);
+        await loadStreamerGroups();
+    } catch (e) {
+        setGroupFormMessage("Netzwerkfehler beim Anlegen der Gruppe.", true);
+    }
+}
+
+async function saveStreamerGroup(groupId) {
+    const nameEl = document.querySelector(`[data-group-name="${groupId}"]`);
+    const descEl = document.querySelector(`[data-group-description="${groupId}"]`);
+    const membersEl = document.querySelector(`[data-group-members="${groupId}"]`);
+    const streamer_ids = membersEl
+        ? Array.from(membersEl.selectedOptions).map((o) => Number(o.value))
+        : [];
+    try {
+        const updateRes = await fetch(`api/streamer-groups/${groupId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name: nameEl ? nameEl.value.trim() : undefined,
+                description: descEl ? descEl.value.trim() : undefined,
+            }),
+        });
+        const updateData = await updateRes.json().catch(() => ({}));
+        if (!updateRes.ok) {
+            setGroupFormMessage(updateData.detail || "Gruppe konnte nicht aktualisiert werden.", true);
+            return;
+        }
+        const membersRes = await fetch(`api/streamer-groups/${groupId}/members`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ streamer_ids }),
+        });
+        const membersData = await membersRes.json().catch(() => ({}));
+        if (!membersRes.ok) {
+            setGroupFormMessage(membersData.detail || "Mitglieder konnten nicht gespeichert werden.", true);
+            return;
+        }
+        setGroupFormMessage(`Gruppe "${membersData.group?.name || ""}" gespeichert.`);
+        await loadStreamerGroups();
+        if (analyticsStreamerId === `group:${groupId}`) {
+            lastAnalyticsFingerprint = null;
+            loadAnalytics();
+        }
+    } catch (e) {
+        setGroupFormMessage("Netzwerkfehler beim Speichern der Gruppe.", true);
+    }
+}
+
+async function deleteStreamerGroup(groupId) {
+    const group = cachedGroups.find((g) => Number(g.id) === Number(groupId));
+    if (!confirm(`Gruppe "${group ? group.name : groupId}" wirklich löschen? Die Streamer selbst bleiben erhalten.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`api/streamer-groups/${groupId}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            setGroupFormMessage(data.detail || "Gruppe konnte nicht gelöscht werden.", true);
+            return;
+        }
+        if (analyticsStreamerId === `group:${groupId}`) {
+            analyticsStreamerId = "all";
+            lastAnalyticsFingerprint = null;
+            loadAnalytics();
+        }
+        setGroupFormMessage("Gruppe gelöscht.");
+        await loadStreamerGroups();
+    } catch (e) {
+        setGroupFormMessage("Netzwerkfehler beim Löschen der Gruppe.", true);
     }
 }
 
@@ -1589,8 +1786,14 @@ function renderAnalyticsTables(data) {
 
 async function loadAnalytics(isBackground = false) {
     try {
-        const sidParam = analyticsStreamerId && analyticsStreamerId !== "all" ? `&streamer_id=${encodeURIComponent(analyticsStreamerId)}` : "";
-        const res = await fetch(`api/analytics?period=${encodeURIComponent(analyticsPeriod)}${sidParam}`);
+        let scopeParam = "";
+        if (analyticsStreamerId && analyticsStreamerId.startsWith("group:")) {
+            const gid = analyticsStreamerId.slice("group:".length);
+            if (gid) scopeParam = `&group_id=${encodeURIComponent(gid)}`;
+        } else if (analyticsStreamerId && analyticsStreamerId !== "all") {
+            scopeParam = `&streamer_id=${encodeURIComponent(analyticsStreamerId)}`;
+        }
+        const res = await fetch(`api/analytics?period=${encodeURIComponent(analyticsPeriod)}${scopeParam}`);
         if (res.status === 401) {
             window.location.href = loginUrl();
             return;
@@ -1635,7 +1838,12 @@ async function loadAnalytics(isBackground = false) {
         // Streamer Meta Banner
         const banner = document.getElementById("anStreamerMetaBanner");
         const bannerMeta = document.getElementById("anStreamerMeta");
-        if (data.selected_streamer) {
+        if (data.selected_group) {
+            const g = data.selected_group;
+            banner.style.display = "block";
+            bannerMeta.innerHTML = `Auswertung fokussiert auf Gruppe: <strong>${escapeHtml(g.name || "")}</strong> · ${fmtNum(g.member_count || 0)} Streamer` +
+                (g.description ? ` · ${escapeHtml(g.description)}` : "");
+        } else if (data.selected_streamer) {
             const s = data.selected_streamer;
             const liveBadge = s.is_live ? `<span class="status-tag live">LIVE</span>` : `<span class="status-tag">OFFLINE</span>`;
             banner.style.display = "block";
@@ -3119,6 +3327,8 @@ document.addEventListener("DOMContentLoaded", () => {
         currentPeriod = e.target.value;
         loadOverview();
     });
+
+    document.getElementById("btnCreateGroup")?.addEventListener("click", createStreamerGroup);
 
     document.getElementById("selectAnalyticsStreamer")?.addEventListener("change", (e) => {
         analyticsStreamerId = e.target.value;

@@ -2287,3 +2287,37 @@ div.hide-md, span.hide-md, a.hide-md {
     background: var(--bg-subtle);
 }
 
+/* Streamer-Gruppen (Scope-Verwaltung) */
+.group-create-form {
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.group-create-form input[type="text"] {
+    min-width: 180px;
+}
+
+.group-create-form .group-color-input {
+    min-width: 96px;
+    max-width: 110px;
+}
+
+#groupTableBody input[type="text"] {
+    width: 100%;
+    min-width: 180px;
+}
+
+#groupTableBody select[multiple] {
+    width: 100%;
+}
+
+.group-color-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    margin-right: 6px;
+    vertical-align: middle;
+}
