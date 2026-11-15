@@ -3,8 +3,9 @@ import html
 import logging
 import os
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timedelta
+from io import BytesIO
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 import httpx
@@ -18,6 +19,7 @@ try:
         BotCommandScopeDefault,
         InlineKeyboardButton,
         InlineKeyboardMarkup,
+        InputMediaPhoto,
         Update,
         WebAppInfo,
     )
@@ -37,6 +39,7 @@ except ImportError:
     ContextTypes = Any  # type: ignore
     InlineKeyboardButton = Any  # type: ignore
     InlineKeyboardMarkup = Any  # type: ignore
+    InputMediaPhoto = Any  # type: ignore
     WebAppInfo = Any  # type: ignore
 
 from config import BASE_DIR, config
@@ -45,6 +48,7 @@ from database import (
     build_streamer_bot_report,
     check_telegram_user_access,
     get_all_streamers_summary,
+    list_streamers_for_picker,
     get_dashboard_overview,
     get_db,
     get_donor_details,
@@ -70,6 +74,13 @@ from shared import bot_format as bf
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_format import BRAND as BOT_BRAND
 from shared.bus import get_bus
+from shared.chart_image import build_chart_image
+from shared.chart_views import (
+    CHART_VIEWS,
+    VIEW_LABELS as CHART_VIEW_LABELS,
+    is_view_alias,
+    normalize_view,
+)
 from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
@@ -87,6 +98,7 @@ from shared.permissions import (
     permissions_for,
     role_label,
 )
+from shared.widget_chart import build_chart_widget, format_coins, format_eur
 from tiktok_service import fetch_tiktok_user_info
 
 PICTURES_DIR = os.path.join(BASE_DIR, "pictures")
@@ -105,6 +117,10 @@ GROUP_TEXT_COMMANDS = frozenset(
         "overview",
         "dashboard",
         "finanzen",
+        "chart",
+        "charts",
+        "graph",
+        "diagramm",
         "radar",
         "whales_radar",
         "whales",
@@ -286,6 +302,7 @@ class TelegramBotService:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._live_alert_subscribed: bool = False
         self._live_alert_lock: Optional[asyncio.Lock] = None
+        self._chart_file_ids: "OrderedDict[str, str]" = OrderedDict()
 
     def _log(self, level: str, msg: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -360,6 +377,9 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler(["app", "miniapp"], self._cmd_miniapp))
             self._app.add_handler(CommandHandler(["id", "whoami"], self._cmd_whoami))
             self._app.add_handler(CommandHandler(["overview", "dashboard", "finanzen"], self._cmd_overview))
+            self._app.add_handler(
+                CommandHandler(["chart", "charts", "graph", "diagramm"], self._cmd_chart)
+            )
             self._app.add_handler(CommandHandler(["radar", "whales_radar"], self._cmd_radar))
             self._app.add_handler(CommandHandler(["whales", "whale_alerts", "alerts"], self._cmd_whales))
             self._app.add_handler(CommandHandler(["donor", "dossier", "spender"], self._cmd_donor))
@@ -391,7 +411,7 @@ class TelegramBotService:
             self._app.add_handler(
                 CallbackQueryHandler(
                     self._on_interactive_callback,
-                    pattern=r"^(overview_period|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
+                    pattern=r"^(overview_period|chart_view|chart_pick|chart_page|chart_stream|chart_cancel|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
                 )
             )
 
@@ -465,6 +485,7 @@ class TelegramBotService:
         commands = [
             BotCommand("start", "🏠 Hauptmenü & Befehlsübersicht öffnen"),
             BotCommand("overview", "📊 Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
+            BotCommand("chart", "📈 Charts: Verlauf, Streamer, Tageszeit, Geschenke, Spender"),
             BotCommand("radar", "🎯 Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
             BotCommand("whales", "🐋 Live-Stream der neuesten Großspenden"),
             BotCommand("donor", "👤 Spender-Dossier, Stammkanal & VIP (<username>)"),
@@ -1252,6 +1273,8 @@ class TelegramBotService:
             await self._cmd_report(update, context)
         elif cmd in ("overview", "dashboard", "finanzen"):
             await self._cmd_overview(update, context)
+        elif cmd in ("chart", "charts", "graph", "diagramm"):
+            await self._cmd_chart(update, context)
         elif cmd in ("radar", "whales_radar"):
             await self._cmd_radar(update, context)
         elif cmd in ("whales", "whale_alerts", "alerts"):
@@ -1363,6 +1386,7 @@ class TelegramBotService:
             sections.append(
                 bf.eyebrow("📊 02 / STATISTIK") + "\n"
                 "▪ 📊 <code>/overview [heute|24h|7d|30d|all]</code> — Finanz-Dashboard\n"
+                "▪ 📈 <code>/chart [@streamer] [24h|7d|30d] [eur|coins] [verlauf|streamer|tageszeit|geschenke|spender]</code> — Chart (Picker via 📺)\n"
                 "▪ 📋 <code>/report [stunden]</code> — Gesamtbericht aller Streamer\n"
                 "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
                 "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
@@ -1770,6 +1794,557 @@ class TelegramBotService:
             reply_markup=markup,
             disable_web_page_preview=True,
         )
+
+    # -----------------------------------------------------------------
+    # EINNAHMEN-CHART ALS TELEGRAM-HTML-WIDGET (/chart)
+    # -----------------------------------------------------------------
+    def _chart_file_id(self, digest: str) -> Optional[str]:
+        file_id = self._chart_file_ids.get(digest)
+        if file_id:
+            self._chart_file_ids.move_to_end(digest)
+        return file_id
+
+    def _remember_chart_file_id(self, digest: str, file_id: Optional[str]) -> None:
+        if not file_id:
+            return
+        self._chart_file_ids[digest] = file_id
+        self._chart_file_ids.move_to_end(digest)
+        while len(self._chart_file_ids) > 128:
+            self._chart_file_ids.popitem(last=False)
+
+    def _chart_bytes_io(self, image: Any) -> BytesIO:
+        buffer = BytesIO(image.png)
+        buffer.name = "chart.png"
+        return buffer
+
+    async def _send_chart_image(
+        self,
+        bot: Any,
+        chat_id: int,
+        image: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Any:
+        cached = self._chart_file_id(image.digest)
+        try:
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=cached or self._chart_bytes_io(image),
+                caption=image.caption,
+                reply_markup=keyboard,
+            )
+        except Exception:
+            if not cached:
+                raise
+            self._chart_file_ids.pop(image.digest, None)
+            message = await bot.send_photo(
+                chat_id=chat_id,
+                photo=self._chart_bytes_io(image),
+                caption=image.caption,
+                reply_markup=keyboard,
+            )
+        photos = getattr(message, "photo", None)
+        if photos:
+            self._remember_chart_file_id(image.digest, photos[-1].file_id)
+        return message
+
+    async def _edit_chart_image(
+        self,
+        bot: Any,
+        chat_id: int,
+        message_id: int,
+        image: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> bool:
+        cached = self._chart_file_id(image.digest)
+        sources: List[Tuple[str, Any]] = []
+        if cached:
+            sources.append(("file_id", cached))
+        sources.append(("bytes", None))
+
+        last_error: Optional[Exception] = None
+        for kind, value in sources:
+            media_source = value if kind == "file_id" else self._chart_bytes_io(image)
+            try:
+                result = await bot.edit_message_media(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    media=InputMediaPhoto(
+                        media=media_source,
+                        caption=image.caption,
+                    ),
+                    reply_markup=keyboard,
+                )
+                photos = getattr(result, "photo", None)
+                if photos:
+                    self._remember_chart_file_id(image.digest, photos[-1].file_id)
+                return True
+            except Exception as exc:
+                if "not modified" in str(exc).lower():
+                    return True
+                if kind == "file_id":
+                    self._chart_file_ids.pop(image.digest, None)
+                last_error = exc
+        if last_error:
+            self._log("DEBUG", f"Chart-Bild konnte nicht editiert werden: {last_error}")
+        return False
+
+    async def _replace_chart_image(
+        self,
+        bot: Any,
+        chat_id: int,
+        old_message_id: int,
+        image: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Any:
+        if old_message_id and await self._edit_chart_image(
+            bot, chat_id, old_message_id, image, keyboard
+        ):
+            return None
+        message = await self._send_chart_image(bot, chat_id, image, keyboard)
+        if old_message_id and message:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
+            except Exception as exc:
+                self._log("DEBUG", f"Altes Chart-Bild konnte nicht gelöscht werden: {exc}")
+        return message
+
+    @staticmethod
+    def _chart_view_suffix(view: str) -> str:
+        norm_view = normalize_view(view)
+        return "" if norm_view == "timeline" else f":{norm_view}"
+
+    def _chart_callback(
+        self,
+        streamer_id: Optional[int],
+        period: str,
+        metric: str,
+        view: str,
+        refresh: int = 0,
+    ) -> str:
+        return (
+            f"chart_view:{int(streamer_id or 0)}:{period}:{metric}:{int(refresh)}"
+            + self._chart_view_suffix(view)
+        )
+
+    def _chart_keyboard(
+        self,
+        period: str,
+        metric: str,
+        streamer_id: Optional[int] = None,
+        view: str = "timeline",
+    ) -> InlineKeyboardMarkup:
+        sid = int(streamer_id or 0)
+        norm_view = normalize_view(view)
+        period_buttons = [
+            InlineKeyboardButton(
+                ("✅ " if key == period else "") + label,
+                callback_data=self._chart_callback(sid, key, metric, norm_view),
+            )
+            for key, label in (
+                ("today", "HEUTE"),
+                ("24h", "24H"),
+                ("7d", "7 TAGE"),
+                ("30d", "30 TAGE"),
+            )
+        ]
+        metric_buttons = [
+            InlineKeyboardButton(
+                ("✅ " if metric == "eur" else "") + "€ NETTO",
+                callback_data=self._chart_callback(sid, period, "eur", norm_view),
+            ),
+            InlineKeyboardButton(
+                ("✅ " if metric == "coins" else "") + "🪙 COINS",
+                callback_data=self._chart_callback(sid, period, "coins", norm_view),
+            ),
+            InlineKeyboardButton(
+                "🔄",
+                callback_data=self._chart_callback(
+                    sid, period, metric, norm_view, refresh=1
+                ),
+            ),
+        ]
+        rows: List[List[InlineKeyboardButton]] = [period_buttons, metric_buttons]
+
+        view_buttons = [
+            InlineKeyboardButton(
+                ("✅ " if key == norm_view else "") + CHART_VIEW_LABELS[key],
+                callback_data=self._chart_callback(sid, period, metric, key),
+            )
+            for key in CHART_VIEWS
+        ]
+        rows.append(view_buttons[:3])
+        rows.append(view_buttons[3:])
+
+        picker_row = [
+            InlineKeyboardButton(
+                "📺 STREAMER",
+                callback_data=(
+                    f"chart_pick:{period}:{metric}"
+                    + self._chart_view_suffix(norm_view)
+                ),
+            )
+        ]
+        if sid:
+            picker_row.append(
+                InlineKeyboardButton(
+                    "🌐 ALLE",
+                    callback_data=self._chart_callback(0, period, metric, norm_view),
+                )
+            )
+        rows.append(picker_row)
+        return InlineKeyboardMarkup(rows)
+
+    def _format_chart_picker(
+        self,
+        period: str,
+        metric: str,
+        page: int = 0,
+        chart_message_id: int = 0,
+        view: str = "timeline",
+    ) -> Tuple[str, InlineKeyboardMarkup]:
+        streamers = list_streamers_for_picker()
+        norm_view = normalize_view(view)
+        suffix = self._chart_view_suffix(norm_view)
+        page_size = 8
+        total_pages = max(1, (len(streamers) + page_size - 1) // page_size)
+        page = max(0, min(int(page), total_pages - 1))
+        start = page * page_size
+        visible = streamers[start : start + page_size]
+
+        period_label = {
+            "today": "HEUTE",
+            "24h": "24 H",
+            "7d": "7 TAGE",
+            "30d": "30 TAGE",
+        }.get(period, period.upper())
+        metric_label = "NETTO (EUR)" if metric == "eur" else "COINS"
+
+        text = "\n".join(
+            [
+                bf.header(3, "📺 STREAMER"),
+                "<b>CHART NACH STREAMER</b>",
+                bf.kv_table(
+                    [
+                        ("ZEITRAUM", period_label),
+                        ("METRIK", metric_label),
+                        ("ANSICHT", CHART_VIEW_LABELS.get(norm_view, "VERLAUF")),
+                        ("STREAMER", str(len(streamers))),
+                        ("SEITE", f"{page + 1}/{total_pages}"),
+                    ]
+                ),
+                "<i>Wähle einen Streamer für die grafische Ansicht.</i>",
+            ]
+        )
+
+        buttons: List[List[InlineKeyboardButton]] = []
+        row: List[InlineKeyboardButton] = []
+        for streamer in visible:
+            sid = int(streamer.get("id") or 0)
+            username = str(streamer.get("username") or "").strip()
+            label = ("🟢 " if streamer.get("is_live") else "") + f"@{username}"
+            if len(label) > 30:
+                label = label[:29] + "…"
+            row.append(
+                InlineKeyboardButton(
+                    label,
+                    callback_data=f"chart_stream:{sid}:{period}:{metric}:{chart_message_id}{suffix}",
+                )
+            )
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+
+        nav: List[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(
+                    "◀️",
+                    callback_data=f"chart_page:{page - 1}:{period}:{metric}:{chart_message_id}{suffix}",
+                )
+            )
+        if page < total_pages - 1:
+            nav.append(
+                InlineKeyboardButton(
+                    "▶️",
+                    callback_data=f"chart_page:{page + 1}:{period}:{metric}:{chart_message_id}{suffix}",
+                )
+            )
+        if nav:
+            buttons.append(nav)
+        buttons.append([InlineKeyboardButton("✖️ ABBRECHEN", callback_data="chart_cancel:0")])
+        return text, InlineKeyboardMarkup(buttons)
+
+    def _format_chart_summary(self, chart: Any, note: str = "") -> str:
+        metric_value = (
+            f"€ {format_eur(chart.total)}"
+            if chart.metric == "eur"
+            else f"{format_coins(chart.total)} Coins"
+        )
+        peak_value = (
+            f"€ {format_eur(chart.peak)}"
+            if chart.metric == "eur"
+            else f"{format_coins(chart.peak)} Coins"
+        )
+        lines = [
+            bf.header(1, "📈 EINNAHMEN-CHART"),
+            bf.kv_table(
+                [
+                    *(
+                        [("STREAMER", f"@{chart.streamer_name}")]
+                        if getattr(chart, "streamer_name", "")
+                        else []
+                    ),
+                    ("ANSICHT", getattr(chart, "view_label", "VERLAUF")),
+                    ("ZEITRAUM", chart.period_label),
+                    ("METRIK", chart.metric_label),
+                    ("SUMME", metric_value),
+                    ("PEAK", peak_value),
+                    ("PUNKTE", str(chart.points)),
+                ]
+            ),
+        ]
+        if note:
+            lines.extend([bf.rule(), note])
+        lines.extend(["\n" + bf.footer()])
+        return "\n".join(lines)
+
+    def _build_chart_summary(
+        self,
+        period: str,
+        metric: str,
+        streamer_id: Optional[int] = None,
+        streamer_name: str = "",
+        note: str = "",
+        view: str = "timeline",
+    ) -> str:
+        return self._format_chart_summary(
+            build_chart_widget(period, metric, streamer_id, streamer_name, view=view),
+            note,
+        )
+
+    async def _send_chart_widget(
+        self,
+        bot: Any,
+        chat_id: int,
+        chart: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> Optional[int]:
+        # PTB 22.8 kennt sendWidget (Bot API 10.4) noch nicht; do_api_request
+        # ist der offizielle Weg für neue Methoden.
+        result = await bot.do_api_request(
+            "sendWidget",
+            api_kwargs={
+                "chat_id": chat_id,
+                "html": chart.html,
+                "caption": chart.caption,
+                "height": chart.height,
+                "reply_markup": keyboard,
+            },
+        )
+        if isinstance(result, dict) and result.get("message_id"):
+            return int(result["message_id"])
+        return None
+
+    async def _replace_chart_widget(
+        self,
+        bot: Any,
+        chat_id: int,
+        old_message_id: int,
+        chart: Any,
+        keyboard: InlineKeyboardMarkup,
+    ) -> None:
+        new_message_id = await self._send_chart_widget(bot, chat_id, chart, keyboard)
+        if not new_message_id or not old_message_id:
+            return
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
+        except Exception as exc:
+            self._log("DEBUG", f"Altes Chart-Widget konnte nicht gelöscht werden: {exc}")
+
+    def _parse_chart_args(
+        self, args: Optional[List[str]]
+    ) -> Tuple[str, str, Optional[str], str]:
+        period = "24h"
+        metric = "eur"
+        streamer: Optional[str] = None
+        view = "timeline"
+        for raw in args or []:
+            text = str(raw).strip()
+            arg = text.lower()
+            if arg in ("today", "heute", "day"):
+                period = "today"
+            elif arg in ("24h", "24"):
+                period = "24h"
+            elif arg in ("7d", "woche", "week"):
+                period = "7d"
+            elif arg in ("30d", "monat", "month"):
+                period = "30d"
+            elif arg in ("eur", "euro", "€", "netto"):
+                metric = "eur"
+            elif arg in ("coins", "coin", "diamonds"):
+                metric = "coins"
+            elif arg in ("all", "alle", "global"):
+                streamer = None
+            elif not text.startswith("@") and is_view_alias(arg):
+                view = normalize_view(arg)
+            elif streamer is None:
+                streamer = arg.lstrip("@")
+        return period, metric, streamer, view
+
+    async def _cmd_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message or not update.effective_chat:
+            return
+        if not await self._authorize(update, require_permission=PERM_BOT_ANALYTICS_VIEW):
+            return
+
+        period, metric, streamer_arg, view = self._parse_chart_args(context.args)
+        streamer_id: Optional[int] = None
+        streamer_name = ""
+        if streamer_arg:
+            streamer_row = await asyncio.to_thread(
+                get_streamer_by_id_or_username, streamer_arg
+            )
+            if not streamer_row:
+                await update.effective_message.reply_text(
+                    bf.eyebrow("🔍 STREAMER NICHT GEFUNDEN")
+                    + f"\n<b>@{html.escape(streamer_arg)}</b> ist nicht in der Datenbank.\n\n"
+                    + "Verfügbare Streamer: <code>/streamers</code>\n"
+                    + "Globaler Chart: <code>/chart</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            streamer_id = int(streamer_row["id"])
+            streamer_name = str(streamer_row.get("username") or streamer_arg)
+
+        chat_type = getattr(update.effective_chat, "type", "")
+
+        if not config.telegram_widget_charts:
+            await update.effective_message.reply_text(
+                "<b>CHARTS DEAKTIVIERT</b>\n"
+                "Aktiviere <code>TELEGRAM_WIDGET_CHARTS=1</code>, um Charts zu nutzen.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        use_image = config.telegram_chart_renderer == "image"
+
+        # Widgets sind in Produktion ausschliesslich im Privatchat verfuegbar.
+        # Bilder (PNG) funktionieren dagegen in jedem Chat.
+        if not use_image and str(chat_type) != "private":
+            try:
+                chart = await asyncio.to_thread(
+                    build_chart_widget,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    False,
+                    view,
+                )
+                text = self._format_chart_summary(
+                    chart,
+                    "<i>Interaktive Widget-Charts sind in Produktion nur im "
+                    "Privatchat mit dem Bot verfügbar. Öffne <code>/chart</code> "
+                    "dort für die grafische Ansicht.</i>",
+                )
+            except Exception as exc:
+                self._log("ERROR", f"Chart-Fallback fehlgeschlagen: {type(exc).__name__}: {exc}")
+                text = self._chart_failure_text(period)
+            await update.effective_message.reply_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            return
+
+        try:
+            try:
+                await context.bot.send_chat_action(
+                    chat_id=int(update.effective_chat.id),
+                    action="upload_photo",
+                )
+            except Exception:
+                pass
+            started_at = time.perf_counter()
+            keyboard = self._chart_keyboard(period, metric, streamer_id, view)
+            if use_image:
+                image = await asyncio.to_thread(
+                    build_chart_image,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    False,
+                    view,
+                )
+                elapsed = time.perf_counter() - started_at
+                self._log(
+                    "DEBUG",
+                    f"Chart-Bild {view}/{period}/{metric} "
+                    f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
+                    f"geladen in {elapsed:.2f}s "
+                    f"({image.points} Punkte, {len(image.png)} Bytes).",
+                )
+                await self._send_chart_image(
+                    context.bot,
+                    int(update.effective_chat.id),
+                    image,
+                    keyboard,
+                )
+            else:
+                chart = await asyncio.to_thread(
+                    build_chart_widget,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    False,
+                    view,
+                )
+                elapsed = time.perf_counter() - started_at
+                self._log(
+                    "DEBUG",
+                    f"Chart-Widget {view}/{period}/{metric} "
+                    f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
+                    f"geladen in {elapsed:.2f}s ({chart.points} Punkte).",
+                )
+                await self._send_chart_widget(
+                    context.bot,
+                    int(update.effective_chat.id),
+                    chart,
+                    keyboard,
+                )
+        except Exception as exc:
+            self._log("ERROR", f"Chart-Versand fehlgeschlagen: {type(exc).__name__}: {exc}")
+            try:
+                text = await asyncio.to_thread(
+                    self._build_chart_summary,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    "<i>Das Chart konnte nicht gesendet werden. "
+                    "Hier die Kennzahlen als Text.</i>",
+                    view,
+                )
+            except Exception:
+                text = self._chart_failure_text(period)
+            await update.effective_message.reply_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+
+    def _chart_failure_text(self, period: str) -> str:
+        try:
+            return self._format_overview_view(period)
+        except Exception:
+            return (
+                "<b>CHART NICHT VERFÜGBAR</b>\n"
+                "Die Kennzahlen konnten aktuell nicht geladen werden."
+            )
 
     # -----------------------------------------------------------------
     # SPENDER-RADAR & CRM (/radar)
@@ -2441,7 +3016,15 @@ class TelegramBotService:
         text = None
         markup = None
 
-        if action in ("overview_period", "overview_streamer") and PERM_BOT_ANALYTICS_VIEW not in access_perms:
+        if action in (
+            "overview_period",
+            "overview_streamer",
+            "chart_view",
+            "chart_pick",
+            "chart_page",
+            "chart_stream",
+            "chart_cancel",
+        ) and PERM_BOT_ANALYTICS_VIEW not in access_perms:
             await _deny_permission(PERM_BOT_ANALYTICS_VIEW)
             return
         if action in ("radar_tier", "whales_min", "donor_refresh", "loyalty_days") and PERM_BOT_RADAR_VIEW not in access_perms:
@@ -2455,6 +3038,236 @@ class TelegramBotService:
             await query.answer()
             period = val or "today"
             text, markup = await asyncio.to_thread(self._format_overview_view, period)
+        elif action == "chart_view":
+            try:
+                await query.answer()
+            except Exception as exc:
+                # Callback-Queries verfallen; ein verspäteter Klick darf keinen
+                # unhandled BadRequest im Bot-Log erzeugen.
+                self._log("DEBUG", f"Chart-Callback konnte nicht bestätigt werden: {exc}")
+            if not config.telegram_widget_charts:
+                return
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            streamer_id: Optional[int] = None
+            view = "timeline"
+            if parts and parts[0].lstrip("-").isdigit():
+                sid = int(parts[0] or 0)
+                streamer_id = sid or None
+                period = parts[1] if len(parts) > 1 and parts[1] else "24h"
+                metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
+                force_refresh = len(parts) > 3 and parts[3] == "1"
+                view = normalize_view(parts[4]) if len(parts) > 4 else "timeline"
+            else:
+                # Kompatibilität mit Widgets aus der ersten Version
+                # (chart_view:<period>:<metric>).
+                period = parts[0] if parts and parts[0] else "24h"
+                metric = parts[1] if len(parts) > 1 and parts[1] else "eur"
+                force_refresh = False
+                if len(parts) > 2 and is_view_alias(parts[2]):
+                    view = normalize_view(parts[2])
+            streamer_name = ""
+            if streamer_id:
+                streamer_row = await asyncio.to_thread(
+                    get_streamer_by_id_or_username, streamer_id
+                )
+                if streamer_row:
+                    streamer_name = str(streamer_row.get("username") or "")
+            try:
+                keyboard = self._chart_keyboard(period, metric, streamer_id, view)
+                if config.telegram_chart_renderer == "image":
+                    image = await asyncio.to_thread(
+                        build_chart_image,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        force_refresh,
+                        view,
+                    )
+                    await self._replace_chart_image(
+                        context.bot,
+                        int(query.message.chat_id),
+                        int(query.message.message_id),
+                        image,
+                        keyboard,
+                    )
+                else:
+                    chart = await asyncio.to_thread(
+                        build_chart_widget,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        force_refresh,
+                        view,
+                    )
+                    await self._replace_chart_widget(
+                        context.bot,
+                        int(query.message.chat_id),
+                        int(query.message.message_id),
+                        chart,
+                        keyboard,
+                    )
+            except Exception as exc:
+                self._log("ERROR", f"Chart-Update fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
+        elif action == "chart_pick":
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            period = parts[0] if parts and parts[0] else "24h"
+            metric = parts[1] if len(parts) > 1 and parts[1] else "eur"
+            view = normalize_view(parts[2]) if len(parts) > 2 else "timeline"
+            chart_message_id = int(query.message.message_id)
+            try:
+                picker_text, picker_markup = await asyncio.to_thread(
+                    self._format_chart_picker,
+                    period,
+                    metric,
+                    0,
+                    chart_message_id,
+                    view,
+                )
+                await context.bot.send_message(
+                    chat_id=int(query.message.chat_id),
+                    text=picker_text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=picker_markup,
+                    disable_web_page_preview=True,
+                )
+            except Exception as exc:
+                self._log("ERROR", f"Streamer-Picker fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
+        elif action == "chart_page":
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            try:
+                page = int(parts[0]) if parts and parts[0] else 0
+            except ValueError:
+                page = 0
+            period = parts[1] if len(parts) > 1 and parts[1] else "24h"
+            metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
+            chart_message_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+            view = normalize_view(parts[4]) if len(parts) > 4 else "timeline"
+            try:
+                picker_text, picker_markup = await asyncio.to_thread(
+                    self._format_chart_picker,
+                    period,
+                    metric,
+                    page,
+                    chart_message_id,
+                    view,
+                )
+                await query.edit_message_text(
+                    text=picker_text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=picker_markup,
+                    disable_web_page_preview=True,
+                )
+            except Exception as exc:
+                if "not modified" not in str(exc).lower():
+                    self._log("ERROR", f"Streamer-Picker-Seite fehlgeschlagen: {exc}")
+            return
+        elif action == "chart_stream":
+            if not query.message:
+                return
+            parts = (val or "").split(":")
+            try:
+                streamer_id = int(parts[0]) if parts and parts[0].isdigit() else 0
+            except ValueError:
+                streamer_id = 0
+            period = parts[1] if len(parts) > 1 and parts[1] else "24h"
+            metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
+            chart_message_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+            view = normalize_view(parts[4]) if len(parts) > 4 else "timeline"
+            streamer_row = await asyncio.to_thread(
+                get_streamer_by_id_or_username, streamer_id
+            )
+            if not streamer_row:
+                try:
+                    await query.answer(
+                        "Streamer nicht gefunden. Bitte /streamers prüfen.",
+                        show_alert=True,
+                    )
+                except Exception:
+                    pass
+                return
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            streamer_name = str(streamer_row.get("username") or "")
+            try:
+                keyboard = self._chart_keyboard(period, metric, streamer_id, view)
+                if config.telegram_chart_renderer == "image":
+                    image = await asyncio.to_thread(
+                        build_chart_image,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        False,
+                        view,
+                    )
+                    await self._replace_chart_image(
+                        context.bot,
+                        int(query.message.chat_id),
+                        chart_message_id,
+                        image,
+                        keyboard,
+                    )
+                else:
+                    chart = await asyncio.to_thread(
+                        build_chart_widget,
+                        period,
+                        metric,
+                        streamer_id,
+                        streamer_name,
+                        False,
+                        view,
+                    )
+                    await self._replace_chart_widget(
+                        context.bot,
+                        int(query.message.chat_id),
+                        chart_message_id,
+                        chart,
+                        keyboard,
+                    )
+                try:
+                    await context.bot.delete_message(
+                        chat_id=int(query.message.chat_id),
+                        message_id=int(query.message.message_id),
+                    )
+                except Exception as exc:
+                    self._log("DEBUG", f"Streamer-Picker konnte nicht gelöscht werden: {exc}")
+            except Exception as exc:
+                self._log("ERROR", f"Streamer-Chart fehlgeschlagen: {type(exc).__name__}: {exc}")
+            return
+        elif action == "chart_cancel":
+            try:
+                await query.answer()
+            except Exception:
+                pass
+            if query.message:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=int(query.message.chat_id),
+                        message_id=int(query.message.message_id),
+                    )
+                except Exception as exc:
+                    self._log("DEBUG", f"Streamer-Picker konnte nicht geschlossen werden: {exc}")
+            return
         elif action == "radar_tier":
             await query.answer()
             tier = val or "all"

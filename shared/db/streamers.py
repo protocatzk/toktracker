@@ -425,6 +425,24 @@ def get_stream_sessions(
         return rows
 
 
+def list_streamers_for_picker() -> List[Dict[str, Any]]:
+    """
+    Leichtgewichtige Streamer-Liste für den Chart-Picker.
+
+    Bewusst ohne Gift-Aggregation: nur id, username, display_name und
+    Live-Status. Sortiert live zuerst, danach alphabetisch.
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, username, display_name, is_live, is_tracking
+            FROM streamers
+            ORDER BY is_live DESC, is_tracking DESC, username ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_all_streamers_summary() -> List[Dict[str, Any]]:
     """
     Liefert alle registrierten Streamer sortiert nach Live-Status und heutigem Umsatz.

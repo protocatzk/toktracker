@@ -57,7 +57,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
-| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py` sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
+| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
 | [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, Wrapper, `get_db`), `schema`, `settings`, `users`, `streamers`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`, `sqlite_import`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
 | [`services/api/`](./services/api) / [`app.py`](./app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
 | [`services/ingest/`](./services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
