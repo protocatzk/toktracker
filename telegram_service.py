@@ -53,17 +53,21 @@ from database import (
     get_db,
     get_donor_details,
     get_donor_radar_data,
+    get_group_streamer_ids,
     get_live_streamers,
     get_network_loyalty_and_overlap,
     get_previous_stream_session,
     get_recent_whale_gifts,
     get_settings,
     get_streamer_by_id_or_username,
+    get_streamer_group,
     get_telegram_access_mode,
     list_streamer_alert_subscriptions,
+    list_streamer_groups,
     list_telegram_users,
     mark_streamer_alert_notified,
     remove_streamer_alert,
+    resolve_streamer_group,
     save_donor_crm,
     set_telegram_access_mode,
     toggle_donor_vip,
@@ -166,10 +170,17 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 
-def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dict[str, Any]:
+def generate_full_report_data(
+    hours: int = 24,
+    only_active: bool = False,
+    group_id: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Erzeugt den vollständigen Bericht für alle Streamer (wird sowohl von der FastAPI-Route
     als auch vom Telegram-Bot für den 24h-Job genutzt).
+
+    Mit ``group_id`` wird der Bericht auf die Mitglieder einer Streamer-Gruppe
+    eingeschränkt.
     """
     cfg = get_settings()
     now = datetime.now()
@@ -177,6 +188,10 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
 
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM streamers ORDER BY username ASC").fetchall()
+    if group_id:
+        allowed = set(get_group_streamer_ids(int(group_id)))
+        rows = [r for r in rows if int(r["id"]) in allowed]
+    group = get_streamer_group(int(group_id)) if group_id else None
 
     cards: List[Dict[str, Any]] = []
     for r in rows:
@@ -209,8 +224,9 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
     total_gifts_sent = sum(c["period_gifts_sent"] for c in cards)
     live_now = sum(1 for c in cards if c["is_live"])
 
+    group_label = f" – Gruppe {group['name']}" if group else ""
     md_lines = [
-        f"*{BOT_BRAND} – Streamer Einnahmen-Report ({hours}h)*",
+        f"*{BOT_BRAND} – Streamer Einnahmen-Report ({hours}h){group_label}*",
         f"Stand: `{now.strftime('%d.%m.%Y %H:%M')}`",
         f"Gesamt Netto ({hours}h): `{total_period_eur_net:,.2f} €` (`${total_period_usd_net:,.2f}`)",
         f"Gesamt Coins ({hours}h): `{total_period_coins:,}` ({total_gifts_sent:,} Gifts)",
@@ -218,7 +234,8 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
         "────────────────────────",
     ]
     html_lines = [
-        bf.eyebrow(f"📋 {bf.BRAND} · REPORT / {hours}H"),
+        bf.eyebrow(f"📋 {bf.BRAND} · REPORT / {hours}H")
+        + (f"\nGRUPPE · {html.escape(str(group['name']))}" if group else ""),
         bf.kv_table(
             [
                 ("STAND", now.strftime("%d.%m.%Y %H:%M")),
@@ -261,6 +278,8 @@ def generate_full_report_data(hours: int = 24, only_active: bool = False) -> Dic
     return {
         "generated_at": now.isoformat(timespec="seconds"),
         "period_hours": hours,
+        "group_id": group_id,
+        "group_name": group["name"] if group else "",
         "cutoff_timestamp": cutoff,
         "currency_primary": cfg["currency_primary"],
         "totals": {
@@ -411,7 +430,7 @@ class TelegramBotService:
             self._app.add_handler(
                 CallbackQueryHandler(
                     self._on_interactive_callback,
-                    pattern=r"^(overview_period|chart_view|chart_pick|chart_page|chart_stream|chart_cancel|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
+                    pattern=r"^(overview_period|chart_view|chart_gview|chart_pick|chart_page|chart_stream|chart_group|chart_cancel|radar_tier|whales_min|donor_vip_toggle|donor_refresh|loyalty_days|streamers_list|gifts_refresh|live_refresh|overview_streamer):"
                 )
             )
 
@@ -484,7 +503,7 @@ class TelegramBotService:
             return
         commands = [
             BotCommand("start", "🏠 Hauptmenü & Befehlsübersicht öffnen"),
-            BotCommand("overview", "📊 Finanz- & Performance-Dashboard (Heute, 24h, 7d)"),
+            BotCommand("overview", "📊 Finanz-Dashboard (Heute, 24h, 7d; optional gruppe:<name>)"),
             BotCommand("chart", "📈 Charts: Verlauf, Streamer, Tageszeit, Geschenke, Spender"),
             BotCommand("radar", "🎯 Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
             BotCommand("whales", "🐋 Live-Stream der neuesten Großspenden"),
@@ -495,7 +514,7 @@ class TelegramBotService:
             BotCommand("live", "🟢 Aktuell live Streamer anzeigen"),
             BotCommand("gifts", "🎁 Live Gift-Ticker der letzten Geschenke"),
             BotCommand("streamer", "🔍 Einzelabfrage für einen Streamer (<username>)"),
-            BotCommand("report", "📋 24h-Gesamtbericht aller überwachten Streamer"),
+            BotCommand("report", "📋 24h-Gesamtbericht (optional gruppe:<name>)"),
             BotCommand("status", "⚙️ Laufzeit-Status aller aktiven TikTokLive-Worker"),
             BotCommand("id", "📌 Eigene Telegram-ID, Gruppen-ID & Berechtigung"),
             BotCommand("login", "🔐 [Admin] Einmal-Code für das Web-Admin-Panel erzeugen"),
@@ -1385,9 +1404,9 @@ class TelegramBotService:
         if PERM_BOT_ANALYTICS_VIEW in perms:
             sections.append(
                 bf.eyebrow("📊 02 / STATISTIK") + "\n"
-                "▪ 📊 <code>/overview [heute|24h|7d|30d|all]</code> — Finanz-Dashboard\n"
-                "▪ 📈 <code>/chart [@streamer] [24h|7d|30d] [eur|coins] [verlauf|streamer|tageszeit|geschenke|spender]</code> — Chart (Picker via 📺)\n"
-                "▪ 📋 <code>/report [stunden]</code> — Gesamtbericht aller Streamer\n"
+                "▪ 📊 <code>/overview [heute|24h|7d|30d|all] [gruppe:&lt;name&gt;]</code> — Finanz-Dashboard\n"
+                "▪ 📈 <code>/chart [@streamer|gruppe:&lt;name&gt;] [24h|7d|30d] [eur|coins] [verlauf|streamer|tageszeit|geschenke|spender]</code> — Chart (Picker via 📺)\n"
+                "▪ 📋 <code>/report [stunden] [gruppe:&lt;name&gt;]</code> — Gesamtbericht (optional je Gruppe)\n"
                 "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
                 "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
             )
@@ -1571,11 +1590,40 @@ class TelegramBotService:
             return
 
         hours = 24
-        if context.args and context.args[0].isdigit():
-            hours = max(1, min(720, int(context.args[0])))
+        group: Optional[Dict[str, Any]] = None
+        group_error = ""
+        group_ref = ""
+        group_parts: List[str] = []
+        for raw in context.args or []:
+            token = str(raw).strip()
+            if token.isdigit():
+                hours = max(1, min(720, int(token)))
+                continue
+            reference = self._group_reference(token)
+            if reference:
+                group_ref = reference
+                group_parts = [reference]
+            elif group_ref:
+                group_parts.append(token)
+
+        if group_parts:
+            group_ref = " ".join(group_parts)
+        if group_ref:
+            group = await asyncio.to_thread(resolve_streamer_group, group_ref)
+            if not group:
+                group_error = group_ref
+
+        if group_error:
+            await update.effective_message.reply_text(
+                f"Gruppe <code>{html.escape(str(group_error))}</code> nicht gefunden.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
 
         is_grp = self._is_group_chat(update)
-        report = await asyncio.to_thread(generate_full_report_data, hours, False)
+        report = await asyncio.to_thread(
+            generate_full_report_data, hours, False, (group or {}).get("id")
+        )
         await self._send_with_optional_banner(
             bot=context.bot,
             chat_id=update.effective_chat.id,
@@ -1694,11 +1742,18 @@ class TelegramBotService:
     # -----------------------------------------------------------------
     # INTERAKTIVE DASHBOARD & FINANZ-ÜBERSICHT (/overview)
     # -----------------------------------------------------------------
-    def _format_overview_view(self, period: str = "today") -> Tuple[str, InlineKeyboardMarkup]:
+    def _format_overview_view(
+        self, period: str = "today", group_id: Optional[int] = None
+    ) -> Tuple[str, InlineKeyboardMarkup]:
         norm_period = period if period in ("today", "24h", "7d", "30d", "all") else "today"
-        data = get_dashboard_overview(period=norm_period, force_refresh=True)
+        data = get_dashboard_overview(
+            period=norm_period, force_refresh=True, group_id=group_id
+        )
         totals = data.get("totals", {})
         streamers = data.get("streamers", [])
+        group = data.get("selected_group") or {}
+        group_name = str(group.get("name") or "")
+        scope_suffix = f":{int(group_id)}" if group_id else ""
 
         period_labels = {
             "today": "Heute (seit 00:00 Uhr)",
@@ -1718,22 +1773,29 @@ class TelegramBotService:
         streamer_count = totals.get("streamer_count", 0)
         total_gifts = totals.get("total_gifts_sent", 0)
 
+        kpi_rows = [("ZEITRAUM", p_label.upper())]
+        if group_name:
+            kpi_rows.append(("GRUPPE", group_name.upper()))
+        kpi_rows.extend(
+            [
+                ("NETTO", f"€ {eur_net:,.2f}"),
+                ("USD", f"$ {usd_net:,.2f}"),
+                ("BRUTTO", f"€ {eur_gross:,.2f}"),
+                ("BRUTTO USD", f"$ {usd_gross:,.2f}"),
+                ("COINS", f"{total_coins:,}"),
+                ("GIFTS", f"{total_gifts:,}"),
+                ("STREAMER", f"{live_count} LIVE / {streamer_count}"),
+            ]
+        )
+
         lines = [
             bf.header(1, "📊 FINANZEN"),
-            bf.kv_table(
-                [
-                    ("ZEITRAUM", p_label.upper()),
-                    ("NETTO", f"€ {eur_net:,.2f}"),
-                    ("USD", f"$ {usd_net:,.2f}"),
-                    ("BRUTTO", f"€ {eur_gross:,.2f}"),
-                    ("BRUTTO USD", f"$ {usd_gross:,.2f}"),
-                    ("COINS", f"{total_coins:,}"),
-                    ("GIFTS", f"{total_gifts:,}"),
-                    ("STREAMER", f"{live_count} LIVE / {streamer_count}"),
-                ]
-            ),
+            bf.kv_table(kpi_rows),
             bf.rule(),
-            bf.eyebrow(f"🏆 TOP STREAMER · {p_label}"),
+            bf.eyebrow(
+                f"🏆 TOP STREAMER · {p_label}"
+                + (f" · GRUPPE {group_name.upper()}" if group_name else "")
+            ),
         ]
 
         sorted_streamers = sorted(streamers, key=lambda s: int(s.get("total_coins") or 0), reverse=True)
@@ -1755,17 +1817,27 @@ class TelegramBotService:
 
         buttons = [
             [
-                InlineKeyboardButton(f"{'✅ ' if norm_period == 'today' else '📅 '}HEUTE", callback_data="overview_period:today"),
-                InlineKeyboardButton(f"{'✅ ' if norm_period == '24h' else '⏱ '}24H", callback_data="overview_period:24h"),
-                InlineKeyboardButton(f"{'✅ ' if norm_period == '7d' else '🗓 '}7 TAGE", callback_data="overview_period:7d"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == 'today' else '📅 '}HEUTE", callback_data=f"overview_period:today{scope_suffix}"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == '24h' else '⏱ '}24H", callback_data=f"overview_period:24h{scope_suffix}"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == '7d' else '🗓 '}7 TAGE", callback_data=f"overview_period:7d{scope_suffix}"),
             ],
             [
-                InlineKeyboardButton(f"{'✅ ' if norm_period == '30d' else '🗓 '}30 TAGE", callback_data="overview_period:30d"),
-                InlineKeyboardButton(f"{'✅ ' if norm_period == 'all' else '📈 '}GESAMT", callback_data="overview_period:all"),
-                InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"overview_period:{norm_period}"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == '30d' else '🗓 '}30 TAGE", callback_data=f"overview_period:30d{scope_suffix}"),
+                InlineKeyboardButton(f"{'✅ ' if norm_period == 'all' else '📈 '}GESAMT", callback_data=f"overview_period:all{scope_suffix}"),
+                InlineKeyboardButton("🔄 AKTUALISIEREN", callback_data=f"overview_period:{norm_period}{scope_suffix}"),
             ],
         ]
         return text, InlineKeyboardMarkup(buttons)
+
+    @staticmethod
+    def _group_reference(token: Any) -> str:
+        """Liest ``gruppe:<name>`` / ``group:<name>`` / ``g:<name>`` aus einem Argument."""
+        text = str(token or "").strip()
+        lowered = text.lower()
+        for prefix in ("gruppe:", "group:", "g:"):
+            if lowered.startswith(prefix):
+                return text[len(prefix):].strip()
+        return ""
 
     async def _cmd_overview(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message:
@@ -1774,9 +1846,18 @@ class TelegramBotService:
             return
 
         period = "today"
-        if context.args:
-            arg = context.args[0].lower().strip()
-            if arg in ("today", "24h", "7d", "30d", "all"):
+        group: Optional[Dict[str, Any]] = None
+        group_error = ""
+        group_ref = ""
+        group_parts: List[str] = []
+        for raw in context.args or []:
+            token = str(raw).strip()
+            arg = token.lower()
+            reference = self._group_reference(token)
+            if reference:
+                group_ref = reference
+                group_parts = [reference]
+            elif arg in ("today", "24h", "7d", "30d", "all"):
                 period = arg
             elif arg in ("heute", "day"):
                 period = "today"
@@ -1786,8 +1867,26 @@ class TelegramBotService:
                 period = "30d"
             elif arg in ("gesamt", "total"):
                 period = "all"
+            elif group_ref:
+                group_parts.append(token)
 
-        text, markup = await asyncio.to_thread(self._format_overview_view, period)
+        if group_parts:
+            group_ref = " ".join(group_parts)
+        if group_ref:
+            group = await asyncio.to_thread(resolve_streamer_group, group_ref)
+            if not group:
+                group_error = group_ref
+
+        if group_error:
+            await update.effective_message.reply_text(
+                f"Gruppe <code>{html.escape(str(group_error))}</code> nicht gefunden.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        text, markup = await asyncio.to_thread(
+            self._format_overview_view, period, (group or {}).get("id")
+        )
         await update.effective_message.reply_text(
             text,
             parse_mode=ParseMode.HTML,
@@ -1913,6 +2012,12 @@ class TelegramBotService:
         norm_view = normalize_view(view)
         return "" if norm_view == "timeline" else f":{norm_view}"
 
+    @staticmethod
+    def _chart_scope_label(streamer_name: str, group_name: str) -> str:
+        if group_name:
+            return f"GRUPPE {group_name.upper()}"
+        return f"@{streamer_name}" if streamer_name else "ALLE"
+
     def _chart_callback(
         self,
         streamer_id: Optional[int],
@@ -1920,9 +2025,12 @@ class TelegramBotService:
         metric: str,
         view: str,
         refresh: int = 0,
+        group_id: Optional[int] = None,
     ) -> str:
+        prefix = "chart_gview" if group_id else "chart_view"
+        scope_id = int(group_id) if group_id else int(streamer_id or 0)
         return (
-            f"chart_view:{int(streamer_id or 0)}:{period}:{metric}:{int(refresh)}"
+            f"{prefix}:{scope_id}:{period}:{metric}:{int(refresh)}"
             + self._chart_view_suffix(view)
         )
 
@@ -1932,13 +2040,15 @@ class TelegramBotService:
         metric: str,
         streamer_id: Optional[int] = None,
         view: str = "timeline",
+        group_id: Optional[int] = None,
     ) -> InlineKeyboardMarkup:
         sid = int(streamer_id or 0)
+        gid = int(group_id) if group_id else None
         norm_view = normalize_view(view)
         period_buttons = [
             InlineKeyboardButton(
                 ("✅ " if key == period else "") + label,
-                callback_data=self._chart_callback(sid, key, metric, norm_view),
+                callback_data=self._chart_callback(sid, key, metric, norm_view, group_id=gid),
             )
             for key, label in (
                 ("today", "HEUTE"),
@@ -1950,16 +2060,16 @@ class TelegramBotService:
         metric_buttons = [
             InlineKeyboardButton(
                 ("✅ " if metric == "eur" else "") + "€ NETTO",
-                callback_data=self._chart_callback(sid, period, "eur", norm_view),
+                callback_data=self._chart_callback(sid, period, "eur", norm_view, group_id=gid),
             ),
             InlineKeyboardButton(
                 ("✅ " if metric == "coins" else "") + "🪙 COINS",
-                callback_data=self._chart_callback(sid, period, "coins", norm_view),
+                callback_data=self._chart_callback(sid, period, "coins", norm_view, group_id=gid),
             ),
             InlineKeyboardButton(
                 "🔄",
                 callback_data=self._chart_callback(
-                    sid, period, metric, norm_view, refresh=1
+                    sid, period, metric, norm_view, refresh=1, group_id=gid
                 ),
             ),
         ]
@@ -1968,7 +2078,7 @@ class TelegramBotService:
         view_buttons = [
             InlineKeyboardButton(
                 ("✅ " if key == norm_view else "") + CHART_VIEW_LABELS[key],
-                callback_data=self._chart_callback(sid, period, metric, key),
+                callback_data=self._chart_callback(sid, period, metric, key, group_id=gid),
             )
             for key in CHART_VIEWS
         ]
@@ -1984,7 +2094,7 @@ class TelegramBotService:
                 ),
             )
         ]
-        if sid:
+        if sid or gid:
             picker_row.append(
                 InlineKeyboardButton(
                     "🌐 ALLE",
@@ -2003,13 +2113,17 @@ class TelegramBotService:
         view: str = "timeline",
     ) -> Tuple[str, InlineKeyboardMarkup]:
         streamers = list_streamers_for_picker()
+        groups = [g for g in list_streamer_groups() if g.get("member_count")]
         norm_view = normalize_view(view)
         suffix = self._chart_view_suffix(norm_view)
+        entries: List[Tuple[str, Dict[str, Any]]] = [
+            ("group", g) for g in groups
+        ] + [("streamer", streamer) for streamer in streamers]
         page_size = 8
-        total_pages = max(1, (len(streamers) + page_size - 1) // page_size)
+        total_pages = max(1, (len(entries) + page_size - 1) // page_size)
         page = max(0, min(int(page), total_pages - 1))
         start = page * page_size
-        visible = streamers[start : start + page_size]
+        visible = entries[start : start + page_size]
 
         period_label = {
             "today": "HEUTE",
@@ -2028,28 +2142,33 @@ class TelegramBotService:
                         ("ZEITRAUM", period_label),
                         ("METRIK", metric_label),
                         ("ANSICHT", CHART_VIEW_LABELS.get(norm_view, "VERLAUF")),
+                        ("GRUPPEN", str(len(groups))),
                         ("STREAMER", str(len(streamers))),
                         ("SEITE", f"{page + 1}/{total_pages}"),
                     ]
                 ),
-                "<i>Wähle einen Streamer für die grafische Ansicht.</i>",
+                "<i>Wähle eine Gruppe oder einen Streamer für die grafische Ansicht.</i>",
             ]
         )
 
         buttons: List[List[InlineKeyboardButton]] = []
         row: List[InlineKeyboardButton] = []
-        for streamer in visible:
-            sid = int(streamer.get("id") or 0)
-            username = str(streamer.get("username") or "").strip()
-            label = ("🟢 " if streamer.get("is_live") else "") + f"@{username}"
-            if len(label) > 30:
-                label = label[:29] + "…"
-            row.append(
-                InlineKeyboardButton(
-                    label,
-                    callback_data=f"chart_stream:{sid}:{period}:{metric}:{chart_message_id}{suffix}",
-                )
-            )
+        for kind, item in visible:
+            if kind == "group":
+                gid = int(item.get("id") or 0)
+                name = str(item.get("name") or "").strip()
+                label = f"👥 {name} ({int(item.get('member_count') or 0)})"
+                if len(label) > 30:
+                    label = label[:29] + "…"
+                callback = f"chart_group:{gid}:{period}:{metric}:{chart_message_id}{suffix}"
+            else:
+                sid = int(item.get("id") or 0)
+                username = str(item.get("username") or "").strip()
+                label = ("🟢 " if item.get("is_live") else "") + f"@{username}"
+                if len(label) > 30:
+                    label = label[:29] + "…"
+                callback = f"chart_stream:{sid}:{period}:{metric}:{chart_message_id}{suffix}"
+            row.append(InlineKeyboardButton(label, callback_data=callback))
             if len(row) == 2:
                 buttons.append(row)
                 row = []
@@ -2092,6 +2211,11 @@ class TelegramBotService:
             bf.kv_table(
                 [
                     *(
+                        [("GRUPPE", str(getattr(chart, "group_name", "")))]
+                        if getattr(chart, "group_name", "")
+                        else []
+                    ),
+                    *(
                         [("STREAMER", f"@{chart.streamer_name}")]
                         if getattr(chart, "streamer_name", "")
                         else []
@@ -2118,9 +2242,19 @@ class TelegramBotService:
         streamer_name: str = "",
         note: str = "",
         view: str = "timeline",
+        group_id: Optional[int] = None,
+        group_name: str = "",
     ) -> str:
         return self._format_chart_summary(
-            build_chart_widget(period, metric, streamer_id, streamer_name, view=view),
+            build_chart_widget(
+                period,
+                metric,
+                streamer_id,
+                streamer_name,
+                view=view,
+                group_id=group_id,
+                group_name=group_name,
+            ),
             note,
         )
 
@@ -2163,17 +2297,115 @@ class TelegramBotService:
         except Exception as exc:
             self._log("DEBUG", f"Altes Chart-Widget konnte nicht gelöscht werden: {exc}")
 
+    async def _render_chart_scope(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        query: Any,
+        period: str,
+        metric: str,
+        view: str,
+        *,
+        streamer_id: Optional[int] = None,
+        group_id: Optional[int] = None,
+        force_refresh: bool = False,
+        chart_message_id: Optional[int] = None,
+        delete_picker: bool = False,
+    ) -> None:
+        """Rendert ein Chart für Streamer, Gruppe oder Gesamt-Scope neu."""
+        if not query.message:
+            return
+        streamer_name = ""
+        group_name = ""
+        try:
+            if group_id:
+                group = await asyncio.to_thread(get_streamer_group, group_id)
+                if not group:
+                    await query.answer("Gruppe nicht gefunden.", show_alert=True)
+                    return
+                group_name = str(group.get("name") or "")
+            elif streamer_id:
+                streamer_row = await asyncio.to_thread(
+                    get_streamer_by_id_or_username, streamer_id
+                )
+                if not streamer_row:
+                    await query.answer(
+                        "Streamer nicht gefunden. Bitte /streamers prüfen.",
+                        show_alert=True,
+                    )
+                    return
+                streamer_name = str(streamer_row.get("username") or "")
+        except Exception as exc:
+            self._log("ERROR", f"Chart-Scope-Auflösung fehlgeschlagen: {exc}")
+            return
+
+        target_message_id = (
+            int(chart_message_id)
+            if chart_message_id is not None
+            else int(query.message.message_id)
+        )
+        chat_id = int(query.message.chat_id)
+        try:
+            keyboard = self._chart_keyboard(
+                period, metric, streamer_id, view, group_id
+            )
+            if config.telegram_chart_renderer == "image":
+                image = await asyncio.to_thread(
+                    build_chart_image,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    force_refresh,
+                    view,
+                    group_id,
+                    group_name,
+                )
+                await self._replace_chart_image(
+                    context.bot, chat_id, target_message_id, image, keyboard
+                )
+            else:
+                chart = await asyncio.to_thread(
+                    build_chart_widget,
+                    period,
+                    metric,
+                    streamer_id,
+                    streamer_name,
+                    force_refresh,
+                    view,
+                    group_id,
+                    group_name,
+                )
+                await self._replace_chart_widget(
+                    context.bot, chat_id, target_message_id, chart, keyboard
+                )
+            if delete_picker:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=chat_id,
+                        message_id=int(query.message.message_id),
+                    )
+                except Exception as exc:
+                    self._log("DEBUG", f"Picker konnte nicht gelöscht werden: {exc}")
+        except Exception as exc:
+            self._log("ERROR", f"Chart-Update fehlgeschlagen: {type(exc).__name__}: {exc}")
+
     def _parse_chart_args(
         self, args: Optional[List[str]]
-    ) -> Tuple[str, str, Optional[str], str]:
+    ) -> Tuple[str, str, Optional[str], str, str]:
         period = "24h"
         metric = "eur"
         streamer: Optional[str] = None
         view = "timeline"
+        group_ref = ""
+        group_parts: List[str] = []
         for raw in args or []:
             text = str(raw).strip()
             arg = text.lower()
-            if arg in ("today", "heute", "day"):
+            reference = self._group_reference(text)
+            if reference:
+                group_ref = reference
+                group_parts = [reference]
+            elif arg in ("today", "heute", "day"):
                 period = "today"
             elif arg in ("24h", "24"):
                 period = "24h"
@@ -2189,9 +2421,18 @@ class TelegramBotService:
                 streamer = None
             elif not text.startswith("@") and is_view_alias(arg):
                 view = normalize_view(arg)
+            elif group_ref:
+                # Mehrwortige Gruppennamen: /chart gruppe:Team Alpha 7d
+                group_parts.append(text)
             elif streamer is None:
                 streamer = arg.lstrip("@")
-        return period, metric, streamer, view
+        return (
+            period,
+            metric,
+            streamer,
+            view,
+            " ".join(group_parts) if group_parts else group_ref,
+        )
 
     async def _cmd_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
@@ -2199,10 +2440,24 @@ class TelegramBotService:
         if not await self._authorize(update, require_permission=PERM_BOT_ANALYTICS_VIEW):
             return
 
-        period, metric, streamer_arg, view = self._parse_chart_args(context.args)
+        period, metric, streamer_arg, view, group_ref = self._parse_chart_args(context.args)
         streamer_id: Optional[int] = None
         streamer_name = ""
-        if streamer_arg:
+        group_id: Optional[int] = None
+        group_name = ""
+        if group_ref:
+            group = await asyncio.to_thread(resolve_streamer_group, group_ref)
+            if not group:
+                await update.effective_message.reply_text(
+                    bf.eyebrow("🔍 GRUPPE NICHT GEFUNDEN")
+                    + f"\n<b>{html.escape(group_ref)}</b> ist keine bekannte Gruppe.\n\n"
+                    + "Gruppen werden im Web-Panel unter <b>Streamer-Gruppen</b> verwaltet.",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            group_id = int(group["id"])
+            group_name = str(group.get("name") or "")
+        elif streamer_arg:
             streamer_row = await asyncio.to_thread(
                 get_streamer_by_id_or_username, streamer_arg
             )
@@ -2242,6 +2497,8 @@ class TelegramBotService:
                     streamer_name,
                     False,
                     view,
+                    group_id,
+                    group_name,
                 )
                 text = self._format_chart_summary(
                     chart,
@@ -2268,7 +2525,9 @@ class TelegramBotService:
             except Exception:
                 pass
             started_at = time.perf_counter()
-            keyboard = self._chart_keyboard(period, metric, streamer_id, view)
+            keyboard = self._chart_keyboard(
+                period, metric, streamer_id, view, group_id
+            )
             if use_image:
                 image = await asyncio.to_thread(
                     build_chart_image,
@@ -2278,12 +2537,14 @@ class TelegramBotService:
                     streamer_name,
                     False,
                     view,
+                    group_id,
+                    group_name,
                 )
                 elapsed = time.perf_counter() - started_at
                 self._log(
                     "DEBUG",
                     f"Chart-Bild {view}/{period}/{metric} "
-                    f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
+                    f"für {self._chart_scope_label(streamer_name, group_name)} "
                     f"geladen in {elapsed:.2f}s "
                     f"({image.points} Punkte, {len(image.png)} Bytes).",
                 )
@@ -2302,12 +2563,14 @@ class TelegramBotService:
                     streamer_name,
                     False,
                     view,
+                    group_id,
+                    group_name,
                 )
                 elapsed = time.perf_counter() - started_at
                 self._log(
                     "DEBUG",
                     f"Chart-Widget {view}/{period}/{metric} "
-                    f"für {('@' + streamer_name) if streamer_name else 'ALLE'} "
+                    f"für {self._chart_scope_label(streamer_name, group_name)} "
                     f"geladen in {elapsed:.2f}s ({chart.points} Punkte).",
                 )
                 await self._send_chart_widget(
@@ -2328,6 +2591,8 @@ class TelegramBotService:
                     "<i>Das Chart konnte nicht gesendet werden. "
                     "Hier die Kennzahlen als Text.</i>",
                     view,
+                    group_id,
+                    group_name,
                 )
             except Exception:
                 text = self._chart_failure_text(period)
@@ -3020,9 +3285,11 @@ class TelegramBotService:
             "overview_period",
             "overview_streamer",
             "chart_view",
+            "chart_gview",
             "chart_pick",
             "chart_page",
             "chart_stream",
+            "chart_group",
             "chart_cancel",
         ) and PERM_BOT_ANALYTICS_VIEW not in access_perms:
             await _deny_permission(PERM_BOT_ANALYTICS_VIEW)
@@ -3036,9 +3303,12 @@ class TelegramBotService:
 
         if action == "overview_period":
             await query.answer()
-            period = val or "today"
-            text, markup = await asyncio.to_thread(self._format_overview_view, period)
-        elif action == "chart_view":
+            period, _, group_part = (val or "").partition(":")
+            group_id = int(group_part) if group_part.isdigit() and int(group_part) > 0 else None
+            text, markup = await asyncio.to_thread(
+                self._format_overview_view, period or "today", group_id
+            )
+        elif action in ("chart_view", "chart_gview"):
             try:
                 await query.answer()
             except Exception as exc:
@@ -3051,10 +3321,15 @@ class TelegramBotService:
                 return
             parts = (val or "").split(":")
             streamer_id: Optional[int] = None
+            group_id: Optional[int] = None
             view = "timeline"
+            force_refresh = False
             if parts and parts[0].lstrip("-").isdigit():
-                sid = int(parts[0] or 0)
-                streamer_id = sid or None
+                scope_id = int(parts[0] or 0)
+                if action == "chart_gview":
+                    group_id = scope_id or None
+                else:
+                    streamer_id = scope_id or None
                 period = parts[1] if len(parts) > 1 and parts[1] else "24h"
                 metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
                 force_refresh = len(parts) > 3 and parts[3] == "1"
@@ -3064,54 +3339,18 @@ class TelegramBotService:
                 # (chart_view:<period>:<metric>).
                 period = parts[0] if parts and parts[0] else "24h"
                 metric = parts[1] if len(parts) > 1 and parts[1] else "eur"
-                force_refresh = False
                 if len(parts) > 2 and is_view_alias(parts[2]):
                     view = normalize_view(parts[2])
-            streamer_name = ""
-            if streamer_id:
-                streamer_row = await asyncio.to_thread(
-                    get_streamer_by_id_or_username, streamer_id
-                )
-                if streamer_row:
-                    streamer_name = str(streamer_row.get("username") or "")
-            try:
-                keyboard = self._chart_keyboard(period, metric, streamer_id, view)
-                if config.telegram_chart_renderer == "image":
-                    image = await asyncio.to_thread(
-                        build_chart_image,
-                        period,
-                        metric,
-                        streamer_id,
-                        streamer_name,
-                        force_refresh,
-                        view,
-                    )
-                    await self._replace_chart_image(
-                        context.bot,
-                        int(query.message.chat_id),
-                        int(query.message.message_id),
-                        image,
-                        keyboard,
-                    )
-                else:
-                    chart = await asyncio.to_thread(
-                        build_chart_widget,
-                        period,
-                        metric,
-                        streamer_id,
-                        streamer_name,
-                        force_refresh,
-                        view,
-                    )
-                    await self._replace_chart_widget(
-                        context.bot,
-                        int(query.message.chat_id),
-                        int(query.message.message_id),
-                        chart,
-                        keyboard,
-                    )
-            except Exception as exc:
-                self._log("ERROR", f"Chart-Update fehlgeschlagen: {type(exc).__name__}: {exc}")
+            await self._render_chart_scope(
+                context,
+                query,
+                period,
+                metric,
+                view,
+                streamer_id=streamer_id,
+                group_id=group_id,
+                force_refresh=force_refresh,
+            )
             return
         elif action == "chart_pick":
             try:
@@ -3179,25 +3418,19 @@ class TelegramBotService:
                 if "not modified" not in str(exc).lower():
                     self._log("ERROR", f"Streamer-Picker-Seite fehlgeschlagen: {exc}")
             return
-        elif action == "chart_stream":
+        elif action in ("chart_stream", "chart_group"):
             if not query.message:
                 return
             parts = (val or "").split(":")
-            try:
-                streamer_id = int(parts[0]) if parts and parts[0].isdigit() else 0
-            except ValueError:
-                streamer_id = 0
+            scope_id = int(parts[0]) if parts and parts[0].isdigit() else 0
             period = parts[1] if len(parts) > 1 and parts[1] else "24h"
             metric = parts[2] if len(parts) > 2 and parts[2] else "eur"
             chart_message_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
             view = normalize_view(parts[4]) if len(parts) > 4 else "timeline"
-            streamer_row = await asyncio.to_thread(
-                get_streamer_by_id_or_username, streamer_id
-            )
-            if not streamer_row:
+            if not scope_id:
                 try:
                     await query.answer(
-                        "Streamer nicht gefunden. Bitte /streamers prüfen.",
+                        "Eintrag nicht gefunden. Bitte /streamers prüfen.",
                         show_alert=True,
                     )
                 except Exception:
@@ -3207,52 +3440,17 @@ class TelegramBotService:
                 await query.answer()
             except Exception:
                 pass
-            streamer_name = str(streamer_row.get("username") or "")
-            try:
-                keyboard = self._chart_keyboard(period, metric, streamer_id, view)
-                if config.telegram_chart_renderer == "image":
-                    image = await asyncio.to_thread(
-                        build_chart_image,
-                        period,
-                        metric,
-                        streamer_id,
-                        streamer_name,
-                        False,
-                        view,
-                    )
-                    await self._replace_chart_image(
-                        context.bot,
-                        int(query.message.chat_id),
-                        chart_message_id,
-                        image,
-                        keyboard,
-                    )
-                else:
-                    chart = await asyncio.to_thread(
-                        build_chart_widget,
-                        period,
-                        metric,
-                        streamer_id,
-                        streamer_name,
-                        False,
-                        view,
-                    )
-                    await self._replace_chart_widget(
-                        context.bot,
-                        int(query.message.chat_id),
-                        chart_message_id,
-                        chart,
-                        keyboard,
-                    )
-                try:
-                    await context.bot.delete_message(
-                        chat_id=int(query.message.chat_id),
-                        message_id=int(query.message.message_id),
-                    )
-                except Exception as exc:
-                    self._log("DEBUG", f"Streamer-Picker konnte nicht gelöscht werden: {exc}")
-            except Exception as exc:
-                self._log("ERROR", f"Streamer-Chart fehlgeschlagen: {type(exc).__name__}: {exc}")
+            await self._render_chart_scope(
+                context,
+                query,
+                period,
+                metric,
+                view,
+                streamer_id=scope_id if action == "chart_stream" else None,
+                group_id=scope_id if action == "chart_group" else None,
+                chart_message_id=chart_message_id,
+                delete_picker=True,
+            )
             return
         elif action == "chart_cancel":
             try:

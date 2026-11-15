@@ -86,6 +86,8 @@ class ChartImage:
     points: int
     streamer_id: Optional[int] = None
     streamer_name: str = ""
+    group_id: Optional[int] = None
+    group_name: str = ""
     view: str = "timeline"
     view_label: str = "VERLAUF"
 
@@ -463,6 +465,8 @@ def _view_fingerprint(series: ChartViewSeries) -> str:
             series.period,
             series.metric,
             series.streamer_id or 0,
+            series.group_id or 0,
+            series.group_name,
             series.labels,
             series.values,
             round(series.total, 4),
@@ -479,6 +483,8 @@ def _fingerprint(series: ChartSeries) -> str:
             series.period,
             series.metric,
             series.streamer_id or 0,
+            series.group_id or 0,
+            series.group_name,
             series.values,
             round(series.total, 4),
             round(series.peak, 4),
@@ -495,6 +501,8 @@ def build_chart_image(
     streamer_name: str = "",
     force_refresh: bool = False,
     view: str = "timeline",
+    group_id: Optional[int] = None,
+    group_name: str = "",
 ) -> ChartImage:
     """
     Liefert ein gecachtes PNG für die Chart-Daten.
@@ -513,9 +521,19 @@ def build_chart_image(
             streamer_id,
             streamer_name,
             force_refresh,
+            group_id,
+            group_name,
         )
 
-    series = load_chart_series(period, metric, streamer_id, streamer_name, force_refresh)
+    series = load_chart_series(
+        period,
+        metric,
+        streamer_id,
+        streamer_name,
+        force_refresh,
+        group_id,
+        group_name,
+    )
     key = _fingerprint(series)
     now = time.monotonic()
 
@@ -539,6 +557,8 @@ def build_chart_image(
             points=len(series.values),
             streamer_id=series.streamer_id,
             streamer_name=series.streamer_name,
+            group_id=series.group_id,
+            group_name=series.group_name,
         )
         _image_cache[key] = (now, image)
         while len(_image_cache) > _CACHE_MAX_ENTRIES:
@@ -553,10 +573,19 @@ def _build_chart_view_image(
     streamer_id: Optional[int],
     streamer_name: str,
     force_refresh: bool,
+    group_id: Optional[int] = None,
+    group_name: str = "",
 ) -> ChartImage:
     """Rendert und cached die zusätzlichen Admin-Panel-Ansichten als PNG."""
     series = load_chart_view(
-        view, period, metric, streamer_id, streamer_name, force_refresh
+        view,
+        period,
+        metric,
+        streamer_id,
+        streamer_name,
+        force_refresh,
+        group_id,
+        group_name,
     )
     key = _view_fingerprint(series)
     now = time.monotonic()
@@ -581,6 +610,8 @@ def _build_chart_view_image(
             points=len(series.values),
             streamer_id=series.streamer_id,
             streamer_name=series.streamer_name,
+            group_id=series.group_id,
+            group_name=series.group_name,
             view=series.view,
             view_label=series.view_label,
         )

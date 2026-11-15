@@ -94,6 +94,8 @@ class ChartWidget:
     points: int
     streamer_id: Optional[int] = None
     streamer_name: str = ""
+    group_id: Optional[int] = None
+    group_name: str = ""
     height: int = WIDGET_HEIGHT
     view: str = "timeline"
     view_label: str = "VERLAUF"
@@ -199,6 +201,7 @@ def _load_timeline(
     period: str,
     streamer_id: Optional[int] = None,
     force_refresh: bool = False,
+    group_id: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     # Lazy import: haelt das Modul unabhaengig von der DB-Fassade und
     # vermeidet Zyklen beim App-Import.
@@ -208,6 +211,7 @@ def _load_timeline(
         period=period,
         streamer_id=streamer_id,
         force_refresh=force_refresh,
+        group_id=group_id,
     )
     timeline = data.get("timeline") or []
     totals = data.get("totals") or {}
@@ -226,6 +230,8 @@ class ChartSeries:
     peak: float
     streamer_id: Optional[int] = None
     streamer_name: str = ""
+    group_id: Optional[int] = None
+    group_name: str = ""
 
     @property
     def period_label(self) -> str:
@@ -253,6 +259,8 @@ class ChartSeries:
 
     @property
     def title_text(self) -> str:
+        if self.group_name:
+            return f"GRUPPE · {self.group_name} · {self.period_label} · {self.metric_label}"
         if self.streamer_name:
             return f"@{self.streamer_name} · {self.period_label} · {self.metric_label}"
         return f"{self.period_label} · {self.metric_label}"
@@ -264,13 +272,18 @@ def load_chart_series(
     streamer_id: Optional[int] = None,
     streamer_name: str = "",
     force_refresh: bool = False,
+    group_id: Optional[int] = None,
+    group_name: str = "",
 ) -> ChartSeries:
     """Lädt und normalisiert die Zeitreihe für Widget und Bild."""
     norm_period = normalize_period(period)
     norm_metric = normalize_metric(metric)
     clean_streamer = str(streamer_name or "").strip().lstrip("@")[:32]
+    clean_group = str(group_name or "").strip()[:48]
 
-    timeline, totals = _load_timeline(norm_period, streamer_id, force_refresh)
+    timeline, totals = _load_timeline(
+        norm_period, streamer_id, force_refresh, group_id
+    )
     metric_key = "coins" if norm_metric == "coins" else "eur_net"
     total_key = "total_coins" if norm_metric == "coins" else "eur_net"
 
@@ -292,10 +305,18 @@ def load_chart_series(
         peak=max(values, default=0.0),
         streamer_id=streamer_id,
         streamer_name=clean_streamer,
+        group_id=group_id,
+        group_name=clean_group,
     )
 
 
 def chart_caption(series: ChartSeries) -> str:
+    if series.group_name:
+        return (
+            f"📈 TT-INTELLIGENCE · GRUPPE {series.group_name}\n"
+            f"{series.period_label} · {series.metric_label} · "
+            f"{series.total_text} · Peak {series.peak_text}"
+        )
     if series.streamer_name:
         return (
             f"📈 TT-INTELLIGENCE · @{series.streamer_name}\n"
@@ -315,6 +336,8 @@ def build_chart_widget(
     streamer_name: str = "",
     force_refresh: bool = False,
     view: str = "timeline",
+    group_id: Optional[int] = None,
+    group_name: str = "",
 ) -> ChartWidget:
     """Lädt die leichte Chart-Zeitreihe und rendert das Widget serverseitig."""
     from shared.chart_views import normalize_view
@@ -324,10 +347,25 @@ def build_chart_widget(
         from shared.chart_views import build_chart_view_widget
 
         return build_chart_view_widget(
-            norm_view, period, metric, streamer_id, streamer_name, force_refresh
+            norm_view,
+            period,
+            metric,
+            streamer_id,
+            streamer_name,
+            force_refresh,
+            group_id,
+            group_name,
         )
 
-    series = load_chart_series(period, metric, streamer_id, streamer_name, force_refresh)
+    series = load_chart_series(
+        period,
+        metric,
+        streamer_id,
+        streamer_name,
+        force_refresh,
+        group_id,
+        group_name,
+    )
 
     svg = _render_svg(series.values)
     ticks = _render_ticks(series.labels)
@@ -367,4 +405,6 @@ def build_chart_widget(
         points=len(series.values),
         streamer_id=series.streamer_id,
         streamer_name=series.streamer_name,
+        group_id=series.group_id,
+        group_name=series.group_name,
     )

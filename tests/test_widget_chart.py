@@ -209,7 +209,7 @@ class TestChartWidget(unittest.TestCase):
     def test_force_refresh_is_forwarded(self):
         with patch.object(wc, "_load_timeline", return_value=([], {})) as loader:
             wc.build_chart_widget("7d", "eur", streamer_id=42, force_refresh=True)
-        loader.assert_called_once_with("7d", 42, True)
+        loader.assert_called_once_with("7d", 42, True, None)
 
     def test_period_and_metric_normalization(self):
         self.assertEqual(wc.normalize_period("Woche"), "7d")

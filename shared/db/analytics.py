@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
 
 
 from shared.db._base import _get_period_cutoff, get_db
+from shared.db.groups import get_group_streamer_ids, get_streamer_group
 from shared.db.settings import get_settings
 from shared.db.users import list_telegram_users
 
@@ -36,6 +37,33 @@ _chart_cache_lock = threading.Lock()
 _CHART_CACHE_TTL = {"today": 30.0, "24h": 30.0, "7d": 120.0, "30d": 300.0}
 
 
+def _scope_streamer_ids(
+    streamer_id: Optional[int], group_id: Optional[int]
+) -> Optional[List[int]]:
+    """
+    Löst einen Analyse-Scope in Streamer-IDs auf.
+
+    ``None`` bedeutet "kein Filter" (alle Streamer). Eine leere Liste bedeutet
+    "Gruppe ohne Mitglieder" und muss in den Queries zu null Treffern führen.
+    Ein einzelner Streamer hat Vorrang vor einer Gruppe.
+    """
+    if streamer_id:
+        return [int(streamer_id)]
+    if group_id:
+        return get_group_streamer_ids(int(group_id))
+    return None
+
+
+def _scope_sql(column: str, streamer_ids: Optional[List[int]]) -> Tuple[str, List[Any]]:
+    """Baut eine IN-Bedingung für einen optionalen Streamer-Scope."""
+    if streamer_ids is None:
+        return "1 = 1", []
+    if not streamer_ids:
+        return "1 = 0", []
+    placeholders = ",".join("?" for _ in streamer_ids)
+    return f"{column} IN ({placeholders})", list(streamer_ids)
+
+
 def invalidate_overview_cache() -> None:
     with _overview_cache_lock:
         _overview_cache.clear()
@@ -43,25 +71,42 @@ def invalidate_overview_cache() -> None:
         _chart_cache.clear()
 
 
-def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> Dict[str, Any]:
+def get_dashboard_overview(
+    period: str = "all",
+    force_refresh: bool = False,
+    group_id: Optional[int] = None,
+) -> Dict[str, Any]:
     now = time.monotonic()
+    scope_ids = _scope_streamer_ids(None, group_id)
+    cache_key = f"{period}:g{int(group_id)}" if group_id else period
     # 7d/30d sind teure Aggregationen und ändern sich langsam; seltener cachen.
     cache_ttl = 60.0 if period in ("7d", "30d") else _OVERVIEW_CACHE_TTL
     if not force_refresh:
         with _overview_cache_lock:
-            cached = _overview_cache.get(period)
+            cached = _overview_cache.get(cache_key)
             if cached and (now - cached[0]) < cache_ttl:
                 return cached[1].copy()
 
     cutoff = _get_period_cutoff(period)
     cfg = get_settings()
+    scope_condition, scope_params = _scope_sql("streamer_id", scope_ids)
 
     with get_db() as conn:
         # Getrennte, index-freundliche Aggregationen: Die frühere JOIN-Abfrage
         # mit COUNT(DISTINCT ...) + acht SUMmen fiel bei ~190k Events auf >7s.
-        streamer_rows = conn.execute("SELECT * FROM streamers").fetchall()
-        where_sql = "WHERE created_at >= ?" if cutoff else ""
-        where_params: Tuple[Any, ...] = (cutoff,) if cutoff else ()
+        all_streamer_rows = conn.execute("SELECT * FROM streamers").fetchall()
+        if scope_ids is not None:
+            allowed = set(scope_ids)
+            streamer_rows = [r for r in all_streamer_rows if int(r["id"]) in allowed]
+        else:
+            streamer_rows = all_streamer_rows
+        where_clauses = [scope_condition]
+        where_params: List[Any] = list(scope_params)
+        if cutoff:
+            where_clauses.append("created_at >= ?")
+            where_params.append(cutoff)
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+        where_params_t: Tuple[Any, ...] = tuple(where_params)
 
         revenue_rows = conn.execute(
             f"""
@@ -79,7 +124,7 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
             {where_sql}
             GROUP BY streamer_id
             """,
-            where_params,
+            where_params_t,
         ).fetchall()
         revenue_by_streamer = {int(r["streamer_id"]): dict(r) for r in revenue_rows}
 
@@ -92,7 +137,7 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
             {where_sql}
             GROUP BY streamer_id
             """,
-            where_params,
+            where_params_t,
         ).fetchall()
         counts_by_streamer = {int(r["streamer_id"]): dict(r) for r in count_rows}
 
@@ -103,7 +148,7 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
             {where_sql}
             GROUP BY streamer_id
             """,
-            where_params,
+            where_params_t,
         ).fetchall()
         gifters_by_streamer = {int(r["streamer_id"]): int(r["unique_gifters"] or 0) for r in gifter_rows}
 
@@ -123,42 +168,24 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
                 active_sess_by_streamer[sid] = dict(as_row)
 
         # Batch 2: Top-Gifts pro Streamer in einem aggregierten Durchlauf erfassen
-        if cutoff:
-            gift_sum_rows = conn.execute(
-                """
-                SELECT streamer_id, gift_name, coins, gift_count
-                FROM (
-                    SELECT streamer_id, gift_name,
-                           SUM(total_coins) AS coins,
-                           SUM(repeat_count) AS gift_count,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY streamer_id ORDER BY SUM(total_coins) DESC
-                           ) AS rn
-                    FROM gift_events
-                    WHERE created_at >= ?
-                    GROUP BY streamer_id, gift_name
-                ) ranked
-                WHERE rn = 1
-                """,
-                (cutoff,),
-            ).fetchall()
-        else:
-            gift_sum_rows = conn.execute(
-                """
-                SELECT streamer_id, gift_name, coins, gift_count
-                FROM (
-                    SELECT streamer_id, gift_name,
-                           SUM(total_coins) AS coins,
-                           SUM(repeat_count) AS gift_count,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY streamer_id ORDER BY SUM(total_coins) DESC
-                           ) AS rn
-                    FROM gift_events
-                    GROUP BY streamer_id, gift_name
-                ) ranked
-                WHERE rn = 1
-                """
-            ).fetchall()
+        gift_sum_rows = conn.execute(
+            f"""
+            SELECT streamer_id, gift_name, coins, gift_count
+            FROM (
+                SELECT streamer_id, gift_name,
+                       SUM(total_coins) AS coins,
+                       SUM(repeat_count) AS gift_count,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY streamer_id ORDER BY SUM(total_coins) DESC
+                       ) AS rn
+                FROM gift_events
+                {where_sql}
+                GROUP BY streamer_id, gift_name
+            ) ranked
+            WHERE rn = 1
+            """,
+            where_params_t,
+        ).fetchall()
 
         top_gift_by_streamer: Dict[int, Dict[str, Any]] = {}
         for grow in gift_sum_rows:
@@ -171,40 +198,23 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
                 }
 
         # Batch 3: Top-Gifter pro Streamer in einem aggregierten Durchlauf erfassen
-        if cutoff:
-            gifter_sum_rows = conn.execute(
-                """
-                SELECT streamer_id, sender_username, coins
-                FROM (
-                    SELECT streamer_id, sender_username,
-                           SUM(total_coins) AS coins,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY streamer_id ORDER BY SUM(total_coins) DESC
-                           ) AS rn
-                    FROM gift_events
-                    WHERE created_at >= ?
-                    GROUP BY streamer_id, sender_username
-                ) ranked
-                WHERE rn = 1
-                """,
-                (cutoff,),
-            ).fetchall()
-        else:
-            gifter_sum_rows = conn.execute(
-                """
-                SELECT streamer_id, sender_username, coins
-                FROM (
-                    SELECT streamer_id, sender_username,
-                           SUM(total_coins) AS coins,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY streamer_id ORDER BY SUM(total_coins) DESC
-                           ) AS rn
-                    FROM gift_events
-                    GROUP BY streamer_id, sender_username
-                ) ranked
-                WHERE rn = 1
-                """
-            ).fetchall()
+        gifter_sum_rows = conn.execute(
+            f"""
+            SELECT streamer_id, sender_username, coins
+            FROM (
+                SELECT streamer_id, sender_username,
+                       SUM(total_coins) AS coins,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY streamer_id ORDER BY SUM(total_coins) DESC
+                       ) AS rn
+                FROM gift_events
+                {where_sql}
+                GROUP BY streamer_id, sender_username
+            ) ranked
+            WHERE rn = 1
+            """,
+            where_params_t,
+        ).fetchall()
 
         top_gifter_by_streamer: Dict[int, Dict[str, Any]] = {}
         for grow in gifter_sum_rows:
@@ -275,28 +285,23 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
             totals["total_gifts_sent"] += int(d["total_gifts_sent"] or 0)
             totals["gift_events_count"] += int(d["gift_events_count"] or 0)
 
+        recent_scope, recent_scope_params = _scope_sql("g.streamer_id", scope_ids)
+        recent_clauses = [recent_scope]
+        recent_params: List[Any] = list(recent_scope_params)
         if cutoff:
-            recent_rows = conn.execute(
-                """
-                SELECT g.*, s.username AS streamer_username, s.display_name AS streamer_display_name
-                FROM gift_events g
-                JOIN streamers s ON s.id = g.streamer_id
-                WHERE g.created_at >= ?
-                ORDER BY g.created_at DESC, g.id DESC
-                LIMIT 50
-                """,
-                (cutoff,),
-            ).fetchall()
-        else:
-            recent_rows = conn.execute(
-                """
-                SELECT g.*, s.username AS streamer_username, s.display_name AS streamer_display_name
-                FROM gift_events g
-                JOIN streamers s ON s.id = g.streamer_id
-                ORDER BY g.created_at DESC, g.id DESC
-                LIMIT 50
-                """
-            ).fetchall()
+            recent_clauses.append("g.created_at >= ?")
+            recent_params.append(cutoff)
+        recent_rows = conn.execute(
+            f"""
+            SELECT g.*, s.username AS streamer_username, s.display_name AS streamer_display_name
+            FROM gift_events g
+            JOIN streamers s ON s.id = g.streamer_id
+            WHERE {' AND '.join(recent_clauses)}
+            ORDER BY g.created_at DESC, g.id DESC
+            LIMIT 50
+            """,
+            tuple(recent_params),
+        ).fetchall()
 
         recent_gifts = []
         for r in recent_rows:
@@ -310,13 +315,15 @@ def get_dashboard_overview(period: str = "all", force_refresh: bool = False) -> 
     res = {
         "settings": cfg,
         "period": period,
+        "group_id": group_id,
+        "selected_group": get_streamer_group(group_id) if group_id else None,
         "totals": totals,
         "streamers": streamers,
         "recent_gifts": recent_gifts,
         "telegram_users": list_telegram_users(),
     }
     with _overview_cache_lock:
-        _overview_cache[period] = (now, res)
+        _overview_cache[cache_key] = (now, res)
     return res
 
 
@@ -486,7 +493,11 @@ def get_streamer_detail(streamer_id: int, period: str = "all") -> Optional[Dict[
         }
 
 
-def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -> Dict[str, Any]:
+def get_analytics_data(
+    streamer_id: Optional[int] = None,
+    period: str = "all",
+    group_id: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Liefert detaillierte Analytics und aggregierte Kennzahlen für Charts:
     - Gesamt-KPIs (Netto/Brutto, Coins, Gifts, Unique Gifters, Averages)
@@ -513,9 +524,13 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
             else:
                 streamer_id = None
 
+        scope_ids = _scope_streamer_ids(streamer_id, group_id)
+        gift_scope, gift_scope_params = _scope_sql("streamer_id", scope_ids)
+        session_scope, session_scope_params = _scope_sql("ss.streamer_id", scope_ids)
+
         # 2. Aggregierte Gesamt-Metriken im gewählten Zeitraum & Scope
         agg_row = conn.execute(
-            """
+            f"""
             SELECT
                 COALESCE(SUM(total_coins), 0) AS total_coins,
                 COALESCE(SUM(repeat_count), 0) AS total_gifts_sent,
@@ -530,10 +545,10 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 COALESCE(SUM(COALESCE(eur_net_low, eur_net)), 0) AS eur_net_low_sum,
                 COALESCE(SUM(COALESCE(eur_net_high, eur_net)), 0) AS eur_net_high_sum
             FROM gift_events
-            WHERE (? IS NULL OR streamer_id = ?)
+            WHERE {gift_scope}
               AND (? IS NULL OR created_at >= ?)
             """,
-            (streamer_id, streamer_id, cutoff, cutoff),
+            tuple(gift_scope_params) + (cutoff, cutoff),
         ).fetchone()
 
         total_coins = int(agg_row["total_coins"] or 0)
@@ -556,7 +571,7 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
 
         # 3. Top Spender & Supporter-Ranking sowie Whale-Konzentration
         top_gifters_rows = conn.execute(
-            """
+            f"""
             SELECT
                 sender_username,
                 SUM(total_coins) AS total_coins,
@@ -569,13 +584,13 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 COALESCE(SUM(COALESCE(eur_net_high, eur_net)), 0) AS eur_net_high_sum,
                 COUNT(id) AS transactions
             FROM gift_events
-            WHERE (? IS NULL OR streamer_id = ?)
+            WHERE {gift_scope}
               AND (? IS NULL OR created_at >= ?)
             GROUP BY sender_username
             ORDER BY total_coins DESC
             LIMIT 25
             """,
-            (streamer_id, streamer_id, cutoff, cutoff),
+            tuple(gift_scope_params) + (cutoff, cutoff),
         ).fetchall()
 
         top_gifter_details: Dict[str, Dict[str, Any]] = {}
@@ -589,10 +604,10 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                        MAX(is_super_fan) AS is_super_fan
                 FROM gift_events
                 WHERE sender_username IN ({placeholders})
-                  AND (? IS NULL OR streamer_id = ?)
+                  AND {gift_scope}
                 GROUP BY sender_username
                 """,
-                tuple(names) + (streamer_id, streamer_id),
+                tuple(names) + tuple(gift_scope_params),
             ).fetchall()
             top_gifter_details = {str(r["sender_username"]): dict(r) for r in detail_rows}
 
@@ -631,7 +646,7 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
 
         # 4. Top Geschenke-Aufschlüsselung
         top_gifts_rows = conn.execute(
-            """
+            f"""
             SELECT
                 MAX(gift_id) AS gift_id,
                 gift_name,
@@ -646,13 +661,13 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 COALESCE(SUM(COALESCE(eur_net_high, eur_net)), 0) AS eur_net_high_sum,
                 COUNT(id) AS events_count
             FROM gift_events
-            WHERE (? IS NULL OR streamer_id = ?)
+            WHERE {gift_scope}
               AND (? IS NULL OR created_at >= ?)
             GROUP BY gift_name, diamond_count
             ORDER BY total_coins DESC
             LIMIT 20
             """,
-            (streamer_id, streamer_id, cutoff, cutoff),
+            tuple(gift_scope_params) + (cutoff, cutoff),
         ).fetchall()
 
         top_gifts = []
@@ -675,7 +690,7 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
 
         # 5. Tageszeit-Aktivitätsmuster (00:00 - 23:00 Uhr)
         tod_rows = conn.execute(
-            """
+            f"""
             SELECT
                 CAST(SUBSTR(created_at, 12, 2) AS INTEGER) AS hour_of_day,
                 SUM(total_coins) AS coins,
@@ -683,12 +698,12 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 COALESCE(SUM(eur_net), 0) AS eur_net_sum,
                 COUNT(id) AS events_count
             FROM gift_events
-            WHERE (? IS NULL OR streamer_id = ?)
+            WHERE {gift_scope}
               AND (? IS NULL OR created_at >= ?)
             GROUP BY CAST(SUBSTR(created_at, 12, 2) AS INTEGER)
             ORDER BY hour_of_day ASC
             """,
-            (streamer_id, streamer_id, cutoff, cutoff),
+            tuple(gift_scope_params) + (cutoff, cutoff),
         ).fetchall()
 
         tod_map = {
@@ -732,12 +747,12 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 COUNT(id) AS events_count,
                 COUNT(DISTINCT sender_username) AS unique_gifters
             FROM gift_events
-            WHERE (? IS NULL OR streamer_id = ?)
+            WHERE {gift_scope}
               AND (? IS NULL OR created_at >= ?)
             GROUP BY SUBSTR(created_at, 1, {substr_len})
             ORDER BY bucket ASC
             """,
-            (streamer_id, streamer_id, cutoff, cutoff),
+            tuple(gift_scope_params) + (cutoff, cutoff),
         ).fetchall()
 
         timeline = []
@@ -775,8 +790,9 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
             })
 
         # 7. Streamer Ranking & Vergleich
+        ranking_scope, ranking_scope_params = _scope_sql("s.id", scope_ids)
         streamer_ranking_rows = conn.execute(
-            """
+            f"""
             SELECT
                 s.id,
                 s.username,
@@ -799,10 +815,11 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
             FROM streamers s
             LEFT JOIN gift_events g
                 ON g.streamer_id = s.id AND (? IS NULL OR g.created_at >= ?)
+            WHERE {ranking_scope}
             GROUP BY s.id
             ORDER BY total_coins DESC, s.username ASC
             """,
-            (cutoff, cutoff),
+            (cutoff, cutoff) + tuple(ranking_scope_params),
         ).fetchall()
 
         streamers_ranking: List[Dict[str, Any]] = []
@@ -862,7 +879,7 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
 
         # 9. Aufgezeichnete Sessions & Hourly Run-Rates
         sessions_rows = conn.execute(
-            """
+            f"""
             SELECT
                 ss.*,
                 s.username AS streamer_username,
@@ -878,13 +895,13 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
             FROM stream_sessions ss
             JOIN streamers s ON s.id = ss.streamer_id
             LEFT JOIN gift_events g ON g.session_id = ss.id
-            WHERE (? IS NULL OR ss.streamer_id = ?)
+            WHERE {session_scope}
               AND (? IS NULL OR ss.started_at >= ?)
             GROUP BY ss.id
             ORDER BY ss.started_at DESC, ss.id DESC
             LIMIT 25
             """,
-            (streamer_id, streamer_id, cutoff, cutoff),
+            tuple(session_scope_params) + (cutoff, cutoff),
         ).fetchall()
 
         now_dt = datetime.now()
@@ -927,8 +944,11 @@ def get_analytics_data(streamer_id: Optional[int] = None, period: str = "all") -
                 "coins_per_hour": coins_per_hour,
             })
 
+    selected_group = get_streamer_group(group_id) if group_id else None
     return {
         "period": period,
+        "group_id": group_id,
+        "selected_group": selected_group,
         "selected_streamer_id": streamer_id,
         "selected_streamer": selected_streamer,
         "totals": {
@@ -1160,18 +1180,21 @@ def get_chart_timeline(
     period: str = "24h",
     streamer_id: Optional[int] = None,
     force_refresh: bool = False,
+    group_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Leichtgewichtige Zeitreihe nur für Bot-Charts.
 
     Anders als ``get_analytics_data`` aggregiert diese Funktion ausschließlich
     ``gift_events`` und liefert Summen + Buckets in unter einer Sekunde.
-    Optional lässt sich auf einen Streamer filtern. Ergebnisse werden pro
-    Zeitraum/Streamer kurz gecacht (30 s für Today/24h, 2-5 Minuten für 7d/30d).
+    Optional lässt sich auf einen Streamer oder eine Streamer-Gruppe filtern.
+    Ergebnisse werden pro Zeitraum/Scope kurz gecacht (30 s für Today/24h,
+    2-5 Minuten für 7d/30d).
     """
     norm = period if period in ("today", "24h", "7d", "30d") else "24h"
     sid = int(streamer_id) if streamer_id else None
-    cache_key = f"{norm}:{sid or 0}"
+    scope_ids = _scope_streamer_ids(sid, group_id)
+    cache_key = f"{norm}:{('s' + str(sid)) if sid else ('g' + str(group_id) if group_id else 'all')}"
     ttl = _CHART_CACHE_TTL.get(norm, 60.0)
     now = time.monotonic()
 
@@ -1184,11 +1207,9 @@ def get_chart_timeline(
     cutoff = _get_period_cutoff(norm)
     hourly = norm in ("today", "24h")
     substr_len = 13 if hourly else 10
-    where_sql = "created_at >= ?"
-    params: List[Any] = [cutoff]
-    if sid is not None:
-        where_sql += " AND streamer_id = ?"
-        params.append(sid)
+    scope_condition, scope_params = _scope_sql("streamer_id", scope_ids)
+    where_sql = f"created_at >= ? AND {scope_condition}"
+    params: List[Any] = [cutoff, *scope_params]
 
     with get_db() as conn:
         rows = conn.execute(
@@ -1239,6 +1260,7 @@ def get_chart_timeline(
     result: Dict[str, Any] = {
         "period": norm,
         "streamer_id": sid,
+        "group_id": group_id,
         "timeline": timeline,
         "totals": {
             "eur_net": round(float(total_row["eur_net_sum"] or 0.0), 2),

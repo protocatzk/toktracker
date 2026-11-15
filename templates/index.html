@@ -26,6 +26,9 @@
             <button type="button" class="tab-btn active" data-tab="tab-streamers">
                 Streamer &amp; Einnahmen <span class="tab-badge" id="badgeStreamers">0</span>
             </button>
+            <button type="button" class="tab-btn" data-tab="tab-groups">
+                Streamer-Gruppen <span class="tab-badge" id="badgeGroups">0</span>
+            </button>
             <button type="button" class="tab-btn" data-tab="tab-workers">
                 Ingest &amp; Worker Health <span class="tab-badge" id="badgeWorkers">0</span>
             </button>
@@ -200,6 +203,47 @@
     </section>
 
     <!-- ========================================================= -->
+    <!-- TAB: STREAMER-GRUPPEN                                      -->
+    <!-- ========================================================= -->
+    <section class="tab-panel" id="tab-groups">
+        <div class="box">
+            <div class="box-header">
+                <div>
+                    <h2>👥 Streamer-Gruppen</h2>
+                    <div class="section-hint">
+                        Gruppen bündeln Streamer als gemeinsamen Scope für Graphen,
+                        Analytics, CSV-Exporte und Bot-Reports. Ein Streamer kann in
+                        mehreren Gruppen sein.
+                    </div>
+                </div>
+            </div>
+            <div class="inline-form group-create-form">
+                <label for="groupNameInput" class="mono muted">Neue Gruppe:</label>
+                <input type="text" id="groupNameInput" maxlength="191" placeholder="z. B. Team Alpha" autocomplete="off">
+                <input type="text" id="groupDescriptionInput" maxlength="512" placeholder="Beschreibung (optional)" autocomplete="off">
+                <input type="text" id="groupColorInput" maxlength="16" placeholder="#58a6ff" autocomplete="off" class="group-color-input">
+                <button type="button" id="btnCreateGroup" class="primary">Anlegen</button>
+            </div>
+            <div id="groupFormMessage" class="mono muted" style="font-size:12px; min-height:16px; margin-top:4px;"></div>
+            <div class="table-wrap" style="margin-top:8px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Gruppe</th>
+                            <th class="num-col">Mitglieder</th>
+                            <th>Streamer zuordnen</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="groupTableBody">
+                        <tr><td colspan="4" class="muted">Noch keine Gruppen angelegt.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================= -->
     <!-- TAB: INGEST & WORKER HEALTH                                -->
     <!-- ========================================================= -->
     <section class="tab-panel" id="tab-workers">
@@ -289,7 +333,7 @@
                     <div class="section-hint">Interaktive Verlaufskurven, Whale-Konzentration, Peak Hours und Performance-Metriken.</div>
                 </div>
                 <div class="inline-form">
-                    <label for="selectAnalyticsStreamer" class="mono muted">Streamer:</label>
+                    <label for="selectAnalyticsStreamer" class="mono muted">Scope:</label>
                     <select id="selectAnalyticsStreamer">
                         <option value="all">Alle überwachten Streamer (Vergleich &amp; Gesamt)</option>
                     </select>
@@ -1308,5 +1352,5 @@
     </div>
 </footer>
 
-<script src="static/dashboard.js?v=2.13.0"></script>
+<script src="static/dashboard.js?v=2.14.0"></script>
 {% endblock %}

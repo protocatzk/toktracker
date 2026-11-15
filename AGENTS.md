@@ -58,7 +58,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
 | [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
-| [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, Wrapper, `get_db`), `schema`, `settings`, `users`, `streamers`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`, `sqlite_import`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
+| [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, Wrapper, `get_db`), `schema`, `settings`, `users`, `streamers`, `groups`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`, `sqlite_import`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
 | [`services/api/`](./services/api) / [`app.py`](./app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
 | [`services/ingest/`](./services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
 | [`services/bot/`](./services/bot) | **Telegram-Bot Service**. Läuft als geschütztes Singleton mit Leader-Lock (`tt:lock:bot:leader`). Reagiert auf Bot-Befehle und verarbeitet RPC-Anfragen (z.B. Login-Codes an Admins senden) via Redis. |
@@ -67,7 +67,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | [`telegram_service.py`](./telegram_service.py) | **Telegram-Bot-Implementierung**. Befehlshandler, Menüs, Inline-Keyboards und Report-Formatter. |
 | [`shared/bot_format.py`](./shared/bot_format.py) | **Bot-Textsystem**. Einheitliche Eyebrows, `<pre>`-Kennzahlen, Status-Glyphen und Message-Chunking im Industrial-Stil. |
 | [`docker-compose.yml`](./docker-compose.yml) | **Produktions-Orchestrierung**. Definiert `redis`, `app` (Web/API), `ingest` (TikTok Worker), `bot` (Telegram), `scheduler`, `db` (MariaDB), `docker-socket-proxy` (nur lesende Docker-API) sowie `nginx-proxy` und `acme-companion` (SSL). |
-| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `landing.html` (öffentliche Infoseite unter `/`), `index.html` (Admin-Dashboard), `stats.html` (read-only Moderator-Statistiken), `access.html` (Whitelist, Anfragen & Rollen), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
+| [`templates/`](./templates) | **Jinja2-HTML-Templates**: `landing.html` (öffentliche Infoseite unter `/`), `index.html` (Admin-Dashboard inkl. Streamer-Gruppen), `stats.html` (read-only Moderator-Statistiken), `access.html` (Whitelist, Anfragen & Rollen), `login.html` (Web-Login mit Telegram-2FA), `public.html` (Öffentliche Streamer-Übersicht). |
 | [`static/`](./static) | **Frontend-Assets**: `brand.css` (Industrial-Design-System, Tokens, Dark/Light, lokale Fonts unter `static/fonts/`), `style.css` (gemeinsame App-Komponenten), `landing.css` (öffentliche Infoseite), `dashboard.js` (Dashboard-Logik, Polling, Charts), `stats.js` (read-only Statistik-Seite), `access.js`/`access.css` (Zugriffsverwaltung), `public.js` (öffentliche Tabelle). |
 
 ---
@@ -91,7 +91,11 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
    - Rollen- & Berechtigungstabelle (`user_id`, `username`, `role` [viewer/user/moderator/admin], `is_allowed` [1=erlaubt, 0=wartend, -1=gesperrt]).
 6. **`streamer_alerts`**:
    - Live-Alert-Abos pro Streamer und Telegram-Chat (`streamer_id`, `chat_id`, `chat_title`, `created_by_*`, `enabled`, `last_notified_session_id`). Eindeutig pro Streamer/Chat.
-7. **`admin_challenges`**:
+7. **`streamer_groups` / `streamer_group_members`**:
+   - Many-to-Many-Gruppierung von Streamern als gemeinsamer Analyse-Scope.
+   - Felder: `name` (unique), `description`, `color`, `created_at`, `updated_at`;
+     Mitglieder mit `UNIQUE(group_id, streamer_id)` und Cascade-Delete.
+8. **`admin_challenges`**:
    - Temporäre Login-Anfragen für das Web-Dashboard mit Status (`pending`, `approved`, `rejected`, `expired`).
 
 ---
@@ -112,7 +116,14 @@ Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectio
 3. Der Bot sendet eine Push-Nachricht mit Inline-Buttons ("Zulassen" / "Ablehnen") an hinterlegte Telegram-Admins.
 4. Klickt ein Admin auf "Zulassen" (oder tippt der Nutzer den 6-stelligen Code ein), autorisiert das Backend die Session und setzt das Cookie `toktracker_session`.
 
-### C. Dashboard & Reporting
+### C. Streamer-Gruppen (Analyse-Scope)
+
+Streamer lassen sich in `streamer_groups` / `streamer_group_members` beliebig
+vielen Gruppen zuordnen. Eine Gruppe wirkt als Filter für Dashboard-Analytics,
+Bot-Charts (`/chart gruppe:<name>`), `/overview`, `/report` und die
+CSV-Exporte (`?group_id=`). Details: [`docs/streamer-groups.md`](./docs/streamer-groups.md).
+
+### D. Dashboard & Reporting
 - Das Dashboard pollt `/api/overview?period=today` (oder `24h`, `7d`, `all`).
 - [`shared/db/analytics.py`](./shared/db/analytics.py) aggregiert Gesamteinnahmen, Rechner-Kurse (EUR/USD), Top-Spender und Streamer-Rankings.
 - Ein automatischer Telegram-Job (`_scheduled_24h_report_job`) sendet alle 24h eine Zusammenfassung in den konfigurierten Chat.

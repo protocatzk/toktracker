@@ -12,6 +12,23 @@ class StreamerCreateRequest(BaseModel):
     auto_reconnect: bool = Field(True, description="Überwacht den Streamer dauerhaft (Auto-Polling wenn offline)")
 
 
+class StreamerGroupCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=191, description="Eindeutiger Gruppenname")
+    description: Optional[str] = Field(None, description="Optionale Beschreibung")
+    color: Optional[str] = Field(None, description="Optionale Akzentfarbe (z. B. #58a6ff)")
+    streamer_ids: List[int] = Field(default_factory=list, description="Initiale Streamer-IDs")
+
+
+class StreamerGroupUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=191, description="Neuer Gruppenname")
+    description: Optional[str] = Field(None, description="Neue Beschreibung")
+    color: Optional[str] = Field(None, description="Neue Akzentfarbe")
+
+
+class StreamerGroupMembersRequest(BaseModel):
+    streamer_ids: List[int] = Field(default_factory=list, description="Vollständige Mitgliederliste")
+
+
 class TrackActionRequest(BaseModel):
     action: str = Field("toggle", description="'start', 'stop' oder 'toggle'")
     auto_reconnect: bool = Field(True, description="Ob der Worker bei Offline-Status weiter pollen soll")

@@ -227,15 +227,15 @@ class TestChartViewKeyboard(unittest.TestCase):
     def test_parse_chart_args_view_and_streamer(self):
         self.assertEqual(
             self.service._parse_chart_args(["7d", "coins", "spender", "@alpha"]),
-            ("7d", "coins", "alpha", "gifters"),
+            ("7d", "coins", "alpha", "gifters", ""),
         )
         self.assertEqual(
             self.service._parse_chart_args(["tageszeit", "@alpha"]),
-            ("24h", "eur", "alpha", "timeofday"),
+            ("24h", "eur", "alpha", "timeofday", ""),
         )
         self.assertEqual(
             self.service._parse_chart_args(["geschenke"]),
-            ("24h", "eur", None, "gifts"),
+            ("24h", "eur", None, "gifts", ""),
         )
 
 
