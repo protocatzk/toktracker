@@ -904,6 +904,42 @@ async function loadStreamerGroups() {
     }
 }
 
+function groupMemberLabel(streamer) {
+    return streamer.display_name && streamer.display_name !== streamer.username
+        ? `${streamer.display_name} (@${streamer.username})`
+        : `@${streamer.username}`;
+}
+
+function updateGroupMemberCount(groupId) {
+    const picker = document.querySelector(`[data-group-picker="${groupId}"]`);
+    const counter = document.querySelector(`[data-group-count="${groupId}"]`);
+    if (!picker || !counter) return;
+    const boxes = picker.querySelectorAll('input[type="checkbox"]');
+    const checked = picker.querySelectorAll('input[type="checkbox"]:checked').length;
+    counter.textContent = `${checked} von ${boxes.length} ausgewählt`;
+}
+
+function filterGroupMembers(groupId, term) {
+    const list = document.querySelector(`[data-group-list="${groupId}"]`);
+    if (!list) return;
+    const needle = String(term || "").trim().toLowerCase();
+    list.querySelectorAll(".group-member-option").forEach((option) => {
+        const haystack = option.getAttribute("data-search-text") || "";
+        option.style.display = !needle || haystack.includes(needle) ? "" : "none";
+    });
+}
+
+function setGroupSelection(groupId, checked) {
+    const list = document.querySelector(`[data-group-list="${groupId}"]`);
+    if (!list) return;
+    list.querySelectorAll(".group-member-option").forEach((option) => {
+        if (option.style.display === "none") return;
+        const box = option.querySelector('input[type="checkbox"]');
+        if (box) box.checked = checked;
+    });
+    updateGroupMemberCount(groupId);
+}
+
 function renderGroupTable() {
     const tbody = document.getElementById("groupTableBody");
     if (!tbody) return;
@@ -911,23 +947,23 @@ function renderGroupTable() {
         tbody.innerHTML = `<tr><td colspan="4" class="muted">Noch keine Gruppen angelegt.</td></tr>`;
         return;
     }
-    const memberOptions = cachedStreamers
-        .map((s) => {
-            const label = s.display_name && s.display_name !== s.username
-                ? `${s.display_name} (@${s.username})`
-                : `@${s.username}`;
-            return `<option value="${s.id}">${escapeHtml(label)}</option>`;
-        })
-        .join("");
+
+    const optionMarkup = (selectedIds) =>
+        cachedStreamers.length
+            ? cachedStreamers.map((s) => {
+                const label = groupMemberLabel(s);
+                return `
+                    <label class="group-member-option" data-search-text="${escapeHtml(label.toLowerCase())}">
+                        <input type="checkbox" value="${s.id}"${selectedIds.has(Number(s.id)) ? " checked" : ""}>
+                        <span>${escapeHtml(label)}</span>
+                        ${s.is_live ? `<span class="tag accent">LIVE</span>` : ""}
+                    </label>
+                `;
+            }).join("")
+            : `<div class="muted" style="padding:8px;">Keine Streamer vorhanden.</div>`;
 
     tbody.innerHTML = cachedGroups.map((g) => {
         const members = new Set((g.streamer_ids || []).map(Number));
-        const options = cachedStreamers.map((s) => {
-            const label = s.display_name && s.display_name !== s.username
-                ? `${s.display_name} (@${s.username})`
-                : `@${s.username}`;
-            return `<option value="${s.id}"${members.has(Number(s.id)) ? " selected" : ""}>${escapeHtml(label)}</option>`;
-        }).join("") || memberOptions;
         return `
             <tr>
                 <td>
@@ -937,9 +973,17 @@ function renderGroupTable() {
                 </td>
                 <td class="num-col"><strong>${fmtNum(g.member_count || 0)}</strong></td>
                 <td>
-                    <select multiple size="4" data-group-members="${g.id}" style="min-width:220px;">
-                        ${options}
-                    </select>
+                    <div class="group-member-picker" data-group-picker="${g.id}">
+                        <div class="group-member-toolbar">
+                            <input type="search" data-group-search="${g.id}" placeholder="Streamer filtern…" autocomplete="off">
+                            <button type="button" class="sm" data-group-all="${g.id}">Alle</button>
+                            <button type="button" class="sm" data-group-none="${g.id}">Keine</button>
+                        </div>
+                        <div class="group-member-list" data-group-list="${g.id}">
+                            ${optionMarkup(members)}
+                        </div>
+                        <div class="group-member-meta mono muted" data-group-count="${g.id}">${members.size} ausgewählt</div>
+                    </div>
                 </td>
                 <td>
                     <div class="action-group">
@@ -957,6 +1001,23 @@ function renderGroupTable() {
     tbody.querySelectorAll("[data-group-delete]").forEach((btn) => {
         btn.addEventListener("click", () => deleteStreamerGroup(Number(btn.getAttribute("data-group-delete"))));
     });
+    tbody.querySelectorAll("[data-group-search]").forEach((input) => {
+        const groupId = input.getAttribute("data-group-search");
+        input.addEventListener("input", () => filterGroupMembers(groupId, input.value));
+    });
+    tbody.querySelectorAll("[data-group-all]").forEach((btn) => {
+        btn.addEventListener("click", () => setGroupSelection(btn.getAttribute("data-group-all"), true));
+    });
+    tbody.querySelectorAll("[data-group-none]").forEach((btn) => {
+        btn.addEventListener("click", () => setGroupSelection(btn.getAttribute("data-group-none"), false));
+    });
+    tbody.querySelectorAll('[data-group-picker] input[type="checkbox"]').forEach((box) => {
+        const picker = box.closest("[data-group-picker]");
+        box.addEventListener("change", () =>
+            updateGroupMemberCount(picker.getAttribute("data-group-picker"))
+        );
+    });
+    cachedGroups.forEach((g) => updateGroupMemberCount(g.id));
 }
 
 function setGroupFormMessage(text, isError = false) {
@@ -1003,9 +1064,11 @@ async function createStreamerGroup() {
 async function saveStreamerGroup(groupId) {
     const nameEl = document.querySelector(`[data-group-name="${groupId}"]`);
     const descEl = document.querySelector(`[data-group-description="${groupId}"]`);
-    const membersEl = document.querySelector(`[data-group-members="${groupId}"]`);
-    const streamer_ids = membersEl
-        ? Array.from(membersEl.selectedOptions).map((o) => Number(o.value))
+    const picker = document.querySelector(`[data-group-picker="${groupId}"]`);
+    const streamer_ids = picker
+        ? Array.from(picker.querySelectorAll('input[type="checkbox"]:checked')).map((box) =>
+            Number(box.value)
+        )
         : [];
     try {
         const updateRes = await fetch(`api/streamer-groups/${groupId}`, {
