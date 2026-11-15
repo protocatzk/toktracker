@@ -117,7 +117,7 @@ Umgesetzt:
 - Widget-Renderer bleibt auf den Privatchat beschränkt (Telegram-Rollout);
   der Bild-Renderer funktioniert dagegen in Gruppen
 - kein Chart im automatischen 24h-Report (Zielchat ist in Produktion meist eine Gruppe)
-- keine Balkendiagramme / Radar-Charts
+- keine Radar-Charts
 - kein Theme-Schalter (Dark/Light) im Bild-Renderer; die schwarze Karte
   funktioniert unabhängig vom Chat-Theme
 - kein `chat_data`-State und kein `editMessageWidgetData` im Phase-A-Flow
@@ -132,6 +132,12 @@ Umgesetzt:
   (PNG-Cache + Telegram-`file_id`).
 - `/chart @streamer` filtert die Zeitreihe auf einen Streamer; ein
   „🌐 ALLE“-Button führt zurück zur Gesamtansicht.
+- Die Ansichts-Tasten (`VERLAUF`, `STREAMER`, `TAGESZEIT`, `GESCHENKE`,
+  `SPENDER`) spiegeln die Admin-Panel-Charts: Linien-/Flächenverlauf,
+  Streamer-Ranking, Tageszeit-Balken, Geschenke-Donut und Top-Spender.
+  Bei gewähltem Streamer zeigt `STREAMER` die Session-Performance.
+- Die Ansicht bleibt beim Wechsel von Zeitraum, Metrik und Streamer erhalten
+  (alte Callback-Formate ohne Ansicht funktionieren weiter).
 - Der „📺 STREAMER“-Button öffnet einen paginierten Picker (8 pro Seite);
   Auswahl und Abbruch funktionieren ohne Chat-Müll (Picker wird gelöscht).
 - Periode und Metrik lassen sich über Buttons umschalten (neues Widget,

@@ -95,6 +95,8 @@ class ChartWidget:
     streamer_id: Optional[int] = None
     streamer_name: str = ""
     height: int = WIDGET_HEIGHT
+    view: str = "timeline"
+    view_label: str = "VERLAUF"
 
     @property
     def period_label(self) -> str:
@@ -312,8 +314,19 @@ def build_chart_widget(
     streamer_id: Optional[int] = None,
     streamer_name: str = "",
     force_refresh: bool = False,
+    view: str = "timeline",
 ) -> ChartWidget:
     """Lädt die leichte Chart-Zeitreihe und rendert das Widget serverseitig."""
+    from shared.chart_views import normalize_view
+
+    norm_view = normalize_view(view)
+    if norm_view != "timeline":
+        from shared.chart_views import build_chart_view_widget
+
+        return build_chart_view_widget(
+            norm_view, period, metric, streamer_id, streamer_name, force_refresh
+        )
+
     series = load_chart_series(period, metric, streamer_id, streamer_name, force_refresh)
 
     svg = _render_svg(series.values)
