@@ -537,7 +537,7 @@ def load_chart_view(
     clean_group = str(group_name or "").strip()[:48]
 
     if norm_view == "timeline":
-        series: ChartSeries = load_chart_series(
+        timeline_series: ChartSeries = load_chart_series(
             norm_period,
             norm_metric,
             streamer_id,
@@ -548,21 +548,21 @@ def load_chart_view(
         )
         return ChartViewSeries(
             view="timeline",
-            period=series.period,
-            metric=series.metric,
+            period=timeline_series.period,
+            metric=timeline_series.metric,
             kind="line",
-            labels=series.labels,
-            values=series.values,
+            labels=timeline_series.labels,
+            values=timeline_series.values,
             secondary=(),
             title=VIEW_TITLES["timeline"],
             subtitle="",
-            total=series.total,
-            peak=series.peak,
-            streamer_id=series.streamer_id,
-            streamer_name=series.streamer_name,
-            group_id=series.group_id,
-            group_name=series.group_name,
-            caption_override=chart_caption(series),
+            total=timeline_series.total,
+            peak=timeline_series.peak,
+            streamer_id=timeline_series.streamer_id,
+            streamer_name=timeline_series.streamer_name,
+            group_id=timeline_series.group_id,
+            group_name=timeline_series.group_name,
+            caption_override=chart_caption(timeline_series),
         )
 
     data = _load_analytics(streamer_id, norm_period, force_refresh, group_id)
@@ -661,7 +661,7 @@ def _render_donut_html(series: ChartViewSeries) -> str:
     )
 
 
-def _render_widget_body(series: ChartViewSeries) -> str:
+def _render_widget_body(series: ChartViewSeries) -> Tuple[str, int]:
     if series.kind == "hbar":
         chart = _render_hbar_html(series)
         height = max(250, 118 + 19 * len(series.values))

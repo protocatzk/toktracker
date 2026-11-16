@@ -57,9 +57,10 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
-| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
+| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `api_deps.py` (FastAPI-Auth-Dependencies), `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
 | [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, Wrapper, `get_db`), `schema`, `settings`, `users`, `streamers`, `groups`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`, `sqlite_import`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
 | [`services/api/`](./services/api) / [`app.py`](./app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
+| [`routers/`](./routers) | **Ausgelagerte FastAPI-Router**: `revenue`, `exports`, `system`, `access`. Sie werden in `app.py` per `include_router` registriert; Pfade und Berechtigungen bleiben unverändert. Neue fachliche Schnitte gehören hierher, nicht in `app.py`. |
 | [`services/ingest/`](./services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
 | [`services/bot/`](./services/bot) | **Telegram-Bot Service**. Läuft als geschütztes Singleton mit Leader-Lock (`tt:lock:bot:leader`). Reagiert auf Bot-Befehle und verarbeitet RPC-Anfragen (z.B. Login-Codes an Admins senden) via Redis. |
 | [`services/scheduler/`](./services/scheduler) | **TokTracker Scheduler Service**. Verwaltet wiederkehrende Aufgaben: automatischen 24h-Report, periodisches Speicherplatz-Monitoring (alle 15 Min) sowie Chat-Cleanup und Cache-Refresh. |
@@ -233,6 +234,10 @@ Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
    - `tiktok_service.py` nutzt dedizierte Worker-Threads mit eigenen Event-Loops. Blockierende I/O-Operationen müssen vorsichtig gehandhabt werden.
    - Der Telegram-Bot läuft asynchron im Hauptprozess unter FastAPI. Niemals den Event-Loop mit synchronen Endlosschleifen blockieren.
    - DB-Zugriffe immer über den Kontextmanager `with get_db() as conn:` kapseln.
+   - Endpunkte mit DB-Bedarf werden als `def` deklariert (FastAPI nutzt dann den
+     Threadpool) oder kapseln den Zugriff in `asyncio.to_thread`. Ein synchroner
+     DB-Aufruf in `async def` blockiert den Event-Loop;
+     [`tests/test_async_db_guard.py`](./tests/test_async_db_guard.py) erzwingt das.
    - Neue DB-Funktionen im passenden Modul unter `shared/db/` ergänzen und in `shared/db/__init__.py` re-exportieren.
 
 3. **API & Schemas**:

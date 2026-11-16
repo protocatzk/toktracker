@@ -20,7 +20,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from shared.chart_views import ChartViewSeries, load_chart_view, normalize_view
 from shared.config import BASE_DIR
@@ -155,10 +155,7 @@ def _render_png(series: ChartSeries) -> bytes:
     )
     draw.text((pad_x, 46 * scale), title, font=font_title, fill=_MUTED)
     draw.text((pad_x, 68 * scale), total_text, font=font_big, fill=_TEXT)
-    if count:
-        info = f"PEAK {peak_text} · {count} PUNKTE"
-    else:
-        info = "Keine Daten im Zeitraum."
+    info = f"PEAK {peak_text} · {count} PUNKTE" if count else "Keine Daten im Zeitraum."
     draw.text((pad_x, 126 * scale), info, font=font_muted, fill=_MUTED)
 
     x0, x1 = 64 * scale, width - 32 * scale
@@ -196,7 +193,7 @@ def _render_png(series: ChartSeries) -> bytes:
                 count - 1,
             }
         )
-        last_right = -10**9
+        last_right = -1e9
         for index in tick_indexes:
             label = series.labels[index] if index < len(series.labels) else ""
             if not label:
@@ -358,7 +355,7 @@ def _render_vbar_png(series: ChartViewSeries) -> bytes:
                 fill=color,
             )
 
-        last_right = -10**9
+        last_right = -1e9
         step = max(1, count // 8)
         for index in list(range(0, count, step)) + [count - 1]:
             label = series.labels[index] if index < len(series.labels) else ""

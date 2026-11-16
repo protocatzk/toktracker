@@ -188,10 +188,12 @@ class TestChartViewImage(unittest.TestCase):
 
     def test_view_cache_renders_once(self):
         data = _analytics_data()
-        with patch.object(cv, "_load_analytics", return_value=data):
-            with patch.object(ci, "_render_view_png", wraps=ci._render_view_png) as renderer:
-                first = ci.build_chart_image("24h", "eur", view="gifts")
-                second = ci.build_chart_image("24h", "eur", view="gifts")
+        with (
+            patch.object(cv, "_load_analytics", return_value=data),
+            patch.object(ci, "_render_view_png", wraps=ci._render_view_png) as renderer,
+        ):
+            first = ci.build_chart_image("24h", "eur", view="gifts")
+            second = ci.build_chart_image("24h", "eur", view="gifts")
         self.assertEqual(renderer.call_count, 1)
         self.assertEqual(first.digest, second.digest)
         self.assertIs(first, second)

@@ -68,10 +68,12 @@ class TestChartImageCache(unittest.TestCase):
     def test_same_data_is_rendered_only_once(self):
         ci.clear_chart_image_cache()
         series = _series()
-        with patch.object(ci, "load_chart_series", return_value=series):
-            with patch.object(ci, "_render_png", wraps=ci._render_png) as renderer:
-                first = ci.build_chart_image("24h", "eur")
-                second = ci.build_chart_image("24h", "eur")
+        with (
+            patch.object(ci, "load_chart_series", return_value=series),
+            patch.object(ci, "_render_png", wraps=ci._render_png) as renderer,
+        ):
+            first = ci.build_chart_image("24h", "eur")
+            second = ci.build_chart_image("24h", "eur")
         self.assertEqual(renderer.call_count, 1)
         self.assertEqual(first.digest, second.digest)
         self.assertIs(first, second)

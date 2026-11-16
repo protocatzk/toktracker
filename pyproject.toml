@@ -19,7 +19,7 @@ ignore = [
 "tests/*" = ["E402", "F401"]  # Bootstrap muss vor App-Imports laufen
 
 [tool.ruff.lint.isort]
-known-first-party = ["shared", "services", "app", "config", "database", "schemas", "system_service", "telegram_service", "tiktok_service"]
+known-first-party = ["shared", "services", "routers", "app", "config", "database", "schemas", "system_service", "telegram_service", "tiktok_service"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -33,6 +33,12 @@ files = [
     "shared/privacy.py",
     "shared/config.py",
     "shared/db",
+    # Chart-Pipeline: bewusst explizit (vorher nur zufällig über Importe geprüft).
+    "shared/widget_chart.py",
+    "shared/chart_views.py",
+    "shared/chart_image.py",
+    "shared/api_deps.py",
+    "routers",
 ]
 
 [tool.pytest.ini_options]

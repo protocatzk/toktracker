@@ -1,7 +1,6 @@
 import asyncio
 import csv
 import hashlib
-import hmac
 import io
 import json
 import logging
@@ -12,10 +11,10 @@ import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,14 +22,11 @@ from pydantic import BaseModel, Field
 
 from config import config
 from database import (
-    assign_streamer_revenue_profile,
     build_streamer_bot_report,
     check_telegram_user_access,
-    clear_demo_data,
     create_streamer_group,
     delete_streamer,
     delete_streamer_group,
-    delete_telegram_user,
     get_analytics_data,
     get_api_analytics_overview,
     get_battle_details,
@@ -43,63 +39,58 @@ from database import (
     get_db,
     get_donor_details,
     get_donor_radar_data,
-    get_group_streamer_ids,
     get_live_streamers,
     get_network_loyalty_and_overlap,
     get_recent_whale_gifts,
-    get_revenue_profile,
     get_settings,
     get_site_analytics_overview,
     get_stream_sessions,
     get_streamer_by_id_or_username,
     get_streamer_detail,
     get_streamer_group,
-    get_streamer_group_by_name,
     get_telegram_access_mode,
-    get_telegram_user_by_id,
-    get_telegram_user_by_identifier,
-    get_telegram_user_permission_overrides,
-    import_from_sqlite_database,
     init_db,
-    inspect_sqlite_database,
     list_revenue_profiles,
     list_streamer_groups,
-    list_telegram_users,
     record_api_call,
     record_bot_session,
     record_gift_event,
     record_page_view,
-    replace_telegram_user_permissions,
     revenue_profile_summary,
     save_donor_crm,
     seed_demo_data,
     set_streamer_group_members,
     toggle_donor_vip,
-    update_revenue_profile,
-    update_settings,
     update_streamer_group,
     upsert_streamer,
-    upsert_telegram_user_permission,
 )
-
+from routers.access import router as access_router
+from routers.exports import router as exports_router
+from routers.revenue import router as revenue_router
+from routers.system import router as system_router
 from schemas import (
     DailyBotReportResponse,
     DonorCRMUpdateRequest,
     GiftCreateRequest,
     MiniAppAuthRequest,
     MiniAppVerifyCodeRequest,
-    SettingsUpdateRequest,
-    SqliteImportRequest,
     StreamerCreateRequest,
     StreamerGroupCreateRequest,
     StreamerGroupMembersRequest,
     StreamerGroupUpdateRequest,
     StreamerReportCard,
-    TelegramUserPermissionRequest,
-    TelegramUserPermissionsUpdateRequest,
     TrackActionRequest,
 )
 from shared.access_gate import is_exempt_path, session_grants_access, wants_json
+from shared.api_deps import (
+    api_key_matches,
+    extract_session_token,
+    require_permission,
+    resolve_access_payload,
+    session_payload_from_request,
+    verify_admin_or_api_key,  # noqa: F401 - Re-Export für Abwärtskompatibilität
+    verify_session_token,
+)
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_client import bot_client as telegram_bot_service
 from shared.branding import brand_context
@@ -121,7 +112,6 @@ from shared.permissions import (
     PERM_REPORTS_SEND,
     PERM_SETTINGS_MANAGE,
     PERM_STREAMERS_MANAGE,
-    PERM_SYSTEM_MANAGE,
     PERM_SYSTEM_VIEW,
     PERM_USERS_MANAGE,
     PERMISSION_LABELS,
@@ -135,7 +125,6 @@ from shared.permissions import (
     has_permission,
     is_blocked,
     normalize_role,
-    resolve_permissions,
     role_label,
     session_permissions,
 )
@@ -265,7 +254,7 @@ app = FastAPI(
         "toktracker Backend-Service zur Echtzeit-Erfassung von TikTokLive-Geschenken (Coins/Diamonds) "
         "mit öffentlichem User-Panel (/), Telegram-geschütztem Admin-Panel (/admin) und integriertem Telegram-Bot."
     ),
-    version="2.5.0",
+    version="2.6.0",
     lifespan=lifespan,
     # API-Doku nur bei expliziter Freigabe (ENABLE_API_DOCS=1) – reduziert die Angriffsfläche.
     docs_url="/docs" if config.enable_api_docs else None,
@@ -444,7 +433,7 @@ async def track_page_views_middleware(request: Request, call_next):
             if x_api_key or query_api_key:
                 auth_type = "api_key"
                 provided_k = x_api_key or query_api_key
-                api_key_name = "configured" if _api_key_matches(provided_k, configured_key) else "custom"
+                api_key_name = "configured" if api_key_matches(provided_k, configured_key) else "custom"
             elif auth_header.lower().startswith("bearer "):
                 auth_type = "bearer"
                 api_key_name = ""
@@ -523,22 +512,6 @@ async def track_page_views_middleware(request: Request, call_next):
     return response
 
 
-def _api_key_matches(provided: str, configured: str) -> bool:
-    """Vergleicht API-Keys in konstanter Zeit (Timing-Angriffe vermeiden)."""
-    if not provided or not configured:
-        return False
-    return hmac.compare_digest(provided.encode("utf-8"), configured.encode("utf-8"))
-
-
-def _provided_api_key(x_api_key: Optional[str], query_api_key: Optional[str]) -> str:
-    """Header hat Vorrang; Query-Parameter nur bei ALLOW_API_KEY_QUERY=1."""
-    if x_api_key and x_api_key.strip():
-        return x_api_key.strip()
-    if query_api_key and config.allow_api_key_query:
-        return query_api_key.strip()
-    return ""
-
-
 @app.middleware("http")
 async def access_gate_middleware(request: Request, call_next):
     """
@@ -574,7 +547,7 @@ async def access_gate_middleware(request: Request, call_next):
             ).strip()
             if provided_key:
                 configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-                allowed = _api_key_matches(provided_key, configured_key)
+                allowed = api_key_matches(provided_key, configured_key)
 
         if not allowed:
             if wants_json(path, request.headers.get("accept", "")):
@@ -663,140 +636,6 @@ async def base_path_middleware(request: Request, call_next):
         ):
             response.headers["location"] = prefix + location
     return response
-
-
-def _extract_session_token(
-    toktracker_admin_session: Optional[str],
-    x_admin_session: Optional[str],
-    authorization: Optional[str],
-) -> Optional[str]:
-    token = toktracker_admin_session or x_admin_session
-    if not token and authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-    return token
-
-
-def _enrich_session_permissions(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Ergänzt die Session um persönliche Rechte-Overrides aus der Datenbank."""
-    if not payload:
-        return payload
-
-    grants: List[str] = []
-    denies: List[str] = []
-    try:
-        identifier = payload.get("telegram_id") or payload.get("sub")
-        user_row = get_telegram_user_by_identifier(identifier) if identifier else None
-        if user_row:
-            overrides = get_telegram_user_permission_overrides(int(user_row["id"]))
-            grants = list(overrides.get("grants") or [])
-            denies = list(overrides.get("denies") or [])
-    except Exception as exc:  # pragma: no cover - DB-Ausfall darf Login nicht blockieren
-        logger.debug("Persönliche Rechte konnten nicht geladen werden: %s", exc)
-
-    payload["permission_grants"] = grants
-    payload["permission_denies"] = denies
-    return payload
-
-
-def _verify_session_token(token: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Verifiziert ein Session-Token und reichert es mit effektiven Rechten an."""
-    return _enrich_session_permissions(admin_auth_manager.verify_session_token(token))
-
-
-def _session_payload_from_request(request: Request) -> Optional[Dict[str, Any]]:
-    """Liest die Session aus Cookie/Header einer normalen Browser-Anfrage."""
-    token = _extract_session_token(
-        request.cookies.get(AdminAuthManager.COOKIE_NAME),
-        request.headers.get("x-admin-session"),
-        request.headers.get("authorization"),
-    )
-    return _verify_session_token(token)
-
-
-def _api_key_payload() -> Dict[str, Any]:
-    return {
-        "sub": "api_key",
-        "role": ROLE_ADMIN,
-        "is_allowed": True,
-        "permissions": sorted(ALL_PERMISSIONS),
-    }
-
-
-def _resolve_access_payload(
-    toktracker_admin_session: Optional[str],
-    x_admin_session: Optional[str],
-    authorization: Optional[str],
-    x_api_key: Optional[str],
-    api_key: Optional[str],
-    permission: Optional[str] = None,
-) -> Dict[str, Any]:
-    token = _extract_session_token(toktracker_admin_session, x_admin_session, authorization)
-    session_payload = _verify_session_token(token)
-    if session_payload:
-        if permission and not has_permission(session_payload, permission):
-            raise HTTPException(
-                status_code=403,
-                detail=f"Zugriff verweigert: Das Recht '{permission}' fehlt für diese Rolle.",
-            )
-        return session_payload
-
-    configured_key = (config.api_key or get_settings().get("api_key") or "").strip()
-    provided = _provided_api_key(x_api_key, api_key)
-    if _api_key_matches(provided, configured_key):
-        return _api_key_payload()
-
-    raise HTTPException(
-        status_code=401,
-        detail="Nicht autorisiert. Bitte unter /login per Telegram authentifizieren oder gültigen X-API-Key übergeben.",
-    )
-
-
-def require_permission(permission: str):
-    """FastAPI-Dependency-Factory: verlangt eine bestimmte Capability."""
-
-    def dependency(
-        toktracker_admin_session: Optional[str] = Cookie(default=None),
-        x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
-        authorization: Optional[str] = Header(default=None, alias="Authorization"),
-        x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-        api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
-    ) -> Dict[str, Any]:
-        return _resolve_access_payload(
-            toktracker_admin_session,
-            x_admin_session,
-            authorization,
-            x_api_key,
-            api_key,
-            permission=permission,
-        )
-
-    return dependency
-
-
-def verify_admin_or_api_key(
-    toktracker_admin_session: Optional[str] = Cookie(default=None),
-    x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-    api_key: Optional[str] = Query(default=None, description="Optionaler API-Key per Query-Parameter"),
-) -> Dict[str, Any]:
-    """
-    Schützt alle reinen Admin-Endpunkte (Einstellungen, Nutzerverwaltung,
-    Demo-/SQLite-Funktionen, destruktive Streamer-Aktionen).
-    """
-    payload = _resolve_access_payload(
-        toktracker_admin_session,
-        x_admin_session,
-        authorization,
-        x_api_key,
-        api_key,
-    )
-    if normalize_role(payload.get("role")) != ROLE_ADMIN or is_blocked(payload.get("is_allowed", True)):
-        raise HTTPException(
-            status_code=403,
-            detail="Zugriff verweigert: Dieser Bereich ist Administratoren vorbehalten.",
-        )
-    return payload
 
 
 # Lesen und Schreiben beim Spender-Radar bewusst trennen.
@@ -906,7 +745,7 @@ def _enrich_streamer_card(streamer_row: Dict[str, Any], hours: int) -> StreamerR
 # =====================================================================
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def start_page(request: Request):
+def start_page(request: Request):
     """
     Öffentliche Infoseite unter "/".
 
@@ -914,7 +753,7 @@ async def start_page(request: Request):
     ausgeliefert (und unterliegt dann wieder der Zugriffssperre).
     """
     if not config.landing_page_enabled:
-        return await public_panel(request)
+        return public_panel(request)
 
     tg_diag = telegram_bot_service.get_diagnostics()
     bot_uname = (tg_diag.get("bot_username") or "").lstrip("@")
@@ -932,7 +771,7 @@ async def start_page(request: Request):
 
 @app.get("/public", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/panel", response_class=HTMLResponse, include_in_schema=False)
-async def public_panel(request: Request):
+def public_panel(request: Request):
     """
     Öffentliches User-Panel (/public, /panel) für Zuschauer (Read-Only).
     """
@@ -953,7 +792,7 @@ async def public_panel(request: Request):
         "btn_url": banner_btn_url,
     }
 
-    session_payload = _session_payload_from_request(request)
+    session_payload = session_payload_from_request(request)
     return templates.TemplateResponse(
         request=request,
         name="public.html",
@@ -1020,7 +859,7 @@ async def admin_login_page(
     Login-Seite (/login) für die Telegram-basierte Admin-Authentifizierung.
     """
     next_value = request.query_params.get("next")
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if session_payload:
         return RedirectResponse(
             url=_resolve_post_login_redirect(next_value, session_payload.get("role")),
@@ -1085,7 +924,7 @@ async def admin_console(
     """
     Geschütztes Admin-Panel (/admin). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/admin"), status_code=302)
     if normalize_role(session_payload.get("role")) != ROLE_ADMIN or is_blocked(session_payload.get("is_allowed", True)):
@@ -1112,7 +951,7 @@ async def admin_console(
 
 
 @app.get("/access", response_class=HTMLResponse, include_in_schema=False)
-async def access_page(
+def access_page(
     request: Request,
     toktracker_admin_session: Optional[str] = Cookie(default=None),
 ):
@@ -1123,7 +962,7 @@ async def access_page(
     zentrale Rechte-Matrix inklusive der bot.*-Capabilities an. Schreibzugriffe
     laufen weiterhin über die serverseitig geschützten APIs.
     """
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/access"), status_code=302)
     if not has_permission(session_payload, PERM_USERS_MANAGE):
@@ -1198,7 +1037,7 @@ async def site_analytics_page(
     """
     Geschützte Analyse-Seite (/site-analytics). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/site-analytics"), status_code=302)
     if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
@@ -1231,7 +1070,7 @@ async def stats_page(
     Read-only Statistik-Dashboard fuer Moderatoren und Administratoren.
     Enthaelt bewusst keine Verwaltungs-, Loesch- oder Buchungsfunktionen.
     """
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/stats"), status_code=302)
     if not has_permission(session_payload, PERM_ANALYTICS_VIEW):
@@ -1269,7 +1108,7 @@ async def donor_radar_page(
     """
     Geschützte Spender-Radar & Chatlog-Seite (/donor-radar). Leitet ohne gültige Telegram-Session auf /login weiter.
     """
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/donor-radar"), status_code=302)
     if not has_permission(session_payload, PERM_RADAR_VIEW):
@@ -1303,7 +1142,7 @@ async def chat_intelligence_page(
     Chat-Intelligence & Wortwolken-Viewer (/chat-intelligence).
     Exklusiv hinter der Whitelist-Funktion geschützt.
     """
-    session_payload = _verify_session_token(toktracker_admin_session)
+    session_payload = verify_session_token(toktracker_admin_session)
     if not session_payload:
         return RedirectResponse(url=_login_url(next_url="/chat-intelligence"), status_code=302)
 
@@ -1338,7 +1177,6 @@ async def chat_intelligence_page(
     )
 
 
-
 # =====================================================================
 # 1b. TELEGRAM ADMIN-AUTH ENDPOINTS (/api/auth/telegram/*)
 # =====================================================================
@@ -1364,7 +1202,8 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
             client_ip = _extract_client_ip(request)
             salt = config.session_secret or "toktracker_salt_2026"
             ip_hash = hashlib.sha256(f"{client_ip}:{salt}".encode("utf-8")).hexdigest()[:20]
-            record_bot_session(
+            await asyncio.to_thread(
+                record_bot_session,
                 session_type="telegram_login_challenge",
                 telegram_id=None,
                 username=payload.identifier or "",
@@ -1383,7 +1222,7 @@ async def api_auth_telegram_request(request: Request, payload: TelegramLoginRequ
     tags=["Admin Authentication"],
     summary="Prüft, ob die Login-Anfrage in Telegram per 1-Klick-Button freigegeben wurde",
 )
-async def api_auth_telegram_poll(
+def api_auth_telegram_poll(
     request: Request,
     challenge_id: str = Query(..., min_length=8),
     next_url: Optional[str] = Query(default=None, alias="next"),
@@ -1448,7 +1287,7 @@ async def api_auth_telegram_verify(
     tags=["Admin Authentication"],
     summary="Verifiziert Authentifizierung über das offizielle Telegram Login Widget (OAuth Flow)",
 )
-async def api_auth_telegram_widget(
+def api_auth_telegram_widget(
     request: Request,
     payload: TelegramWidgetAuthPayload,
     next_url: Optional[str] = Query(default=None, alias="next"),
@@ -1501,7 +1340,7 @@ async def api_auth_telegram_widget(
     "/api/auth/telegram/widget-callback",
     include_in_schema=False,
 )
-async def api_auth_telegram_widget_callback(request: Request):
+def api_auth_telegram_widget_callback(request: Request):
     init_db()
     auth_data = dict(request.query_params)
     # ``next`` ist kein Telegram-Auth-Feld und darf die Signaturprüfung nicht verfälschen.
@@ -1582,8 +1421,8 @@ async def api_auth_password(
     tags=["Public Panel API"],
     summary="Öffentliche Read-Only Übersicht für das User-Panel (ohne interne Logs/Whitelist)",
 )
-async def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
-    raw = await asyncio.to_thread(get_dashboard_overview, period=period)
+def api_public_overview(period: str = Query("24h", description="all | today | 24h | 7d | 30d")):
+    raw = get_dashboard_overview(period=period)
 
     show_donors = bool(get_settings().get("public_show_donors"))
     public_streamers = []
@@ -1649,13 +1488,13 @@ async def api_public_overview(period: str = Query("24h", description="all | toda
     tags=["Public Panel API"],
     summary="Öffentliche Read-Only Detail-Auswertung eines Streamers",
 )
-async def api_public_streamer_detail(identifier: str, period: str = Query("24h")):
+def api_public_streamer_detail(identifier: str, period: str = Query("24h")):
     init_db()
     s_row = get_streamer_by_id_or_username(identifier)
     if not s_row:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
-    detail = await asyncio.to_thread(get_streamer_detail, s_row["id"], period=period)
+    detail = get_streamer_detail(s_row["id"], period=period)
     if not detail:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
@@ -2006,12 +1845,12 @@ async def api_public_battle_stats(
     tags=["Public Panel API"],
     summary="Öffentliche Einnahmen-Analytics, Zeitreihen & Verteilungen für interaktive Charts",
 )
-async def api_public_analytics(
+def api_public_analytics(
     streamer_id: Optional[int] = Query(None, description="Optionale Streamer-ID"),
     period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
 ):
     init_db()
-    data = await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+    data = get_analytics_data(streamer_id=streamer_id, period=period)
     return apply_public_privacy(data, bool(get_settings().get("public_show_donors")))
 
 
@@ -2020,12 +1859,12 @@ async def api_public_analytics(
     tags=["Telegram Mini-App"],
     summary="Kompakter Daten-Feed für die Telegram Mini-App (Live-Matches, Einnahmen, Streamer)",
 )
-async def api_miniapp_data(period: str = Query("24h", description="today | 24h | 7d | 30d | all")):
+def api_miniapp_data(period: str = Query("24h", description="today | 24h | 7d | 30d | all")):
     init_db()
     monitor_manager.autostart_from_db()
 
     # 1. Dashboard-Übersicht & Einnahmen
-    overview = await asyncio.to_thread(get_dashboard_overview, period=period)
+    overview = get_dashboard_overview(period=period)
     totals = overview.get("totals", {})
     totals["total_eur_net"] = totals.get("eur_net", 0.0)
     totals["total_usd_net"] = totals.get("usd_net", 0.0)
@@ -2067,11 +1906,11 @@ async def api_miniapp_data(period: str = Query("24h", description="today | 24h |
     live_battles = consolidate_live_battles(diag.get("workers", []), streamer_map)
 
     # 4. Kürzliche Battles
-    battles_resp = await asyncio.to_thread(get_battles_list, period=period, limit=25)
+    battles_resp = get_battles_list(period=period, limit=25)
     recent_battles = battles_resp.get("battles", [])
 
     # 5. Battle Stats
-    battle_stats = await asyncio.to_thread(get_battle_stats, period=period)
+    battle_stats = get_battle_stats(period=period)
 
     # 6. Telegram Bot Info
     tg_diag = telegram_bot_service.get_diagnostics()
@@ -2115,7 +1954,7 @@ async def api_miniapp_battle_detail(battle_id: int):
     tags=["Telegram Mini-App"],
     summary="Authentifiziert den Telegram-Nutzer anhand von WebApp initData (HMAC-SHA256)",
 )
-async def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, response: Response):
+def api_miniapp_auth(request: Request, payload: MiniAppAuthRequest, response: Response):
     init_db()
     validated = admin_auth_manager.validate_webapp_init_data(payload.init_data)
     if not validated:
@@ -2212,9 +2051,9 @@ async def api_miniapp_auth_status(
     x_admin_session: Optional[str] = Header(default=None, alias="X-Admin-Session"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    token = _extract_session_token(toktracker_admin_session, x_admin_session, authorization)
+    token = extract_session_token(toktracker_admin_session, x_admin_session, authorization)
 
-    session_payload = _verify_session_token(token)
+    session_payload = verify_session_token(token)
     if session_payload:
         role = normalize_role(session_payload.get("role"))
         is_admin = role == ROLE_ADMIN and not is_blocked(session_payload.get("is_allowed", True))
@@ -2262,7 +2101,7 @@ async def api_miniapp_radar(
 ):
     init_db()
     try:
-        payload = _resolve_access_payload(
+        payload = resolve_access_payload(
             toktracker_admin_session,
             x_admin_session,
             authorization,
@@ -2378,12 +2217,12 @@ async def api_miniapp_auth_logout(response: Response):
     tags=["Telegram Mini-App"],
     summary="Öffentliche Analytics- und Chart-Daten für die Mini-App",
 )
-async def api_miniapp_analytics(
+def api_miniapp_analytics(
     period: str = Query("24h", description="all | today | 24h | 7d | 30d"),
     streamer_id: Optional[int] = Query(None, description="Optionaler Einzelfilter nach Streamer"),
 ):
     init_db()
-    data = await asyncio.to_thread(get_analytics_data, streamer_id=streamer_id, period=period)
+    data = get_analytics_data(streamer_id=streamer_id, period=period)
     return apply_public_privacy(data, bool(get_settings().get("public_show_donors")))
 
 
@@ -2425,218 +2264,13 @@ async def api_v1_telegram_send_report(
 
 
 @app.get(
-    "/api/telegram/users",
-    tags=["Telegram Bot API"],
-    summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-@app.get(
-    "/api/v1/telegram/users",
-    tags=["Telegram Bot API"],
-    summary="Listet alle Telegram-Nutzer (Whitelist, Admins & offene Anfragen) sowie den Zugriffsmodus",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-async def api_get_telegram_users():
-    init_db()
-    return {
-        "access_mode": get_telegram_access_mode(),
-        "users": list_telegram_users(),
-    }
-
-
-@app.post(
-    "/api/telegram/users",
-    tags=["Telegram Bot API"],
-    summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-@app.post(
-    "/api/v1/telegram/users",
-    tags=["Telegram Bot API"],
-    summary="Fügt einen Telegram-Nutzer per ID oder @username zur Whitelist hinzu oder ändert seine Rolle",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-async def api_upsert_telegram_user(payload: TelegramUserPermissionRequest):
-    init_db()
-    try:
-        user_row = upsert_telegram_user_permission(
-            identifier=payload.identifier,
-            is_allowed=payload.is_allowed,
-            role=payload.role,
-            first_name=payload.first_name,
-            note=payload.note,
-        )
-        return {"ok": True, "user": user_row, "access_mode": get_telegram_access_mode()}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-_CRITICAL_PERMISSIONS = frozenset({
-    PERM_USERS_MANAGE,
-    PERM_SETTINGS_MANAGE,
-    PERM_SYSTEM_MANAGE,
-})
-
-
-def _permission_definitions() -> List[Dict[str, str]]:
-    return [
-        {
-            "key": permission,
-            "label": PERMISSION_LABELS.get(permission, permission),
-            "scope": "bot" if permission.startswith("bot.") else "web",
-        }
-        for permission in sorted(ALL_PERMISSIONS)
-    ]
-
-
-def _telegram_user_permission_payload(user_row: Dict[str, Any]) -> Dict[str, Any]:
-    role = normalize_role(user_row.get("role"))
-    overrides = get_telegram_user_permission_overrides(int(user_row["id"]))
-    grants = list(overrides.get("grants") or [])
-    denies = list(overrides.get("denies") or [])
-    effective = sorted(
-        resolve_permissions(
-            role,
-            user_row.get("is_allowed", 0),
-            grants,
-            denies,
-        )
-    )
-    return {
-        "user": user_row,
-        "role": role,
-        "role_permissions": sorted(ROLE_PERMISSIONS.get(role, frozenset())),
-        "grants": grants,
-        "denies": denies,
-        "effective_permissions": effective,
-        "permissions": _permission_definitions(),
-    }
-
-
-def _session_user_id(payload: Optional[Dict[str, Any]]) -> Optional[int]:
-    if not payload:
-        return None
-    try:
-        identifier = payload.get("telegram_id") or payload.get("sub")
-        user_row = get_telegram_user_by_identifier(identifier) if identifier else None
-        return int(user_row["id"]) if user_row else None
-    except Exception:
-        return None
-
-
-@app.get(
-    "/api/telegram/users/{record_id}/permissions",
-    tags=["Telegram Bot API"],
-    summary="Liefert Rolle, persönliche Overrides und effektive Rechte eines Kontos",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-@app.get(
-    "/api/v1/telegram/users/{record_id}/permissions",
-    tags=["Telegram Bot API"],
-    summary="Liefert Rolle, persönliche Overrides und effektive Rechte eines Kontos",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-async def api_get_telegram_user_permissions(record_id: int):
-    init_db()
-    user_row = get_telegram_user_by_id(record_id)
-    if not user_row:
-        raise HTTPException(status_code=404, detail="Telegram-Nutzer nicht gefunden.")
-    return _telegram_user_permission_payload(user_row)
-
-
-@app.put(
-    "/api/telegram/users/{record_id}/permissions",
-    tags=["Telegram Bot API"],
-    summary="Ersetzt die persönlichen Rechte-Overrides eines Kontos",
-)
-@app.put(
-    "/api/v1/telegram/users/{record_id}/permissions",
-    tags=["Telegram Bot API"],
-    summary="Ersetzt die persönlichen Rechte-Overrides eines Kontos",
-)
-async def api_update_telegram_user_permissions(
-    record_id: int,
-    payload: TelegramUserPermissionsUpdateRequest,
-    session_payload: Dict[str, Any] = Depends(require_permission(PERM_USERS_MANAGE)),
-):
-    init_db()
-    user_row = get_telegram_user_by_id(record_id)
-    if not user_row:
-        raise HTTPException(status_code=404, detail="Telegram-Nutzer nicht gefunden.")
-
-    if _session_user_id(session_payload) == record_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Eigene Rechte können nicht geändert werden. Bitte einen anderen Admin verwenden.",
-        )
-
-    if (
-        normalize_role(user_row.get("role")) == ROLE_ADMIN
-        and normalize_role(session_payload.get("role")) != ROLE_ADMIN
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Rechte von Administratoren dürfen nur Administratoren ändern.",
-        )
-
-    requested = set(payload.grants) | set(payload.denies)
-    actor_permissions = session_permissions(session_payload)
-    if not requested.issubset(actor_permissions):
-        raise HTTPException(
-            status_code=403,
-            detail="Es können nur Rechte vergeben oder entzogen werden, die das eigene Konto besitzt.",
-        )
-
-    if requested & _CRITICAL_PERMISSIONS and normalize_role(session_payload.get("role")) != ROLE_ADMIN:
-        raise HTTPException(
-            status_code=403,
-            detail="Kritische Rechte dürfen nur Administratoren vergeben oder entziehen.",
-        )
-
-    try:
-        replace_telegram_user_permissions(
-            record_id,
-            payload.grants,
-            payload.denies,
-            created_by=str(session_payload.get("sub") or ""),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    updated_row = get_telegram_user_by_id(record_id) or user_row
-    result = _telegram_user_permission_payload(updated_row)
-    result["ok"] = True
-    return result
-
-
-@app.delete(
-    "/api/telegram/users/{record_id}",
-    tags=["Telegram Bot API"],
-    summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-@app.delete(
-    "/api/v1/telegram/users/{record_id}",
-    tags=["Telegram Bot API"],
-    summary="Entfernt einen Telegram-Nutzer aus der Datenbank",
-    dependencies=[Depends(require_permission(PERM_USERS_MANAGE))],
-)
-async def api_delete_telegram_user(record_id: int):
-    init_db()
-    deleted = delete_telegram_user(record_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Telegram-Nutzer nicht gefunden.")
-    return {"ok": True, "deleted_id": record_id}
-
-
-@app.get(
     "/api/v1/streamers/{identifier}/report",
     response_model=StreamerReportCard,
     tags=["Telegram Bot API"],
     summary="Einzelabfrage für einen bestimmten Streamer per @username oder ID",
     dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
-async def api_v1_streamer_single_report(
+def api_v1_streamer_single_report(
     identifier: str,
     hours: int = Query(24, ge=1, le=8760, description="Zeitraum in Stunden für die Auswertung (Standard: 24h)"),
 ):
@@ -2682,14 +2316,12 @@ async def api_live_streamers():
 
 @app.get("/api/overview", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 @app.get("/api/v1/overview", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
-async def api_overview(
+def api_overview(
     period: str = Query("all", description="all | today | 24h | 7d | 30d"),
     group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
 ):
     init_db()
-    data = await asyncio.to_thread(
-        lambda: get_dashboard_overview(period=period, group_id=group_id)
-    )
+    data = get_dashboard_overview(period=period, group_id=group_id)
     for s in data["streamers"]:
         uname = s["username"]
         s["is_tracking_active"] = monitor_manager.is_tracking(uname)
@@ -2732,12 +2364,12 @@ async def api_analytics(
     summary="Liefert aggregierte Daten zu Web-Traffic, Besuchern und Bot-Sessions",
     dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))],
 )
-async def api_site_analytics(
+def api_site_analytics(
     period: str = Query("today", description="all | today | 24h | 7d | 30d"),
 ):
     init_db()
     data = get_site_analytics_overview(period=period)
-    overview = await asyncio.to_thread(get_dashboard_overview, period=period)
+    overview = get_dashboard_overview(period=period)
     workers_list = []
     for s in overview.get("streamers", []):
         uname = s["username"]
@@ -3145,7 +2777,6 @@ async def api_chat_intelligence_export(
         )
 
 
-
 @app.get("/api/battles", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 @app.get("/api/v1/battles", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 async def api_get_battles(
@@ -3259,13 +2890,13 @@ async def api_system_health(force_refresh: bool = False):
 
 @app.get("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
 @app.get("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_ANALYTICS_VIEW))])
-async def api_streamer_detail(identifier: str, period: str = Query("all")):
+def api_streamer_detail(identifier: str, period: str = Query("all")):
     init_db()
     s_row = get_streamer_by_id_or_username(identifier)
     if not s_row:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
-    detail = await asyncio.to_thread(get_streamer_detail, s_row["id"], period=period)
+    detail = get_streamer_detail(s_row["id"], period=period)
     if not detail:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
@@ -3387,15 +3018,14 @@ async def api_add_streamer(payload: StreamerCreateRequest):
 
 @app.post("/api/streamers/{identifier}/refresh", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 @app.post("/api/v1/streamers/{identifier}/refresh", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
-async def api_refresh_streamer(identifier: str):
+def api_refresh_streamer(identifier: str):
     init_db()
     row = get_streamer_by_id_or_username(identifier)
     if not row:
         raise HTTPException(status_code=404, detail="Streamer nicht gefunden")
 
-    profile = await asyncio.to_thread(fetch_tiktok_user_info, row["username"])
-    updated = await asyncio.to_thread(
-        upsert_streamer,
+    profile = fetch_tiktok_user_info(row["username"])
+    updated = upsert_streamer(
         username=row["username"],
         display_name=profile.get("display_name") or row["display_name"],
         avatar_url=profile.get("avatar_url") or row["avatar_url"],
@@ -3408,7 +3038,7 @@ async def api_refresh_streamer(identifier: str):
 
 @app.post("/api/streamers/{identifier}/track", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 @app.post("/api/v1/streamers/{identifier}/track", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
-async def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequest] = None):
+def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequest] = None):
     init_db()
     req = payload or TrackActionRequest()
     row = get_streamer_by_id_or_username(identifier)
@@ -3427,7 +3057,7 @@ async def api_toggle_tracking(identifier: str, payload: Optional[TrackActionRequ
 
 @app.delete("/api/streamers/{identifier}", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
 @app.delete("/api/v1/streamers/{identifier}", tags=["Telegram Bot API"], dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))])
-async def api_delete_streamer(identifier: str):
+def api_delete_streamer(identifier: str):
     init_db()
     row = get_streamer_by_id_or_username(identifier)
     if not row:
@@ -3466,373 +3096,16 @@ async def api_record_gift(payload: GiftCreateRequest):
     return {"ok": True, "created": created, "event": event}
 
 
-def _export_scope_clause(
-    column: str, streamer_id: Optional[int], group_id: Optional[int]
-) -> Tuple[str, Tuple[Any, ...]]:
-    """Baut die optionale Scope-Bedingung für CSV-Exporte (Streamer oder Gruppe)."""
-    if streamer_id:
-        return f" WHERE {column} = ?", (int(streamer_id),)
-    if group_id:
-        ids = get_group_streamer_ids(int(group_id))
-        if not ids:
-            return " WHERE 1 = 0", ()
-        placeholders = ",".join("?" for _ in ids)
-        return f" WHERE {column} IN ({placeholders})", tuple(ids)
-    return "", ()
-
-
-def _fetch_gift_export_rows(
-    streamer_id: Optional[int], group_id: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    """Synchroner DB-Zugriff für den CSV-Export (läuft via to_thread)."""
-    scope_sql, scope_params = _export_scope_clause("g.streamer_id", streamer_id, group_id)
-    with get_db() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT g.*, s.username AS streamer_username
-            FROM gift_events g
-            JOIN streamers s ON s.id = g.streamer_id
-            {scope_sql}
-            ORDER BY g.created_at DESC
-            """,
-            scope_params,
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def _fetch_battle_export_rows(
-    streamer_id: Optional[int], group_id: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    """Synchroner DB-Zugriff für den Battle-CSV-Export (läuft via to_thread)."""
-    scope_sql, scope_params = _export_scope_clause("b.streamer_id", streamer_id, group_id)
-    with get_db() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT b.*, s.username AS streamer_username
-            FROM tiktok_battles b
-            JOIN streamers s ON s.id = b.streamer_id
-            {scope_sql}
-            ORDER BY b.started_at DESC
-            """,
-            scope_params,
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-@app.get("/api/export/gifts.csv", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_EXPORT_DOWNLOAD))])
-async def api_export_gifts_csv(
-    streamer_id: Optional[int] = Query(None),
-    group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
-):
-    init_db()
-    rows = await asyncio.to_thread(_fetch_gift_export_rows, streamer_id, group_id)
-
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    writer.writerow(
-        [
-            "id",
-            "created_at",
-            "streamer_username",
-            "session_id",
-            "sender_username",
-            "sender_nickname",
-            "is_super_fan",
-            "gift_id",
-            "gift_name",
-            "diamond_count",
-            "repeat_count",
-            "total_coins",
-            "usd_net",
-            "eur_net",
-            "usd_gross",
-            "eur_gross",
-            "source",
-        ]
-    )
-    for r in rows:
-        writer.writerow(
-            [
-                r["id"],
-                r["created_at"],
-                r["streamer_username"],
-                r["session_id"],
-                r["sender_username"],
-                r["sender_nickname"],
-                r["is_super_fan"],
-                r["gift_id"],
-                r["gift_name"],
-                r["diamond_count"],
-                r["repeat_count"],
-                r["total_coins"],
-                r["usd_net"],
-                r["eur_net"],
-                r["usd_gross"],
-                r["eur_gross"],
-                r["source"],
-            ]
-        )
-
-    return Response(
-        content=output.getvalue(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=toktracker_gifts_export.csv"},
-    )
-
-
-@app.get("/api/export/battles.csv", tags=["TikTok Battles"], dependencies=[Depends(require_permission(PERM_EXPORT_DOWNLOAD))])
-async def api_export_battles_csv(
-    streamer_id: Optional[int] = Query(None),
-    group_id: Optional[int] = Query(None, description="Optionale Streamer-Gruppe als Scope"),
-):
-    init_db()
-    b_rows = await asyncio.to_thread(_fetch_battle_export_rows, streamer_id, group_id)
-
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    writer.writerow(
-        [
-            "id",
-            "battle_id",
-            "battle_mode",
-            "streamer_username",
-            "streamer_score",
-            "teammate_username",
-            "teammate_score",
-            "opponent_username",
-            "opponent_display_name",
-            "opponent_score",
-            "opponent2_username",
-            "opponent2_score",
-            "opponent3_username",
-            "opponent3_score",
-            "streamer_rank",
-            "started_at",
-            "ended_at",
-            "duration_seconds",
-            "result",
-            "streamer_mvp_name",
-            "streamer_mvp_score",
-            "opponent_mvp_name",
-            "opponent_mvp_score",
-            "coins_earned",
-            "eur_net",
-            "usd_net",
-            "status",
-        ]
-    )
-    for r in b_rows:
-        writer.writerow(
-            [
-                r["id"],
-                r["battle_id"],
-                r["battle_mode"] or "1v1",
-                r["streamer_username"],
-                r["streamer_score"],
-                r["teammate_username"] or "",
-                r["teammate_score"] or 0,
-                r["opponent_username"],
-                r["opponent_display_name"],
-                r["opponent_score"],
-                r["opponent2_username"] or "",
-                r["opponent2_score"] or 0,
-                r["opponent3_username"] or "",
-                r["opponent3_score"] or 0,
-                r["streamer_rank"] or 0,
-                r["started_at"],
-                r["ended_at"] or "",
-                r["duration_seconds"],
-                r["result"],
-                r["streamer_mvp_name"] or "",
-                r["streamer_mvp_score"] or 0,
-                r["opponent_mvp_name"] or "",
-                r["opponent_mvp_score"] or 0,
-                r["coins_earned"] or 0,
-                r["eur_net"] or 0.0,
-                r["usd_net"] or 0.0,
-                r["status"],
-            ]
-        )
-
-    return Response(
-        content=output.getvalue(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=tiktok_battles_export.csv"},
-    )
-
-
-@app.get("/api/settings", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))])
-async def api_get_settings():
-    init_db()
-    return get_settings()
-
-
-@app.post("/api/settings", tags=["System & Workers"], dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))])
-async def api_update_settings(payload: SettingsUpdateRequest):
-    init_db()
-    updated = update_settings(payload.model_dump(exclude_none=True))
-    if config.has_redis:
-        try:
-            get_bus().publish_sync(CHANNEL_SETTINGS_CHANGED, {"action": "settings_changed"})
-        except Exception:
-            pass
-    return {"ok": True, "settings": updated}
-
-
-@app.get(
-    "/api/revenue/profiles",
-    tags=["Revenue"],
-    dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))],
-)
-async def api_revenue_profiles():
-    init_db()
-    with get_db() as conn:
-        streamer_rows = conn.execute(
-            """
-            SELECT id, username, display_name, revenue_profile_id
-            FROM streamers
-            ORDER BY username ASC
-            """
-        ).fetchall()
-    return {
-        "profiles": [revenue_profile_summary(p) for p in list_revenue_profiles()],
-        "streamers": [
-            {
-                "id": int(s["id"]),
-                "username": s["username"],
-                "display_name": s.get("display_name") or s["username"],
-                "revenue_profile_id": s.get("revenue_profile_id"),
-            }
-            for s in streamer_rows
-        ],
-    }
-
-
-@app.post(
-    "/api/revenue/profiles/{profile_id}",
-    tags=["Revenue"],
-    dependencies=[Depends(require_permission(PERM_SETTINGS_MANAGE))],
-)
-async def api_update_revenue_profile(
-    profile_id: int,
-    payload: Dict[str, Any] = Body(...),
-):
-    init_db()
-    updated = update_revenue_profile(profile_id, payload)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Revenue-Profil nicht gefunden.")
-    return {"ok": True, "profile": revenue_profile_summary(updated)}
-
-
-@app.post(
-    "/api/revenue/assign",
-    tags=["Revenue"],
-    dependencies=[Depends(require_permission(PERM_STREAMERS_MANAGE))],
-)
-async def api_assign_revenue_profile(payload: Dict[str, Any] = Body(...)):
-    init_db()
-    try:
-        streamer_id = int(payload.get("streamer_id"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="streamer_id fehlt oder ist ungültig.") from None
-    profile_id = payload.get("profile_id")
-    if profile_id is not None:
-        try:
-            profile_id = int(profile_id)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="profile_id ist ungültig.") from None
-        if not get_revenue_profile(profile_id):
-            raise HTTPException(status_code=404, detail="Revenue-Profil nicht gefunden.")
-    if not assign_streamer_revenue_profile(streamer_id, profile_id):
-        raise HTTPException(status_code=404, detail="Streamer nicht gefunden.")
-    return {"ok": True}
-
-
-@app.post("/api/demo/seed", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))])
-async def api_seed_demo():
-    init_db()
-    seed_demo_data()
-    return {"ok": True, "message": "Demo-Daten geladen."}
-
-
-@app.post("/api/demo/clear", tags=["Dashboard & Data"], dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))])
-async def api_clear_demo():
-    init_db()
-    removed = clear_demo_data()
-    return {"ok": True, "removed": removed}
-
-
 # =====================================================================
-# SQLITE DATENBANK IMPORTER (ADMIN PANEL API)
+# AUSGELAGERTE ROUTER (siehe routers/)
 # =====================================================================
+# Die Router werden erst hier registriert, damit die Reihenfolge der übrigen
+# Routen unverändert bleibt und die Middlewares weiterhin global greifen.
 
-@app.get(
-    "/api/admin/sqlite/inspect",
-    tags=["System & Workers"],
-    summary="Untersucht eine SQLite-Datei vor dem Import (Standard: tiktok_earnings.db)",
-    dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))],
-)
-async def api_sqlite_inspect(file_path: Optional[str] = Query(None)):
-    target_path = file_path.strip() if file_path and file_path.strip() else config.db_path
-    if not os.path.exists(target_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"SQLite-Datei '{target_path}' wurde auf dem Server nicht gefunden."
-        )
-    try:
-        inspection = inspect_sqlite_database(target_path)
-        # Zusätzliche Info über aktuelle Ziel-Datenbank
-        inspection["target_db"] = {
-            "engine": config.db_engine,
-            "target": (
-                f"{config.mysql_user}@{config.mysql_host}:{config.mysql_port}/{config.mysql_database}"
-                if config.is_mysql
-                else os.path.basename(config.db_path)
-            ),
-        }
-        return {"ok": True, "data": inspection}
-    except Exception:
-        logger.exception("SQLite-Analyse fehlgeschlagen")
-        raise HTTPException(
-            status_code=500,
-            detail="Die SQLite-Datei konnte nicht analysiert werden. Details stehen im Server-Log.",
-        ) from None
-
-
-@app.post(
-    "/api/admin/sqlite/import",
-    tags=["System & Workers"],
-    summary="Führt den Datenimport aus der SQLite-Datei in die aktive Datenbank aus",
-    dependencies=[Depends(require_permission(PERM_SYSTEM_MANAGE))],
-)
-async def api_sqlite_import(payload: Optional[SqliteImportRequest] = None):
-    init_db()
-    req = payload or SqliteImportRequest()
-    target_path = (req.file_path or "").strip() or config.db_path
-    if not os.path.exists(target_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"SQLite-Datei '{target_path}' wurde auf dem Server nicht gefunden."
-        )
-
-    try:
-        result = import_from_sqlite_database(
-            sqlite_file_path=target_path,
-            import_tables=req.tables,
-            mode=req.mode,
-        )
-        # Nach dem Import auto-start für neu importierte Streamer triggern
-        try:
-            monitor_manager.autostart_from_db(force=True)
-        except Exception:
-            pass
-        return {"ok": True, "result": result}
-    except Exception:
-        logger.exception("SQLite-Import fehlgeschlagen")
-        raise HTTPException(
-            status_code=500,
-            detail="Der SQLite-Import ist fehlgeschlagen. Details stehen im Server-Log.",
-        ) from None
+app.include_router(revenue_router)
+app.include_router(exports_router)
+app.include_router(system_router)
+app.include_router(access_router)
 
 
 if __name__ == "__main__":

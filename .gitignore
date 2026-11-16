@@ -13,6 +13,11 @@
 __pycache__/
 *.py[cod]
 
+# Coverage-Artefakte (pytest-cov)
+.coverage
+.coverage.*
+htmlcov/
+
 # IDE
 .idea/
 .vscode/

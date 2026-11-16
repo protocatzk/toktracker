@@ -1,4 +1,5 @@
 # TokTracker - Entwicklungs- & CI-Abhängigkeiten (nicht im Produktions-Image nötig)
 pytest>=8.3
+pytest-cov>=6.0
 ruff>=0.17
 mypy>=1.11

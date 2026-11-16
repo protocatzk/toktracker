@@ -1,6 +1,9 @@
 """
 TokTracker - Config Re-export & Abwärtskompatibilität
 Ermöglicht Importe wie `from config import config, BASE_DIR` sowie `from shared.config import config`.
+
+Ablauf: Diese Fassade entfällt mit v2.0. Bis dahin bleiben die Importpfade
+stabil; neuer Code importiert direkt aus `shared.config`.
 """
 
 from shared.config import (

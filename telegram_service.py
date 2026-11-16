@@ -48,7 +48,6 @@ from database import (
     build_streamer_bot_report,
     check_telegram_user_access,
     get_all_streamers_summary,
-    list_streamers_for_picker,
     get_dashboard_overview,
     get_db,
     get_donor_details,
@@ -64,6 +63,7 @@ from database import (
     get_telegram_access_mode,
     list_streamer_alert_subscriptions,
     list_streamer_groups,
+    list_streamers_for_picker,
     list_telegram_users,
     mark_streamer_alert_notified,
     remove_streamer_alert,
@@ -81,9 +81,11 @@ from shared.bus import get_bus
 from shared.chart_image import build_chart_image
 from shared.chart_views import (
     CHART_VIEWS,
-    VIEW_LABELS as CHART_VIEW_LABELS,
     is_view_alias,
     normalize_view,
+)
+from shared.chart_views import (
+    VIEW_LABELS as CHART_VIEW_LABELS,
 )
 from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
