@@ -1,5 +1,6 @@
 # TokTracker - Entwicklungs- & CI-Abhängigkeiten (nicht im Produktions-Image nötig)
-pytest>=8.3
-pytest-cov>=6.0
-ruff>=0.17
-mypy>=1.11
+# Gepinnt am 2026-11-16, damit CI reproduzierbar bleibt (keine ungetesteten Major-Updates).
+pytest==9.2.0
+pytest-cov==7.1.0
+ruff==0.17.5
+mypy==2.4.1
