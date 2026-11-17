@@ -22,7 +22,6 @@ ADMIN_ENDPOINTS = (
     "/api/system/status",
     "/api/telegram/users",
     "/api/site-analytics",
-    "/api/admin/sqlite/inspect",
 )
 
 

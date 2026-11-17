@@ -215,7 +215,6 @@ class TestApiRoleMatrix(ApiRoleTestCase):
             ("POST", "/api/streamers"),
             ("POST", "/api/gifts"),
             ("POST", "/api/demo/seed"),
-            ("GET", "/api/admin/sqlite/inspect"),
             ("POST", "/api/donor-radar/donors/test/crm"),
             ("POST", "/api/donor-radar/donors/test/toggle-vip"),
         )

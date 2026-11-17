@@ -131,7 +131,7 @@ def _build(
 
 
 class TestChartTimeline(unittest.TestCase):
-    def test_lightweight_query_structure_on_sqlite(self):
+    def test_lightweight_query_returns_structure(self):
         from shared.database import get_chart_timeline
 
         data = get_chart_timeline("24h", force_refresh=True)

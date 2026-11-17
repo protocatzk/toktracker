@@ -3,8 +3,9 @@
 # TokTracker Test-Runner (Quotenfrei & Rückstandsfrei)
 # Kopiert Tests temporär in den Container, führt sie aus und löscht sie garantiert.
 #
-# Die Tests laufen gegen eine isolierte SQLite-DB in /tmp (siehe tests/_bootstrap.py)
-# und nutzen den Container-Redis für die Redis-Pfade (Bus, Leases, Rate-Limits).
+# Die Tests laufen gegen eine isolierte MariaDB-Datenbank pro Lauf
+# (siehe tests/_bootstrap.py) und nutzen den Container-Redis für die
+# Redis-Pfade (Bus, Leases, Rate-Limits).
 # ==============================================================================
 set -euo pipefail
 

@@ -29,8 +29,6 @@ EXTRACTED_ROUTES = {
     ("POST", "/api/settings"),
     ("POST", "/api/demo/seed"),
     ("POST", "/api/demo/clear"),
-    ("GET", "/api/admin/sqlite/inspect"),
-    ("POST", "/api/admin/sqlite/import"),
     ("GET", "/api/telegram/users"),
     ("GET", "/api/v1/telegram/users"),
     ("POST", "/api/telegram/users"),

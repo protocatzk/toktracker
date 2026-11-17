@@ -44,30 +44,24 @@ class TestDecimalNormalization(unittest.TestCase):
 
 
 class TestSchemaTypes(unittest.TestCase):
-    def test_mysql_money_columns_use_decimal(self):
-        source = inspect.getsource(schema._init_mysql_schema)
+    def test_money_columns_use_decimal(self):
+        source = inspect.getsource(schema._init_schema)
         for column in ("usd_net", "eur_net", "usd_gross", "eur_gross"):
             with self.subTest(column=column):
                 self.assertRegex(
                     source,
                     rf"{column}\s+DECIMAL\(14,4\)",
-                    f"{column} sollte in MySQL DECIMAL(14,4) sein",
+                    f"{column} sollte DECIMAL(14,4) sein",
                 )
                 self.assertNotRegex(source, rf"{column}\s+DOUBLE")
 
-    def test_sqlite_money_columns_remain_real(self):
-        source = inspect.getsource(schema._init_sqlite_schema)
-        for column in ("usd_net", "eur_net", "usd_gross", "eur_gross"):
-            with self.subTest(column=column):
-                self.assertRegex(source, rf"{column}\s+REAL")
-
     def test_migration_targets_exactly_the_schema_columns(self):
-        mysql_source = inspect.getsource(schema._init_mysql_schema)
+        schema_source = inspect.getsource(schema._init_schema)
         for table, columns in migration.MONEY_COLUMNS.items():
-            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", mysql_source)
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", schema_source)
             for column in columns:
                 with self.subTest(table=table, column=column):
-                    self.assertRegex(mysql_source, rf"{column}\s+DECIMAL\(14,4\)")
+                    self.assertRegex(schema_source, rf"{column}\s+DECIMAL\(14,4\)")
 
     def test_migration_plan_is_empty_for_decimal_columns(self):
         types = {(table, col): "decimal" for table, cols in migration.MONEY_COLUMNS.items() for col in cols}

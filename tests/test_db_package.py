@@ -32,12 +32,10 @@ CRITICAL_SYMBOLS = (
     "get_donor_radar_data",
     "get_chat_analysis",
     "record_api_call",
-    "import_from_sqlite_database",
-    "MySQLConnectionWrapper",
+    "MariaDBConnection",
     "DBRow",
     "DEFAULT_SETTINGS",
-    "_init_mysql_schema",
-    "_init_sqlite_schema",
+    "_init_schema",
 )
 
 
@@ -51,10 +49,11 @@ class TestDatabaseFacade(unittest.TestCase):
                 self.assertTrue(hasattr(facade, name), f"{name} fehlt in shared.database")
 
     def test_private_helpers_stay_reachable(self):
-        # Wird z.B. von Tests und Migrationsskripten genutzt.
-        self.assertTrue(callable(facade._init_mysql_schema))
+        # Wird z.B. von Tests genutzt.
+        self.assertTrue(callable(facade._init_schema))
         self.assertIsNotNone(facade._get_period_cutoff("24h"))
-        self.assertIsNotNone(facade._ensure_column_sqlite)
+        self.assertTrue(callable(facade._ensure_column))
+        self.assertTrue(callable(facade._ensure_index))
 
     def test_facade_is_thin(self):
         path = os.path.join(os.path.dirname(__file__), "..", "shared", "database.py")
@@ -79,7 +78,7 @@ class TestDatabaseFacade(unittest.TestCase):
 
     def test_modules_import_independently(self):
         for name in ("_base", "settings", "schema", "users", "streamers", "gifts",
-                     "battles", "donors", "analytics", "chat", "web_analytics", "sqlite_import"):
+                     "battles", "donors", "analytics", "chat", "web_analytics"):
             with self.subTest(module=name):
                 module = importlib.import_module(f"shared.db.{name}")
                 self.assertTrue(module.__doc__)

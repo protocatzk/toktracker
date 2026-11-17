@@ -141,5 +141,30 @@ class TestPrivacyMasking(unittest.TestCase):
         self.assertEqual(apply_public_privacy(payload, show_donors=True)["top_gifters"][0]["sender_username"], "donor123")
 
 
+class TestMariaDBOnlyConfig(unittest.TestCase):
+    def test_legacy_sqlite_engine_is_rejected(self):
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"DB_ENGINE": "sqlite"}, clear=False), \
+                self.assertRaises(RuntimeError) as ctx:
+            AppConfig(session_secret="s" * 40)
+        self.assertIn("nicht mehr unterstützt", str(ctx.exception))
+
+    def test_mysql_engine_alias_is_accepted(self):
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"DB_ENGINE": "mysql", "DATABASE_URL": ""}, clear=False):
+            cfg = AppConfig(session_secret="s" * 40)
+        self.assertEqual(cfg.public_summary()["db_engine"], "mariadb")
+
+    def test_public_summary_reports_mariadb_target(self):
+        cfg = AppConfig(session_secret="s" * 40, mysql_user="u", mysql_host="h", mysql_port=3306, mysql_database="d")
+        summary = cfg.public_summary()
+        self.assertEqual(summary["db_engine"], "mariadb")
+        self.assertEqual(summary["db_target"], "u@h:3306/d")
+
+
 if __name__ == "__main__":
     unittest.main()
