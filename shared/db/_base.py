@@ -1,10 +1,11 @@
 """
-TokTracker - Verbindungs-Handling: DBRow, MySQL-Wrapper, Connection-Pool, get_db().
+TokTracker - Verbindungs-Handling: DBRow, MariaDB-Verbindung, Connection-Pool, get_db().
+
+MariaDB/MySQL ist die einzige Datenbank-Engine (Dev, Tests, Produktion). Es gibt
+deshalb keinen Dialekt-Zweig mehr; der Wrapper übersetzt nur noch den Paramstyle.
 """
 
 import queue
-import re
-import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -21,9 +22,6 @@ except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
     PYMYSQL_AVAILABLE = False
 
 from shared.config import config
-
-DB_PATH = config.db_path
-
 
 DEFAULT_SETTINGS: Dict[str, str] = {
     "usd_per_diamond": "0.005",        # Netto-Auszahlung an Streamer pro Coin/Diamond in USD
@@ -45,15 +43,14 @@ DEFAULT_SETTINGS: Dict[str, str] = {
 
 class DBRow(dict):
     """
-    Kompatibilitäts-Zeilenobjekt für MySQL/MariaDB, das sich exakt wie `sqlite3.Row` verhält:
+    Zeilenobjekt für MariaDB-Ergebnisse mit stabilem Zugriffsvertrag:
     - Unterstützt Dictionary-Zugriff (`row["username"]`, `dict(row)`, `row.get(...)`)
     - Unterstützt numerischen Index-Zugriff (`row[0]` z.B. bei `SELECT COUNT(*) ... fetchone()[0]`)
     """
 
     def __init__(self, data: Dict[str, Any]) -> None:
-        # MySQL/MariaDB liefert DECIMAL-Spalten als Decimal. Für die restliche
-        # Anwendung (und für JSON-Ausgaben) wird zentral auf float normalisiert,
-        # damit SQLite und MySQL identische Typen liefern.
+        # MariaDB liefert DECIMAL-Spalten als Decimal. Für die restliche
+        # Anwendung (und für JSON-Ausgaben) wird zentral auf float normalisiert.
         normalized = {
             key: float(value) if isinstance(value, Decimal) else value
             for key, value in data.items()
@@ -67,8 +64,8 @@ class DBRow(dict):
         return super().__getitem__(key)
 
 
-class MySQLCursorWrapper:
-    """Wrapper um den PyMySQL DictCursor mit `sqlite3.Cursor`-kompatibler Schnittstelle."""
+class MariaDBCursor:
+    """Wrapper um den PyMySQL DictCursor mit Zeilen-Objekten (DBRow) und `lastrowid`."""
 
     def __init__(self, raw_cursor: Any) -> None:
         self._cur = raw_cursor
@@ -90,38 +87,33 @@ class MySQLCursorWrapper:
         return [DBRow(r) for r in rows] if rows else []
 
 
-class MySQLConnectionWrapper:
+class MariaDBConnection:
     """
-    Übersetzt die SQLite-Queries aus `database.py` automatisch für MySQL / MariaDB:
-    - `?` -> `%s`
-    - `INSERT OR IGNORE INTO` -> `INSERT IGNORE INTO`
-    - `INSERT OR REPLACE INTO` -> `REPLACE INTO`
-    - `MAX(a, b)` (2 Argumente) -> `GREATEST(a, b)`
+    Verbindungs-Wrapper für den Query-Code.
+
+    Der Code schreibt SQL mit `?`-Platzhaltern; PyMySQL erwartet `%s`. Diese
+    Umsetzung ist reiner Paramstyle und ändert die Semantik des Statements nicht.
+    Die früher hier sitzenden Dialekt-Umschreibungen (SQLite-Upserts,
+    2-Argument-`MAX`) gibt es bewusst nicht mehr – die Query-Module schreiben
+    natives MariaDB-SQL.
     """
 
     def __init__(self, raw_conn: Any) -> None:
         self._conn = raw_conn
 
     @staticmethod
-    def _translate_sql(sql: str) -> str:
-        out = sql.replace("?", "%s")
-        out = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT IGNORE INTO", out, flags=re.IGNORECASE)
-        out = re.sub(r"\bINSERT\s+OR\s+REPLACE\s+INTO\b", "REPLACE INTO", out, flags=re.IGNORECASE)
-        out = re.sub(r"\bMAX\s*\(\s*last_fan_tickets\s*,\s*%s\s*\)", "GREATEST(last_fan_tickets, %s)", out, flags=re.IGNORECASE)
-        return out
+    def _bind_params(sql: str) -> str:
+        return sql.replace("?", "%s")
 
-    def execute(self, sql: str, params: Optional[Sequence[Any]] = None) -> MySQLCursorWrapper:
-        translated = self._translate_sql(sql)
+    def execute(self, sql: str, params: Optional[Sequence[Any]] = None) -> MariaDBCursor:
         cur = self._conn.cursor()
-        cur.execute(translated, tuple(params) if params is not None else None)
-        return MySQLCursorWrapper(cur)
+        cur.execute(self._bind_params(sql), tuple(params) if params is not None else None)
+        return MariaDBCursor(cur)
 
-    def executemany(self, sql: str, seq_of_params: Sequence[Sequence[Any]]) -> MySQLCursorWrapper:
-        translated = self._translate_sql(sql)
+    def executemany(self, sql: str, seq_of_params: Sequence[Sequence[Any]]) -> MariaDBCursor:
         cur = self._conn.cursor()
-        cur.executemany(translated, [tuple(p) for p in seq_of_params])
-        return MySQLCursorWrapper(cur)
-
+        cur.executemany(self._bind_params(sql), [tuple(p) for p in seq_of_params])
+        return MariaDBCursor(cur)
 
     def commit(self) -> None:
         self._conn.commit()
@@ -130,13 +122,13 @@ class MySQLConnectionWrapper:
         self._conn.rollback()
 
     def close(self) -> None:
-        # Verbindung wird vom MySQLConnectionPool verwaltet
+        # Verbindung wird vom MariaDBConnectionPool verwaltet
         pass
 
 
-class MySQLConnectionPool:
+class MariaDBConnectionPool:
     """
-    Thread-sicherer Connection-Pool für MySQL/MariaDB.
+    Thread-sicherer Connection-Pool für MariaDB/MySQL.
     Verhindert das ständige Neuaufbauen von TCP-Verbindungen (bis zu 8 Verb./Sekunde)
     und senkt CPU-Last von MariaDB und Python drastisch.
     """
@@ -174,7 +166,7 @@ class MySQLConnectionPool:
 
         if can_create:
             try:
-                return _open_mysql_connection(include_db=True)
+                return _open_connection(include_db=True)
             except Exception:
                 with self._lock:
                     self._created = max(0, self._created - 1)
@@ -191,7 +183,7 @@ class MySQLConnectionPool:
                 pass
             with self._lock:
                 self._created = max(0, self._created - 1)
-            return _open_mysql_connection(include_db=True)
+            return _open_connection(include_db=True)
 
     def release_connection(self, conn: Any) -> None:
         if conn is None:
@@ -211,25 +203,25 @@ class MySQLConnectionPool:
                 self._created = max(0, self._created - 1)
 
 
-_mysql_pool: Optional[MySQLConnectionPool] = None
+_pool: Optional[MariaDBConnectionPool] = None
 
 
-_mysql_pool_lock = threading.Lock()
+_pool_lock = threading.Lock()
 
 
-def get_mysql_pool() -> MySQLConnectionPool:
-    global _mysql_pool
-    if _mysql_pool is None:
-        with _mysql_pool_lock:
-            if _mysql_pool is None:
-                _mysql_pool = MySQLConnectionPool(max_size=25, timeout=15.0)
-    return _mysql_pool
+def get_pool() -> MariaDBConnectionPool:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = MariaDBConnectionPool(max_size=25, timeout=15.0)
+    return _pool
 
 
-def _open_mysql_connection(include_db: bool = True) -> Any:
+def _open_connection(include_db: bool = True) -> Any:
     if not PYMYSQL_AVAILABLE:
         raise RuntimeError(
-            "Für DB_ENGINE=mysql wird das Paket 'pymysql' benötigt (pip install pymysql)."
+            "Für die Datenbank wird das Paket 'pymysql' benötigt (pip install pymysql)."
         )
     conn = pymysql.connect(
         host=config.mysql_host,
@@ -250,36 +242,26 @@ def _open_mysql_connection(include_db: bool = True) -> Any:
 @contextmanager
 def get_db() -> Generator[Any, None, None]:
     """
-    Universeller Datenbank-Context-Manager für `toktracker`:
-    - Standard (`DB_ENGINE=sqlite`): Lokale SQLite-Datenbank im schnellen WAL-Modus.
-    - Externer SQL-Server (`DB_ENGINE=mysql`): MySQL / MariaDB über Thread-sicheren Connection-Pool.
+    Datenbank-Context-Manager für `toktracker`:
+    MariaDB/MySQL über den thread-sicheren Connection-Pool.
+    Committet bei Erfolg, rollt bei Exceptions zurück.
+
+    Rückgabetyp bewusst `Any`: Die Query-Module greifen nach `fetchone()`
+    durchgängig ohne None-Check auf Spalten zu. Eine strikte Typisierung
+    (`MariaDBConnection`) würde dort ~40 Fehler erzeugen und gehört in einen
+    eigenen Härtungs-Pass.
     """
-    if config.is_mysql:
-        pool = get_mysql_pool()
-        raw_conn = pool.get_connection()
-        wrapper = MySQLConnectionWrapper(raw_conn)
-        try:
-            yield wrapper
-            wrapper.commit()
-        except Exception:
-            wrapper.rollback()
-            raise
-        finally:
-            pool.release_connection(raw_conn)
-    else:
-        conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON;")
-        conn.execute("PRAGMA journal_mode = WAL;")
-        conn.execute("PRAGMA synchronous = NORMAL;")
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    pool = get_pool()
+    raw_conn = pool.get_connection()
+    wrapper = MariaDBConnection(raw_conn)
+    try:
+        yield wrapper
+        wrapper.commit()
+    except Exception:
+        wrapper.rollback()
+        raise
+    finally:
+        pool.release_connection(raw_conn)
 
 
 def _get_period_cutoff(period: str) -> Optional[str]:

@@ -96,7 +96,10 @@ def update_settings(new_settings: Dict[str, Any]) -> Dict[str, Any]:
                     if val not in ("highlight", "info", "success", "warning"):
                         val = "highlight"
                 conn.execute(
-                    "INSERT OR REPLACE INTO settings (`key`, `value`) VALUES (?, ?)",
+                    """
+                    INSERT INTO settings (`key`, `value`) VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)
+                    """,
                     (key, val),
                 )
     invalidate_settings_cache()

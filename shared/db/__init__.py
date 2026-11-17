@@ -6,18 +6,17 @@ flache API von `shared.database` unverändert bereit.
 """
 
 from shared.db._base import (  # noqa: F401
-    DB_PATH,
     DEFAULT_SETTINGS,
     DBRow,
-    MySQLConnectionPool,
-    MySQLConnectionWrapper,
-    MySQLCursorWrapper,
+    MariaDBConnection,
+    MariaDBConnectionPool,
+    MariaDBCursor,
     _get_period_cutoff,
-    _mysql_pool,
-    _mysql_pool_lock,
-    _open_mysql_connection,
+    _open_connection,
+    _pool,
+    _pool_lock,
     get_db,
-    get_mysql_pool,
+    get_pool,
 )
 from shared.db.alerts import (  # noqa: F401
     add_streamer_alert,
@@ -119,11 +118,9 @@ from shared.db.revenue import (  # noqa: F401
 from shared.db.schema import (  # noqa: F401
     _db_init_lock,
     _db_initialized,
-    _ensure_column_mysql,
-    _ensure_column_sqlite,
-    _ensure_index_mysql,
-    _init_mysql_schema,
-    _init_sqlite_schema,
+    _ensure_column,
+    _ensure_index,
+    _init_schema,
     init_db,
 )
 from shared.db.settings import (  # noqa: F401
@@ -136,10 +133,6 @@ from shared.db.settings import (  # noqa: F401
     invalidate_settings_cache,
     set_telegram_access_mode,
     update_settings,
-)
-from shared.db.sqlite_import import (  # noqa: F401
-    import_from_sqlite_database,
-    inspect_sqlite_database,
 )
 from shared.db.streamers import (  # noqa: F401
     clear_demo_data,
@@ -179,16 +172,15 @@ from shared.db.web_analytics import (  # noqa: F401
 )
 
 __all__ = [
-    "DB_PATH",
     "DEFAULT_SETTINGS",
     "DBRow",
-    "MySQLCursorWrapper",
-    "MySQLConnectionWrapper",
-    "MySQLConnectionPool",
-    "_mysql_pool",
-    "_mysql_pool_lock",
-    "get_mysql_pool",
-    "_open_mysql_connection",
+    "MariaDBCursor",
+    "MariaDBConnection",
+    "MariaDBConnectionPool",
+    "_pool",
+    "_pool_lock",
+    "get_pool",
+    "_open_connection",
     "get_db",
     "_get_period_cutoff",
     "_scope_sql",
@@ -204,11 +196,9 @@ __all__ = [
     "set_telegram_access_mode",
     "_db_init_lock",
     "_db_initialized",
-    "_ensure_column_sqlite",
-    "_ensure_column_mysql",
-    "_ensure_index_mysql",
-    "_init_mysql_schema",
-    "_init_sqlite_schema",
+    "_ensure_column",
+    "_ensure_index",
+    "_init_schema",
     "init_db",
     "list_telegram_users",
     "upsert_telegram_user_permission",
@@ -319,6 +309,4 @@ __all__ = [
     "record_api_call",
     "get_api_analytics_overview",
     "get_site_analytics_overview",
-    "inspect_sqlite_database",
-    "import_from_sqlite_database",
 ]

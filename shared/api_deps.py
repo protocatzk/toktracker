@@ -163,7 +163,7 @@ def verify_admin_or_api_key(
 ) -> Dict[str, Any]:
     """
     Schützt alle reinen Admin-Endpunkte (Einstellungen, Nutzerverwaltung,
-    Demo-/SQLite-Funktionen, destruktive Streamer-Aktionen).
+    Demo-Daten, destruktive Streamer-Aktionen).
     """
     payload = resolve_access_payload(
         toktracker_admin_session,

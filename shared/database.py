@@ -2,7 +2,7 @@
 TokTracker - Database Re-export & Abwärtskompatibilität.
 
 Die Implementierung liegt in `shared.db` (Verbindungen, Schema, Settings,
-Streamer, Gifts, Battles, Donors, Analytics, Chat, Web-Analytics, SQLite-Import).
+Streamer, Gifts, Battles, Donors, Analytics, Chat, Web-Analytics).
 Dieses Modul bleibt als stabile Import-Fassade erhalten:
 
     from database import get_db, init_db

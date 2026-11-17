@@ -123,7 +123,7 @@ def record_gift_event(
             conn.execute(
                 """
                 UPDATE stream_sessions
-                SET last_fan_tickets = MAX(last_fan_tickets, ?)
+                SET last_fan_tickets = GREATEST(last_fan_tickets, ?)
                 WHERE id = ?
                 """,
                 (int(room_fan_tickets), session_id),

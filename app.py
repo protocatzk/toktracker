@@ -208,7 +208,7 @@ class PasswordLoginPayload(BaseModel):
 async def lifespan(app_instance: FastAPI):
     """
     FastAPI Lifespan:
-    1. Initialisiert die Datenbank (SQLite oder MySQL)
+    1. Initialisiert die Datenbank (MariaDB/MySQL)
     2. Startet oder benachrichtigt Ingest-Worker für markierte Streamer
     3. Startet lokalen Bot (Monolith) oder verbindet Remote-Bus (Microservices)
     """

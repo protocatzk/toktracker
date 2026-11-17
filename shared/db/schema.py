@@ -1,24 +1,14 @@
 """
-TokTracker - Schema-Initialisierung und Migrationen für SQLite und MySQL/MariaDB.
+TokTracker - Schema-Initialisierung und Migrationen für MariaDB/MySQL.
 """
 
 import logging
 import re
-import sqlite3
 import threading
 from datetime import datetime
 
-try:
-    import pymysql
-    import pymysql.cursors
-
-    PYMYSQL_AVAILABLE = True
-except ImportError:  # pragma: no cover - pymysql ist in Produktion installiert
-    pymysql = None  # type: ignore
-    PYMYSQL_AVAILABLE = False
-
 from shared.config import config
-from shared.db._base import DEFAULT_SETTINGS, MySQLConnectionWrapper, _open_mysql_connection, get_db
+from shared.db._base import DEFAULT_SETTINGS, MariaDBConnection, _open_connection, get_db
 
 logger = logging.getLogger("toktracker.schema")
 
@@ -28,13 +18,7 @@ _db_init_lock = threading.Lock()
 _db_initialized: bool = False
 
 
-def _ensure_column_sqlite(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
-    cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-    if column not in cols:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
-
-
-def _ensure_column_mysql(conn: MySQLConnectionWrapper, table: str, column: str, col_def: str) -> None:
+def _ensure_column(conn: MariaDBConnection, table: str, column: str, col_def: str) -> None:
     row = conn.execute(
         """
         SELECT COUNT(*) AS cnt
@@ -47,7 +31,7 @@ def _ensure_column_mysql(conn: MySQLConnectionWrapper, table: str, column: str, 
         conn.execute(f"ALTER TABLE `{table}` ADD COLUMN `{column}` {col_def}")
 
 
-def _ensure_index_mysql(conn: MySQLConnectionWrapper, table: str, index_name: str, columns_sql: str, unique: bool = False) -> None:
+def _ensure_index(conn: MariaDBConnection, table: str, index_name: str, columns_sql: str, unique: bool = False) -> None:
     row = conn.execute(
         """
         SELECT COUNT(*) AS cnt
@@ -61,10 +45,10 @@ def _ensure_index_mysql(conn: MySQLConnectionWrapper, table: str, index_name: st
         conn.execute(f"CREATE {uniq_kw}INDEX {index_name} ON {table}({columns_sql})")
 
 
-def _init_mysql_schema() -> None:
+def _init_schema() -> None:
     # 1. Datenbank anlegen, falls sie noch nicht existiert
     try:
-        bootstrap_conn = _open_mysql_connection(include_db=False)
+        bootstrap_conn = _open_connection(include_db=False)
         try:
             with bootstrap_conn.cursor() as cur:
                 db_name = re.sub(r"[^a-zA-Z0-9_]", "", config.mysql_database) or "toktracker"
@@ -78,8 +62,8 @@ def _init_mysql_schema() -> None:
         # Falls der MySQL-User keine CREATE DATABASE Rechte hat und die DB bereits existiert, normal fortfahren
         pass
 
-    raw_conn = _open_mysql_connection(include_db=True)
-    conn = MySQLConnectionWrapper(raw_conn)
+    raw_conn = _open_connection(include_db=True)
+    conn = MariaDBConnection(raw_conn)
     try:
         conn.execute(
             """
@@ -372,94 +356,95 @@ def _init_mysql_schema() -> None:
             """
         )
 
-        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
-        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_session", "session_id")
-        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_sender", "sender_username")
-        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_gift", "streamer_id, gift_name, total_coins, repeat_count")
-        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_streamer_sender", "streamer_id, sender_username, total_coins")
-        _ensure_index_mysql(conn, "gift_events", "idx_gift_events_created", "created_at")
-        _ensure_index_mysql(
+        _ensure_column(conn, "tiktok_battles", "battle_mode", "VARCHAR(32) DEFAULT '1v1'")
+        _ensure_column(conn, "tiktok_battles", "teammate_user_id", "VARCHAR(128) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "teammate_username", "VARCHAR(191) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "teammate_display_name", "VARCHAR(255) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "teammate_avatar_url", "TEXT")
+        _ensure_column(conn, "tiktok_battles", "teammate_score", "BIGINT DEFAULT 0")
+        _ensure_column(conn, "tiktok_battles", "opponent2_user_id", "VARCHAR(128) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "opponent2_username", "VARCHAR(191) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "opponent2_display_name", "VARCHAR(255) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "opponent2_avatar_url", "TEXT")
+        _ensure_column(conn, "tiktok_battles", "opponent2_score", "BIGINT DEFAULT 0")
+        _ensure_column(conn, "tiktok_battles", "opponent3_user_id", "VARCHAR(128) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "opponent3_username", "VARCHAR(191) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "opponent3_display_name", "VARCHAR(255) DEFAULT ''")
+        _ensure_column(conn, "tiktok_battles", "opponent3_avatar_url", "TEXT")
+        _ensure_column(conn, "tiktok_battles", "opponent3_score", "BIGINT DEFAULT 0")
+        _ensure_column(conn, "tiktok_battles", "streamer_rank", "INT DEFAULT 0")
+
+        _ensure_column(conn, "streamers", "revenue_profile_id", "BIGINT NULL")
+        _ensure_column(conn, "gift_events", "revenue_profile_id", "BIGINT NULL")
+        _ensure_column(conn, "gift_events", "revenue_model", "VARCHAR(32) DEFAULT 'legacy'")
+        _ensure_column(conn, "gift_events", "coin_price_usd", "DECIMAL(14,8) NULL")
+        _ensure_column(conn, "gift_events", "creator_share_pct", "DECIMAL(6,4) NULL")
+        _ensure_column(conn, "gift_events", "agency_share_pct", "DECIMAL(6,4) NULL")
+        _ensure_column(conn, "gift_events", "payout_fee_pct", "DECIMAL(6,4) NULL")
+        _ensure_column(conn, "gift_events", "tax_pct", "DECIMAL(6,4) NULL")
+        _ensure_column(conn, "gift_events", "fx_rate", "DECIMAL(14,8) NULL")
+        _ensure_column(conn, "gift_events", "usd_net_low", "DECIMAL(14,4) NULL")
+        _ensure_column(conn, "gift_events", "usd_net_high", "DECIMAL(14,4) NULL")
+        _ensure_column(conn, "gift_events", "eur_net_low", "DECIMAL(14,4) NULL")
+        _ensure_column(conn, "gift_events", "eur_net_high", "DECIMAL(14,4) NULL")
+
+        _ensure_index(conn, "gift_events", "idx_gift_events_streamer_date", "streamer_id, created_at")
+        _ensure_index(conn, "gift_events", "idx_gift_events_session", "session_id")
+        _ensure_index(conn, "gift_events", "idx_gift_events_sender", "sender_username")
+        _ensure_index(conn, "gift_events", "idx_gift_events_streamer_gift", "streamer_id, gift_name, total_coins, repeat_count")
+        _ensure_index(conn, "gift_events", "idx_gift_events_streamer_sender", "streamer_id, sender_username, total_coins")
+        _ensure_index(conn, "gift_events", "idx_gift_events_created", "created_at")
+        _ensure_index(
             conn,
             "gift_events",
             "idx_gift_events_created_streamer_sender",
             "created_at, streamer_id, sender_username, total_coins",
         )
-        _ensure_index_mysql(
+        _ensure_index(
             conn,
             "gift_events",
             "idx_gift_events_created_streamer_counts",
             "created_at, streamer_id, repeat_count",
         )
-        _ensure_index_mysql(
+        _ensure_index(
             conn,
             "gift_events",
             "idx_gift_events_created_streamer_gift",
             "created_at, streamer_id, gift_name, total_coins, repeat_count",
         )
-        _ensure_index_mysql(
+        _ensure_index(
             conn,
             "gift_events",
             "idx_gift_events_revenue_cover",
             "streamer_id, created_at, total_coins, usd_net, eur_net, usd_gross, eur_gross, "
             "usd_net_low, usd_net_high, eur_net_low, eur_net_high",
         )
-        _ensure_index_mysql(conn, "stream_sessions", "idx_stream_sessions_streamer", "streamer_id, started_at")
-        _ensure_index_mysql(conn, "telegram_users", "idx_telegram_users_username", "username")
-        _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_streamer", "streamer_id, created_at")
-        _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_battle_id", "battle_id")
-        _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_result", "result")
-        _ensure_index_mysql(conn, "tiktok_battles", "idx_battles_opponent", "opponent_username")
-        _ensure_index_mysql(conn, "streamer_alerts", "idx_streamer_alerts_chat", "chat_id")
-        _ensure_index_mysql(conn, "streamer_group_members", "idx_group_members_group", "group_id")
-        _ensure_index_mysql(conn, "streamer_group_members", "idx_group_members_streamer", "streamer_id")
-        _ensure_index_mysql(conn, "page_views", "idx_page_views_created", "created_at")
-        _ensure_index_mysql(conn, "page_views", "idx_page_views_path", "path")
-        _ensure_index_mysql(conn, "page_views", "idx_page_views_visitor", "visitor_hash, created_at")
-        _ensure_index_mysql(conn, "bot_sessions", "idx_bot_sessions_type", "session_type, created_at")
-        _ensure_index_mysql(conn, "bot_sessions", "idx_bot_sessions_telegram_id", "telegram_id")
-        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_streamer_created", "streamer_id, created_at")
-        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_created", "created_at")
-        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_username", "username")
-        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_whale", "is_whale, streamer_id")
-        _ensure_index_mysql(conn, "chat_messages", "idx_chat_messages_session", "session_id")
-        _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_username", "username")
-        _ensure_index_mysql(conn, "donor_crm", "idx_donor_crm_vip", "is_vip")
-        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_created", "created_at")
-        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_endpoint", "endpoint")
-        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_external", "is_external, created_at")
-        _ensure_index_mysql(conn, "api_calls", "idx_api_calls_status", "status_code")
+        _ensure_index(conn, "stream_sessions", "idx_stream_sessions_streamer", "streamer_id, started_at")
+        _ensure_index(conn, "telegram_users", "idx_telegram_users_username", "username")
+        _ensure_index(conn, "tiktok_battles", "idx_battles_streamer", "streamer_id, created_at")
+        _ensure_index(conn, "tiktok_battles", "idx_battles_battle_id", "battle_id")
+        _ensure_index(conn, "tiktok_battles", "idx_battles_result", "result")
+        _ensure_index(conn, "tiktok_battles", "idx_battles_opponent", "opponent_username")
+        _ensure_index(conn, "streamer_alerts", "idx_streamer_alerts_chat", "chat_id")
+        _ensure_index(conn, "streamer_group_members", "idx_group_members_group", "group_id")
+        _ensure_index(conn, "streamer_group_members", "idx_group_members_streamer", "streamer_id")
+        _ensure_index(conn, "page_views", "idx_page_views_created", "created_at")
+        _ensure_index(conn, "page_views", "idx_page_views_path", "path")
+        _ensure_index(conn, "page_views", "idx_page_views_visitor", "visitor_hash, created_at")
+        _ensure_index(conn, "bot_sessions", "idx_bot_sessions_type", "session_type, created_at")
+        _ensure_index(conn, "bot_sessions", "idx_bot_sessions_telegram_id", "telegram_id")
+        _ensure_index(conn, "chat_messages", "idx_chat_messages_streamer_created", "streamer_id, created_at")
+        _ensure_index(conn, "chat_messages", "idx_chat_messages_created", "created_at")
+        _ensure_index(conn, "chat_messages", "idx_chat_messages_username", "username")
+        _ensure_index(conn, "chat_messages", "idx_chat_messages_whale", "is_whale, streamer_id")
+        _ensure_index(conn, "chat_messages", "idx_chat_messages_session", "session_id")
+        _ensure_index(conn, "donor_crm", "idx_donor_crm_username", "username")
+        _ensure_index(conn, "donor_crm", "idx_donor_crm_vip", "is_vip")
+        _ensure_index(conn, "api_calls", "idx_api_calls_created", "created_at")
+        _ensure_index(conn, "api_calls", "idx_api_calls_endpoint", "endpoint")
+        _ensure_index(conn, "api_calls", "idx_api_calls_external", "is_external, created_at")
+        _ensure_index(conn, "api_calls", "idx_api_calls_status", "status_code")
 
-        _ensure_column_mysql(conn, "tiktok_battles", "battle_mode", "VARCHAR(32) DEFAULT '1v1'")
-        _ensure_column_mysql(conn, "tiktok_battles", "teammate_user_id", "VARCHAR(128) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "teammate_username", "VARCHAR(191) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "teammate_display_name", "VARCHAR(255) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "teammate_avatar_url", "TEXT")
-        _ensure_column_mysql(conn, "tiktok_battles", "teammate_score", "BIGINT DEFAULT 0")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent2_user_id", "VARCHAR(128) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent2_username", "VARCHAR(191) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent2_display_name", "VARCHAR(255) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent2_avatar_url", "TEXT")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent2_score", "BIGINT DEFAULT 0")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent3_user_id", "VARCHAR(128) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent3_username", "VARCHAR(191) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent3_display_name", "VARCHAR(255) DEFAULT ''")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent3_avatar_url", "TEXT")
-        _ensure_column_mysql(conn, "tiktok_battles", "opponent3_score", "BIGINT DEFAULT 0")
-        _ensure_column_mysql(conn, "tiktok_battles", "streamer_rank", "INT DEFAULT 0")
-
-        _ensure_column_mysql(conn, "streamers", "revenue_profile_id", "BIGINT NULL")
-        _ensure_column_mysql(conn, "gift_events", "revenue_profile_id", "BIGINT NULL")
-        _ensure_column_mysql(conn, "gift_events", "revenue_model", "VARCHAR(32) DEFAULT 'legacy'")
-        _ensure_column_mysql(conn, "gift_events", "coin_price_usd", "DECIMAL(14,8) NULL")
-        _ensure_column_mysql(conn, "gift_events", "creator_share_pct", "DECIMAL(6,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "agency_share_pct", "DECIMAL(6,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "payout_fee_pct", "DECIMAL(6,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "tax_pct", "DECIMAL(6,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "fx_rate", "DECIMAL(14,8) NULL")
-        _ensure_column_mysql(conn, "gift_events", "usd_net_low", "DECIMAL(14,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "usd_net_high", "DECIMAL(14,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "eur_net_low", "DECIMAL(14,4) NULL")
-        _ensure_column_mysql(conn, "gift_events", "eur_net_high", "DECIMAL(14,4) NULL")
 
         # Bestehende Legacy-Zeilen ohne Bandbreite: exakter Wert als Unter-/Obergrenze.
         conn.execute(
@@ -482,405 +467,17 @@ def _init_mysql_schema() -> None:
         raw_conn.close()
 
 
-def _init_sqlite_schema() -> None:
-    with get_db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                `key` TEXT PRIMARY KEY,
-                `value` TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS revenue_profiles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                gross_region TEXT NOT NULL DEFAULT 'DE',
-                creator_region TEXT NOT NULL DEFAULT 'DE',
-                coin_price_usd REAL NOT NULL DEFAULT 0.0105,
-                creator_share_pct REAL NOT NULL DEFAULT 0.50,
-                agency_share_pct REAL NOT NULL DEFAULT 0.0,
-                payout_fee_pct REAL NOT NULL DEFAULT 0.0,
-                tax_pct REAL NOT NULL DEFAULT 0.0,
-                coin_price_uncertainty_pct REAL NOT NULL DEFAULT 0.10,
-                creator_share_uncertainty_pct REAL NOT NULL DEFAULT 0.05,
-                agency_share_max_pct REAL NOT NULL DEFAULT 0.10,
-                tax_max_pct REAL NOT NULL DEFAULT 0.20,
-                fx_rate REAL NOT NULL DEFAULT 0.92,
-                fx_uncertainty_pct REAL NOT NULL DEFAULT 0.02,
-                is_default INTEGER DEFAULT 0,
-                valid_from TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS streamers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                display_name TEXT,
-                avatar_url TEXT,
-                room_id TEXT,
-                follower_count INTEGER DEFAULT 0,
-                is_live INTEGER DEFAULT 0,
-                is_tracking INTEGER DEFAULT 0,
-                auto_monitor INTEGER DEFAULT 0,
-                current_viewers INTEGER DEFAULT 0,
-                last_error TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                last_seen_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS stream_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                streamer_id INTEGER NOT NULL,
-                room_id TEXT,
-                title TEXT DEFAULT '',
-                started_at TEXT NOT NULL,
-                ended_at TEXT,
-                peak_viewers INTEGER DEFAULT 0,
-                last_fan_tickets INTEGER DEFAULT 0,
-                status TEXT DEFAULT 'active',
-                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS gift_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                streamer_id INTEGER NOT NULL,
-                session_id INTEGER,
-                event_uid TEXT UNIQUE,
-                sender_user_id TEXT DEFAULT '',
-                sender_username TEXT NOT NULL,
-                sender_nickname TEXT,
-                is_super_fan INTEGER DEFAULT 0,
-                gift_id INTEGER DEFAULT 0,
-                gift_name TEXT NOT NULL,
-                gift_icon_url TEXT,
-                diamond_count INTEGER NOT NULL,
-                repeat_count INTEGER NOT NULL DEFAULT 1,
-                combo_count INTEGER DEFAULT 1,
-                group_id TEXT DEFAULT '',
-                room_fan_tickets INTEGER DEFAULT 0,
-                total_coins INTEGER NOT NULL,
-                usd_net REAL NOT NULL,
-                eur_net REAL NOT NULL,
-                usd_gross REAL NOT NULL,
-                eur_gross REAL NOT NULL,
-                source TEXT DEFAULT 'tiktoklive',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
-                FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS telegram_users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_id INTEGER UNIQUE,
-                username TEXT COLLATE NOCASE,
-                first_name TEXT DEFAULT '',
-                role TEXT DEFAULT 'user',
-                is_allowed INTEGER DEFAULT 0,
-                note TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                last_seen_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS telegram_user_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                permission TEXT NOT NULL,
-                effect TEXT NOT NULL DEFAULT 'grant',
-                created_by TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                UNIQUE(user_id, permission),
-                FOREIGN KEY(user_id) REFERENCES telegram_users(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_telegram_user_permissions_user
-                ON telegram_user_permissions(user_id);
-
-            CREATE TABLE IF NOT EXISTS tiktok_battles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                streamer_id INTEGER NOT NULL,
-                session_id INTEGER,
-                battle_id TEXT NOT NULL,
-                opponent_user_id TEXT DEFAULT '',
-                opponent_username TEXT DEFAULT '',
-                opponent_display_name TEXT DEFAULT '',
-                opponent_avatar_url TEXT,
-                started_at TEXT NOT NULL,
-                ended_at TEXT,
-                duration_seconds INTEGER DEFAULT 300,
-                streamer_score INTEGER DEFAULT 0,
-                opponent_score INTEGER DEFAULT 0,
-                result TEXT DEFAULT 'ONGOING',
-                streamer_mvp_name TEXT DEFAULT '',
-                streamer_mvp_score INTEGER DEFAULT 0,
-                streamer_mvp_avatar TEXT,
-                opponent_mvp_name TEXT DEFAULT '',
-                opponent_mvp_score INTEGER DEFAULT 0,
-                opponent_mvp_avatar TEXT,
-                coins_earned INTEGER DEFAULT 0,
-                usd_net REAL DEFAULT 0.0,
-                eur_net REAL DEFAULT 0.0,
-                usd_gross REAL DEFAULT 0.0,
-                eur_gross REAL DEFAULT 0.0,
-                status TEXT DEFAULT 'active',
-                raw_data_json TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
-                FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
-            );
-            CREATE TABLE IF NOT EXISTS streamer_alerts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                streamer_id INTEGER NOT NULL,
-                chat_id INTEGER NOT NULL,
-                chat_title TEXT DEFAULT '',
-                created_by_telegram_id INTEGER NULL,
-                created_by_username TEXT DEFAULT '',
-                enabled INTEGER DEFAULT 1,
-                last_notified_session_id INTEGER NULL,
-                last_notified_at TEXT,
-                created_at TEXT NOT NULL,
-                UNIQUE(streamer_id, chat_id),
-                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS streamer_groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                description TEXT DEFAULT '',
-                color TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS streamer_group_members (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
-                streamer_id INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(group_id, streamer_id),
-                FOREIGN KEY (group_id) REFERENCES streamer_groups(id) ON DELETE CASCADE,
-                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS page_views (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT NOT NULL,
-                visitor_hash TEXT NOT NULL,
-                user_agent TEXT DEFAULT '',
-                device_type TEXT DEFAULT 'desktop',
-                referrer TEXT DEFAULT '',
-                status_code INTEGER DEFAULT 200,
-                response_time_ms REAL DEFAULT 0.0,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS bot_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_type TEXT NOT NULL,
-                telegram_id INTEGER NULL,
-                username TEXT DEFAULT '',
-                first_name TEXT DEFAULT '',
-                client_ip_hash TEXT DEFAULT '',
-                status TEXT DEFAULT 'active',
-                details_json TEXT,
-                created_at TEXT NOT NULL,
-                last_active_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                streamer_id INTEGER NOT NULL,
-                session_id INTEGER,
-                user_id TEXT DEFAULT '',
-                username TEXT NOT NULL COLLATE NOCASE,
-                nickname TEXT DEFAULT '',
-                avatar_url TEXT,
-                comment TEXT NOT NULL,
-                is_whale INTEGER DEFAULT 0,
-                whale_tier TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (streamer_id) REFERENCES streamers(id) ON DELETE CASCADE,
-                FOREIGN KEY (session_id) REFERENCES stream_sessions(id) ON DELETE SET NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS donor_crm (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                is_vip INTEGER DEFAULT 0,
-                tags TEXT DEFAULT '',
-                notes TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS api_calls (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                endpoint TEXT NOT NULL,
-                method TEXT NOT NULL DEFAULT 'GET',
-                status_code INTEGER NOT NULL DEFAULT 200,
-                response_time_ms REAL NOT NULL DEFAULT 0.0,
-                client_ip TEXT DEFAULT '',
-                ip_hash TEXT DEFAULT '',
-                user_agent TEXT DEFAULT '',
-                auth_type TEXT DEFAULT 'none',
-                api_key_name TEXT DEFAULT '',
-                is_external INTEGER NOT NULL DEFAULT 1,
-                query_params TEXT DEFAULT '',
-                created_at TEXT NOT NULL
-            );
-            """
-        )
-
-        _ensure_column_sqlite(conn, "streamers", "auto_monitor", "INTEGER DEFAULT 0")
-        _ensure_column_sqlite(conn, "streamers", "current_viewers", "INTEGER DEFAULT 0")
-        _ensure_column_sqlite(conn, "streamers", "last_error", "TEXT DEFAULT ''")
-
-        _ensure_column_sqlite(conn, "gift_events", "session_id", "INTEGER")
-        _ensure_column_sqlite(conn, "gift_events", "event_uid", "TEXT")
-        _ensure_column_sqlite(conn, "gift_events", "sender_user_id", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "gift_events", "is_super_fan", "INTEGER DEFAULT 0")
-        _ensure_column_sqlite(conn, "gift_events", "combo_count", "INTEGER DEFAULT 1")
-        _ensure_column_sqlite(conn, "gift_events", "group_id", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "gift_events", "room_fan_tickets", "INTEGER DEFAULT 0")
-
-        _ensure_column_sqlite(conn, "tiktok_battles", "battle_mode", "TEXT DEFAULT '1v1'")
-        _ensure_column_sqlite(conn, "tiktok_battles", "teammate_user_id", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "teammate_username", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "teammate_display_name", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "teammate_avatar_url", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "teammate_score", "INTEGER DEFAULT 0")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent2_user_id", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent2_username", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent2_display_name", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent2_avatar_url", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent2_score", "INTEGER DEFAULT 0")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent3_user_id", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent3_username", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent3_display_name", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent3_avatar_url", "TEXT DEFAULT ''")
-        _ensure_column_sqlite(conn, "tiktok_battles", "opponent3_score", "INTEGER DEFAULT 0")
-        _ensure_column_sqlite(conn, "tiktok_battles", "streamer_rank", "INTEGER DEFAULT 0")
-
-        _ensure_column_sqlite(conn, "streamers", "revenue_profile_id", "INTEGER")
-        _ensure_column_sqlite(conn, "gift_events", "revenue_profile_id", "INTEGER")
-        _ensure_column_sqlite(conn, "gift_events", "revenue_model", "TEXT DEFAULT 'legacy'")
-        _ensure_column_sqlite(conn, "gift_events", "coin_price_usd", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "creator_share_pct", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "agency_share_pct", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "payout_fee_pct", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "tax_pct", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "fx_rate", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "usd_net_low", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "usd_net_high", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "eur_net_low", "REAL")
-        _ensure_column_sqlite(conn, "gift_events", "eur_net_high", "REAL")
-
-        conn.execute(
-            """
-            UPDATE gift_events
-            SET usd_net_low = COALESCE(usd_net_low, usd_net),
-                usd_net_high = COALESCE(usd_net_high, usd_net),
-                eur_net_low = COALESCE(eur_net_low, eur_net),
-                eur_net_high = COALESCE(eur_net_high, eur_net),
-                revenue_model = COALESCE(revenue_model, 'legacy')
-            WHERE usd_net_low IS NULL
-               OR usd_net_high IS NULL
-               OR eur_net_low IS NULL
-               OR eur_net_high IS NULL
-               OR revenue_model IS NULL
-            """
-        )
-
-        conn.executescript(
-            """
-            CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_date
-                ON gift_events(streamer_id, created_at);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_session
-                ON gift_events(session_id);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_sender
-                ON gift_events(sender_username);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_gift
-                ON gift_events(streamer_id, gift_name, total_coins, repeat_count);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_streamer_sender
-                ON gift_events(streamer_id, sender_username, total_coins);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_created
-                ON gift_events(created_at);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_created_streamer_sender
-                ON gift_events(created_at, streamer_id, sender_username, total_coins);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_created_streamer_counts
-                ON gift_events(created_at, streamer_id, repeat_count);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_created_streamer_gift
-                ON gift_events(created_at, streamer_id, gift_name, total_coins, repeat_count);
-            CREATE INDEX IF NOT EXISTS idx_gift_events_revenue_cover
-                ON gift_events(
-                    streamer_id, created_at, total_coins, usd_net, eur_net,
-                    usd_gross, eur_gross, usd_net_low, usd_net_high,
-                    eur_net_low, eur_net_high
-                );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_events_uid
-                ON gift_events(event_uid) WHERE event_uid IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_stream_sessions_streamer
-                ON stream_sessions(streamer_id, started_at);
-            CREATE INDEX IF NOT EXISTS idx_telegram_users_username
-                ON telegram_users(username);
-            CREATE INDEX IF NOT EXISTS idx_battles_streamer
-                ON tiktok_battles(streamer_id, created_at);
-            CREATE INDEX IF NOT EXISTS idx_battles_battle_id
-                ON tiktok_battles(battle_id);
-            CREATE INDEX IF NOT EXISTS idx_battles_result
-                ON tiktok_battles(result);
-            CREATE INDEX IF NOT EXISTS idx_battles_opponent
-                ON tiktok_battles(opponent_username);
-            CREATE INDEX IF NOT EXISTS idx_streamer_alerts_chat
-                ON streamer_alerts(chat_id);
-            CREATE INDEX IF NOT EXISTS idx_group_members_group
-                ON streamer_group_members(group_id);
-            CREATE INDEX IF NOT EXISTS idx_group_members_streamer
-                ON streamer_group_members(streamer_id);
-            CREATE INDEX IF NOT EXISTS idx_page_views_created
-                ON page_views(created_at);
-            CREATE INDEX IF NOT EXISTS idx_page_views_path
-                ON page_views(path);
-            CREATE INDEX IF NOT EXISTS idx_page_views_visitor
-                ON page_views(visitor_hash, created_at);
-            CREATE INDEX IF NOT EXISTS idx_bot_sessions_type
-                ON bot_sessions(session_type, created_at);
-            CREATE INDEX IF NOT EXISTS idx_bot_sessions_telegram_id
-                ON bot_sessions(telegram_id);
-            CREATE INDEX IF NOT EXISTS idx_chat_messages_streamer_created
-                ON chat_messages(streamer_id, created_at);
-            CREATE INDEX IF NOT EXISTS idx_chat_messages_created
-                ON chat_messages(created_at);
-            CREATE INDEX IF NOT EXISTS idx_chat_messages_username
-                ON chat_messages(username);
-            CREATE INDEX IF NOT EXISTS idx_chat_messages_whale
-                ON chat_messages(is_whale, streamer_id);
-            CREATE INDEX IF NOT EXISTS idx_chat_messages_session
-                ON chat_messages(session_id);
-            CREATE INDEX IF NOT EXISTS idx_donor_crm_username
-                ON donor_crm(username);
-            CREATE INDEX IF NOT EXISTS idx_donor_crm_vip
-                ON donor_crm(is_vip);
-            CREATE INDEX IF NOT EXISTS idx_api_calls_created
-                ON api_calls(created_at);
-            CREATE INDEX IF NOT EXISTS idx_api_calls_endpoint
-                ON api_calls(endpoint);
-            CREATE INDEX IF NOT EXISTS idx_api_calls_external
-                ON api_calls(is_external, created_at);
-            CREATE INDEX IF NOT EXISTS idx_api_calls_status
-                ON api_calls(status_code);
-            """
-        )
-
-
 def init_db(force: bool = False) -> None:
     global _db_initialized
     with _db_init_lock:
         if _db_initialized and not force:
             return
-        if config.is_mysql:
-            _init_mysql_schema()
-        else:
-            _init_sqlite_schema()
+        _init_schema()
 
         with get_db() as conn:
             for k, v in DEFAULT_SETTINGS.items():
                 conn.execute(
-                    "INSERT OR IGNORE INTO settings (`key`, `value`) VALUES (?, ?)", (k, v)
+                    "INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)", (k, v)
                 )
 
             # Initiale Admins/Whitelist-User aus der .env synchronisieren

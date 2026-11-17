@@ -8,7 +8,7 @@ Hintergrund:
     auf float normalisiert, bleibt das Anwendungsverhalten identisch.
 
 Geltungsbereich:
-    Nur MySQL/MariaDB. SQLite kennt kein echtes DECIMAL (REAL bleibt dort bestehen);
+    Nur MariaDB/MySQL (die einzige Engine).
     das Skript beendet sich in diesem Fall ohne Änderung.
 
 Nutzung:
@@ -28,7 +28,6 @@ import argparse
 import sys
 from typing import Dict, List, Tuple
 
-from shared.config import config
 from shared.db import get_db
 
 # Spaltentypen für den Zielzustand (NOT NULL wie im Schema).
@@ -86,10 +85,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Geldspalten auf DECIMAL(14,4) migrieren")
     parser.add_argument("--apply", action="store_true", help="Migration ausführen (Default: Dry-Run)")
     args = parser.parse_args()
-
-    if not config.is_mysql:
-        print("DB_ENGINE ist nicht mysql – nichts zu tun (SQLite speichert REAL).")
-        return 0
 
     with get_db() as conn:
         types = _current_types(conn)

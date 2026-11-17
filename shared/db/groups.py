@@ -301,8 +301,8 @@ def update_streamer_group(
 
 def delete_streamer_group(group_id: int) -> bool:
     with get_db() as conn:
-        # Explizit aufräumen, damit auch SQLite ohne aktive FK-Enforcement
-        # keine verwaisten Mitgliedschaften behält.
+        # Explizit aufräumen, damit unabhängig von FK-Enforcement
+        # keine verwaisten Mitgliedschaften bleiben.
         conn.execute(
             "DELETE FROM streamer_group_members WHERE group_id = ?", (int(group_id),)
         )

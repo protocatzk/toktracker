@@ -12,7 +12,7 @@ logger = logging.getLogger("toktracker.memory_bus")
 
 class MemoryBus(BaseBus):
     """
-    In-Memory-Fallback für Standalone-Betrieb ohne Redis (z.B. lokale SQLite-Entwicklung).
+    In-Memory-Fallback für Standalone-Betrieb ohne Redis (z.B. lokale Entwicklung).
     Simuliert PubSub, KV-Store mit TTL, Leases und RPC im selben Python-Prozess.
     """
 

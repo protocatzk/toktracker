@@ -569,7 +569,7 @@ def save_donor_crm(
 ) -> Dict[str, Any]:
     """
     Speichert oder aktualisiert VIP-Status, Tags und Notizen eines Spenders.
-    Vollständig portabel für SQLite und MySQL.
+    Vollständig portabel (natives MariaDB-SQL).
     """
     clean_uname = username.strip().lstrip("@").lower()
     now = datetime.now().isoformat(timespec="seconds")

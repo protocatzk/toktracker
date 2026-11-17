@@ -92,17 +92,11 @@ class AppConfig:
     # Redis URL für Message-Bus & Shared State (z.B. redis://redis:6379/0)
     redis_url: str = os.getenv("REDIS_URL", "").strip()
 
-    # Datenbank-Engine ("sqlite" oder "mysql")
-    db_engine: str = os.getenv("DB_ENGINE", "sqlite").strip().lower()
+    # MariaDB/MySQL ist die einzige Datenbank-Engine (Dev, Tests, Produktion).
+    # `DATABASE_URL=mysql://…` wird zusätzlich unterstützt.
     database_url: str = os.getenv("DATABASE_URL", "").strip()
 
-    # Lokale SQLite-Datenbank (Standard, wenn DB_ENGINE=sqlite)
-    db_path: str = os.getenv(
-        "TIKTOK_DB_PATH",
-        os.path.join(BASE_DIR, "tiktok_earnings.db"),
-    )
-
-    # Externer MySQL / MariaDB Server (aktiv, sobald DB_ENGINE=mysql oder DATABASE_URL=mysql://...)
+    # Externer MariaDB/MySQL-Server
     mysql_host: str = os.getenv("MYSQL_HOST", "127.0.0.1").strip()
     mysql_port: int = int(os.getenv("MYSQL_PORT", "3306"))
     mysql_user: str = os.getenv("MYSQL_USER", "root").strip()
@@ -198,9 +192,22 @@ class AppConfig:
     session_secret_source: str = ""
 
     def __post_init__(self) -> None:
+        legacy_engine = os.getenv("DB_ENGINE", "").strip().lower()
+        if legacy_engine and legacy_engine not in ("mysql", "mariadb"):
+            raise RuntimeError(
+                f"DB_ENGINE={legacy_engine!r} wird nicht mehr unterstützt: MariaDB/MySQL ist die "
+                "einzige Datenbank-Engine. Entferne DB_ENGINE oder setze 'mysql'. "
+                "Bestehende SQLite-Installationen migrieren mit dem Script der letzten "
+                "Version (migrate_sqlite_to_mysql.py, siehe Git-History)."
+            )
+        if self.database_url.lower().startswith("sqlite"):
+            raise RuntimeError(
+                "DATABASE_URL=sqlite://… wird nicht mehr unterstützt: MariaDB/MySQL ist die "
+                "einzige Datenbank-Engine."
+            )
+
         if self.database_url.lower().startswith(("mysql://", "mysql+pymysql://", "mariadb://")):
             parsed = urlparse(self.database_url)
-            self.db_engine = "mysql"
             if parsed.hostname:
                 self.mysql_host = parsed.hostname
             if parsed.port:
@@ -279,10 +286,6 @@ class AppConfig:
         return bool(self.redis_url)
 
     @property
-    def is_mysql(self) -> bool:
-        return self.db_engine in ("mysql", "mariadb")
-
-    @property
     def has_tiktok_session(self) -> bool:
         return bool(self.tiktok_session_id)
 
@@ -328,12 +331,10 @@ class AppConfig:
             "service_role": self.service_role,
             "app_timezone": self.app_timezone,
             "has_redis": self.has_redis,
-            "db_engine": "mysql" if self.is_mysql else "sqlite",
-            "db_target": (
-                f"{self.mysql_user}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
-                if self.is_mysql
-                else os.path.basename(self.db_path)
-            ),
+            # "db_engine" bleibt als stabiler Diagnose-Schlüssel erhalten
+            # (Mini-App/Health-Output lesen ihn), liefert aber immer "mariadb".
+            "db_engine": "mariadb",
+            "db_target": f"{self.mysql_user}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}",
             "has_tiktok_session": self.has_tiktok_session,
             "tiktok_session_masked": _mask_secret(self.tiktok_session_id),
             "tiktok_target_idc": self.tiktok_target_idc if self.has_tiktok_session else "",

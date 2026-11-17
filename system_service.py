@@ -179,7 +179,7 @@ _DB_STORAGE_CACHE_TTL = 60.0
 
 
 def _get_database_storage() -> Dict[str, Any]:
-    """Ermittelt die Speichergröße der Datenbank (MariaDB/MySQL oder SQLite), gecached für 60s."""
+    """Ermittelt die Speichergröße der MariaDB/MySQL-Datenbank, gecached für 60s."""
     global _cached_db_storage, _cached_db_storage_time
     now = time.time()
     if _cached_db_storage is not None and (now - _cached_db_storage_time) < _DB_STORAGE_CACHE_TTL:
@@ -188,55 +188,38 @@ def _get_database_storage() -> Dict[str, Any]:
     try:
         from database import get_db
 
-        if config.db_engine == "mysql":
-            with get_db() as conn:
-                row = conn.execute(
-                    """
-                    SELECT
-                        ROUND(COALESCE(SUM(data_length + index_length), 0) / 1024 / 1024, 2) AS total_mb,
-                        ROUND(COALESCE(SUM(data_length), 0) / 1024 / 1024, 2) AS data_mb,
-                        ROUND(COALESCE(SUM(index_length), 0) / 1024 / 1024, 2) AS index_mb,
-                        COUNT(*) as table_count
-                    FROM information_schema.tables
-                    WHERE table_schema = ?
-                    """,
-                    (config.mysql_database,),
-                ).fetchone()
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    ROUND(COALESCE(SUM(data_length + index_length), 0) / 1024 / 1024, 2) AS total_mb,
+                    ROUND(COALESCE(SUM(data_length), 0) / 1024 / 1024, 2) AS data_mb,
+                    ROUND(COALESCE(SUM(index_length), 0) / 1024 / 1024, 2) AS index_mb,
+                    COUNT(*) as table_count
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                """,
+                (config.mysql_database,),
+            ).fetchone()
 
-                if row:
-                    res = {
-                        "engine": "mysql",
-                        "database_name": config.mysql_database,
-                        "total_mb": float(row["total_mb"] or 0.0),
-                        "data_mb": float(row["data_mb"] or 0.0),
-                        "index_mb": float(row["index_mb"] or 0.0),
-                        "table_count": int(row["table_count"] or 0),
-                    }
-                    _cached_db_storage = res
-                    _cached_db_storage_time = now
-                    return res
-        else:
-            db_file = config.sqlite_db_path
-            size_mb = 0.0
-            if os.path.exists(db_file):
-                size_mb = round(os.path.getsize(db_file) / (1024 * 1024), 2)
-            res = {
-                "engine": "sqlite",
-                "database_name": os.path.basename(db_file),
-                "total_mb": size_mb,
-                "data_mb": size_mb,
-                "index_mb": 0.0,
-                "table_count": 0,
-            }
-            _cached_db_storage = res
-            _cached_db_storage_time = now
-            return res
+            if row:
+                res = {
+                    "engine": "mariadb",
+                    "database_name": config.mysql_database,
+                    "total_mb": float(row["total_mb"] or 0.0),
+                    "data_mb": float(row["data_mb"] or 0.0),
+                    "index_mb": float(row["index_mb"] or 0.0),
+                    "table_count": int(row["table_count"] or 0),
+                }
+                _cached_db_storage = res
+                _cached_db_storage_time = now
+                return res
     except Exception as exc:
         logger.debug("Fehler beim Abfragen des Datenbank-Speichers: %s", exc)
 
     return {
-        "engine": config.db_engine,
-        "database_name": config.mysql_database if config.db_engine == "mysql" else "sqlite",
+        "engine": "mariadb",
+        "database_name": config.mysql_database,
         "total_mb": 0.0,
         "data_mb": 0.0,
         "index_mb": 0.0,
