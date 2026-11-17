@@ -25,9 +25,29 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
+      mariadb:
+        image: mariadb:11
+        ports:
+          - 3306:3306
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: toktracker
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       # Aktiviert die Redis-Pfade (Bus, Leases, Rate-Limits) in der Testsuite.
       TOKTRACKER_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      # MariaDB ist die einzige Engine; die Suite legt pro Lauf eine eigene
+      # Test-Datenbank an (tests/_bootstrap.py) und droppt sie wieder.
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_DATABASE: toktracker
 
     steps:
       - uses: actions/checkout@v4

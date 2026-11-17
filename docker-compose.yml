@@ -67,7 +67,6 @@ services:
       - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - SERVICE_ROLE=api
       - REDIS_URL=redis://redis:6379/0
-      - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
       # Automatische Konfiguration für Nginx Reverse Proxy & Let's Encrypt
@@ -113,7 +112,6 @@ services:
       - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
       - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - REDIS_URL=redis://redis:6379/0
-      - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
     depends_on:
@@ -147,7 +145,6 @@ services:
       - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
       - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - REDIS_URL=redis://redis:6379/0
-      - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
       - INTERNAL_API_URL=http://app:5000
@@ -183,7 +180,6 @@ services:
       - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
       - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - REDIS_URL=redis://redis:6379/0
-      - DB_ENGINE=mysql
       - MYSQL_HOST=db
       - MYSQL_PORT=3306
       - DOCKER_PROXY_URL=http://docker-socket-proxy:2375
@@ -216,6 +212,7 @@ services:
       TZ: ${APP_TIMEZONE:-Europe/Berlin}
     volumes:
       - mariadb_data:/var/lib/mysql
+      - ./docker/mariadb-init:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:3306:3306"
     networks:
