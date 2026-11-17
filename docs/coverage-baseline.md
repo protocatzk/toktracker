@@ -26,14 +26,13 @@ pytest --cov=shared --cov=app --cov=routers \
 | `routers/exports.py` | 50 | 94 % | CSV-Pfade getestet |
 | `routers/access.py` | 81 | 78 % | Rechte-Endpunkte getestet |
 | `routers/revenue.py` | 37 | 32 % | Zuordnung/Bearbeitung ungetestet |
-| `routers/system.py` | 67 | 42 % | SQLite-Import/Demo ungetestet |
+| `routers/system.py` | 67 | 42 % | Demo-Endpunkte ungetestet |
 | `app.py` | 1219 | 56 % | Legacy-Shell, sinkt mit jedem Router |
-| `shared/db/_base.py` | 179 | 45 % | MySQL-Pool-Pfade brauchen einen Stub-Test |
+| `shared/db/_base.py` | 179 | 45 % | Pool-Pfade brauchen einen Stub-Test |
 | `shared/db/battles.py` | 283 | 43 % | Detail-/Timeline-Abfragen offen |
-| `shared/db/schema.py` | 197 | 42 % | MySQL-DDL wird in SQLite-Tests nicht geladen |
+| `shared/db/schema.py` | 197 | 42 % | DDL läuft nur beim Bootstrap |
 | `shared/db/donors.py` | 360 | 19 % | CRM, Whale-Alerts, Loyalty |
 | `shared/db/chat.py` | 228 | 19 % | Chat-Intelligence-Abfragen |
-| `shared/db/sqlite_import.py` | 122 | 8 % | Import-Pipeline |
 | `telegram_service.py` | 1825 | 22 % | **größte Lücke** |
 | `tiktok_service.py` | 1545 | 31 % | **zweitgrößte Lücke** |
 | **Gesamt** | **9888** | **50 %** | |
@@ -50,10 +49,10 @@ Monolith-Dateien mit dem meisten Code haben die niedrigste Abdeckung.
 2. **`tiktok_service.py` – Streak-Aggregation**: `on_gift`/`_streak_watchdog_loop`
    mit Fake-Events, ohne echte WebSocket-Verbindung.
 3. **`routers/revenue.py` + `routers/system.py`**: ein Test je Endpunkt
-   (Zuordnung, ungültige IDs, Demo-Seed/-Clear, SQLite-Inspect-Fehlerpfad).
+   (Zuordnung, ungültige IDs, Demo-Seed/-Clear).
 4. **`shared/db/_base.py`**: MySQL-Pool mit gestubbtem `pymysql`, damit
    Timeout-/Reconnect-Pfade nicht nur in Produktion laufen.
-5. **`shared/db/sqlite_import.py`**: Mini-Fixture-DB + Dry-Run-Modus.
+5. **`shared/db/_base.py`**: Verbindungsaufbau/Paramstyle-Bindung als Unit-Test.
 
 Nicht sinnvoll ist es, die Coverage-Zahl um ihrer selbst willen zu heben:
 Die 50 % enthalten viele Admin-/Legacy-Pfade, die nur mit erhöhtem

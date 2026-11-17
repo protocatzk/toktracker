@@ -48,18 +48,18 @@ api (FastAPI, Web + REST) ◀──PubSub/Streams──────────�
 bot (Telegram, Leader-Lock) ◀────────RPC─────────────────────┤
 scheduler (Reports, Cleanup, Disk-Monitoring) ◀──────────────┘
                                                              │
-                                              MariaDB / MySQL ◀─▶ SQLite (lokaler Fallback)
+                                                       MariaDB / MySQL
 ```
 
 | Pfad | Rolle |
 | :--- | :--- |
 | `app.py` | FastAPI-App: Web-Routen, REST-API, Auth, Exports |
-| `shared/` | Config, DB-Abstraktion (SQLite + MySQL), Schemas, Bus, Auth, Clients |
+| `shared/` | Config, DB-Schicht (MariaDB/MySQL), Schemas, Bus, Auth, Clients |
 | `services/api`, `services/ingest`, `services/bot`, `services/scheduler` | Service-Einstiegspunkte |
 | `tiktok_service.py` | TikTokLive-Worker, Event-Handler, Reconnect-Supervisor |
 | `telegram_service.py` | Bot-Befehle, Menüs, Report-Formatter |
 | `templates/`, `static/` | Jinja2-Templates und Frontend-Assets |
-| `tests/` | Testsuite (isolierte SQLite-DB, optional Redis) |
+| `tests/` | Testsuite (isolierte MariaDB-DB pro Lauf, optional Redis) |
 
 Details für Entwicklung und Betrieb: [`AGENTS.md`](./AGENTS.md).
 
@@ -82,12 +82,17 @@ docker compose up -d --build
 curl -f http://localhost:5000/api/health
 ```
 
-Ohne Docker (nur API/UI, SQLite):
+Ohne Docker (nur API/UI gegen die Compose-Datenbank):
 
 ```bash
+docker compose up -d db
 pip install -r requirements.txt
-python -m uvicorn app:app --host 0.0.0.0 --port 5000
+MYSQL_HOST=127.0.0.1 python -m uvicorn app:app --host 0.0.0.0 --port 5000
 ```
+
+MariaDB/MySQL ist die einzige Engine – es gibt keinen SQLite-Laufzeitpfad mehr.
+Bestehende SQLite-Installationen migrieren mit `migrate_sqlite_to_mysql.py` aus
+der letzten Release-Version (siehe Git-History).
 
 ---
 
@@ -100,7 +105,7 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `SESSION_SECRET` | Signatur der Admin-Sessions (min. 32 Zeichen, Pflicht in Produktion) |
 | `TIKTOK_API_KEY` | API-Key für externe Skripte (`X-API-Key`-Header) |
 | `ADMIN_PASSWORD` | Optionaler Notfall-Login, falls Telegram nicht erreichbar ist |
-| `DB_ENGINE` | `mysql` (Produktion) oder `sqlite` (lokal) |
+| `MYSQL_*` | Verbindung zur MariaDB/MySQL-Datenbank (einzige Engine) |
 | `REDIS_URL` | Aktiviert Bus, Leases und verteilte Rate-Limits |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USERS` | Bot und Whitelist |
 | `SESSION_COOKIE_SECURE` | `auto` (nur HTTPS), `1` oder `0` |
@@ -240,7 +245,7 @@ pytest -q        # Testsuite, ~3 s
 ./run_tests.sh   # Testsuite im laufenden Container (inkl. Redis-Pfade)
 ```
 
-Die Tests laufen gegen eine temporäre SQLite-Datenbank (`tests/_bootstrap.py`) und berühren niemals Produktionsdaten. CI: `.github/workflows/ci.yml` (Ruff, Mypy, Pytest mit Redis-Service, JS-Syntaxcheck).
+Die Tests laufen gegen eine eigene MariaDB-Datenbank pro Lauf (`tests/_bootstrap.py`, Präfix `toktracker_test_`) und berühren niemals Produktionsdaten. CI: `.github/workflows/ci.yml` (Ruff, Mypy, Pytest mit MariaDB- und Redis-Service, JS-Syntaxcheck).
 
 **Datenbank-Migrationen**
 
@@ -249,7 +254,7 @@ docker exec toktracker_app python migrate_money_to_decimal.py           # Dry-Ru
 docker exec toktracker_app python migrate_money_to_decimal.py --apply   # ausführen
 ```
 
-Geldspalten sind in MySQL/MariaDB `DECIMAL(14,4)` (exakte Cent-Beträge), SQLite nutzt `REAL`.
+Geldspalten sind in MariaDB/MySQL `DECIMAL(14,4)` (exakte Cent-Beträge).
 
 ---
 

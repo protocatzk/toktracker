@@ -13,7 +13,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 - **Finanzmetriken**: Präzise Berechnung von Brutto-Kaufwerten (Viewer-Ausgaben) und Netto-Creator-Auszahlungen in **USD ($)** und **EUR (€)**.
 - **Web-Dashboard**: Modernes Web-Interface (Jinja2, CSS, Vanilla JS) für Admins und eine schlanke öffentliche Ansicht (`/public`).
 - **Telegram-Bot Integration**: Automatisierte 24h-Reports, Streamer-Statistiken, Live-Status-Checks, Live-Alerts für einzelne Streamer in Gruppen und interaktiver 2FA-/1-Click-Login für das Web-Admin-Panel.
-- **Dual-Database Engine**: Vollständige Unterstützung von **SQLite** (lokal mit WAL-Modus) und **MySQL / MariaDB** (Produktion).
+- **Eine Datenbank-Engine**: **MariaDB / MySQL** für Dev, Tests und Produktion (kein SQLite-Laufzeitpfad, kein Dialekt-Übersetzer).
 
 ---
 
@@ -58,7 +58,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
 | [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `api_deps.py` (FastAPI-Auth-Dependencies), `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
-| [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, Wrapper, `get_db`), `schema`, `settings`, `users`, `streamers`, `groups`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`, `sqlite_import`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
+| [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, MariaDB-Verbindung, `get_db`), `schema`, `settings`, `users`, `streamers`, `groups`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
 | [`services/api/`](./services/api) / [`app.py`](./app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
 | [`routers/`](./routers) | **Ausgelagerte FastAPI-Router**: `revenue`, `exports`, `system`, `access`. Sie werden in `app.py` per `include_router` registriert; Pfade und Berechtigungen bleiben unverändert. Neue fachliche Schnitte gehören hierher, nicht in `app.py`. |
 | [`services/ingest/`](./services/ingest) | **TikTokLive Ingest Worker**. Beinhaltet `coordinator.py` und `main.py`. Überwacht TikTokLive-Streams horizontal skalierbar über Redis-Leases (`tt:lease:*`) mit automatischem Reconcile & Failover. |
@@ -75,9 +75,9 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 ## 4. Datenmodell & Datenbankarchitektur
 
-Die Anwendung abstrahiert SQLite und MySQL über eigene Wrapper (`MySQLConnectionWrapper`, `DBRow`) in [`shared/db/_base.py`](./shared/db/_base.py). Alle Queries nutzen `?` als Platzhalter (wird für MySQL intern zu `%s` konvertiert).
+MariaDB/MySQL ist die einzige Engine. [`shared/db/_base.py`](./shared/db/_base.py) stellt `MariaDBConnection`, `MariaDBCursor`, `MariaDBConnectionPool` und `DBRow` bereit. Alle Queries nutzen `?` als Platzhalter; `MariaDBConnection._bind_params()` setzt sie mechanisch auf `%s` um (reiner Paramstyle, keine Semantik-Übersetzung). Natives MariaDB-SQL ist Pflicht – SQLite-Konstrukte werden von [`tests/test_sql_hygiene.py`](./tests/test_sql_hygiene.py) abgewiesen.
 
-**Geldbeträge:** In MySQL/MariaDB sind `usd_net`, `eur_net`, `usd_gross`, `eur_gross` (Tabellen `gift_events`, `tiktok_battles`) als `DECIMAL(14,4)` definiert; `DBRow` normalisiert `Decimal` beim Lesen zentral zu `float`, damit beide Engines identische Typen liefern. SQLite speichert `REAL` (kein echtes DECIMAL). Migration bestehender Installationen: `python migrate_money_to_decimal.py [--apply]`.
+**Geldbeträge:** `usd_net`, `eur_net`, `usd_gross`, `eur_gross` (Tabellen `gift_events`, `tiktok_battles`) sind in MariaDB/MySQL als `DECIMAL(14,4)` definiert; `DBRow` normalisiert `Decimal` beim Lesen zentral zu `float`. Migration bestehender Installationen: `python migrate_money_to_decimal.py [--apply]`.
 
 ### Kern-Tabellen:
 1. **`streamers`**:
@@ -226,9 +226,10 @@ Prefix-Betrieb ab.
 
 Beachte bei Änderungen an der Codebasis zwingend folgende Regeln:
 
-1. **Dual-Database Kompatibilität wahren**:
-   - Niemals SQLite-spezifische Syntax verwenden, die auf MySQL fehlschlägt (z.B. `INSERT OR REPLACE` vs. `ON DUPLICATE KEY UPDATE`). In [`shared/db/schema.py`](./shared/db/schema.py) existieren bereits Methoden wie `_init_sqlite_schema()` und `_init_mysql_schema()`.
-   - Bei Tabellen- oder Spaltenänderungen **beide** Schemas und Migrationen pflegen.
+1. **Natives MariaDB-SQL schreiben**:
+   - Kein SQLite-Dialekt (`INSERT OR IGNORE/REPLACE`, `PRAGMA`, `AUTOINCREMENT`, `MAX(a, b)` als 2-Arg-Funktion). Upserts laufen über `INSERT ... ON DUPLICATE KEY UPDATE`, Maxima über `GREATEST()`.
+   - Schema-Änderungen gehören in `_init_schema()` in [`shared/db/schema.py`](./shared/db/schema.py) **plus** eine `_ensure_column`/`_ensure_index`-Migration für bestehende Installationen. Neue Spalten immer vor Indizes anlegen.
+   - `tests/test_sql_hygiene.py` erzwingt, dass keine SQLite-Konstrukte zurückkehren.
 
 2. **Threading & Asyncio Isolation**:
    - `tiktok_service.py` nutzt dedizierte Worker-Threads mit eigenen Event-Loops. Blockierende I/O-Operationen müssen vorsichtig gehandhabt werden.
@@ -278,18 +279,23 @@ docker compose build app && docker compose up -d app
 python -m uvicorn app:app --host 0.0.0.0 --port 5000
 ```
 
-### Migration von SQLite zu MySQL
+### Migration von SQLite zu MariaDB
+SQLite ist nur noch ein Importformat für Altinstallationen. Das Migrationsskript
+(`migrate_sqlite_to_mysql.py`) wurde mit dem Umstieg auf MariaDB-only entfernt;
+es liegt in der Git-History der letzten Release-Version:
+
 ```bash
-docker exec toktracker_app python migrate_sqlite_to_mysql.py
-# oder lokal:
-python migrate_sqlite_to_mysql.py
+git show <letzte-release>:migrate_sqlite_to_mysql.py > /tmp/migrate_sqlite_to_mysql.py
+docker exec -i toktracker_app python /tmp/migrate_sqlite_to_mysql.py
 ```
+
+`DB_ENGINE=sqlite` wird beim Start mit einer klaren Fehlermeldung abgewiesen.
 
 ### Qualitätssicherung
 ```bash
 ruff check .          # Lint
 mypy                  # Typen (kuratierter Scope, siehe pyproject.toml)
-pytest -q             # Testsuite (isolierte SQLite-DB)
+pytest -q             # Testsuite (eigene MariaDB-Test-DB pro Lauf)
 ./run_tests.sh        # Testsuite im laufenden Container (inkl. Redis-Pfade)
 ```
 
