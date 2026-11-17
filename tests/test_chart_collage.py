@@ -247,6 +247,39 @@ class TestCollageCommand(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(builder.call_count, 1)
         service._send_chart_image.assert_awaited_once()
 
+    async def test_command_supports_streamer_grid_cards(self):
+        service, update, context = self._service()
+        update.effective_message.text = (
+            "/collage SELECT cards FROM ALL WHERE all AND eur "
+            "TITLE 'ALLE STREAMER · GESAMT'"
+        )
+        context.args = [
+            "SELECT",
+            "cards",
+            "FROM",
+            "ALL",
+            "WHERE",
+            "all",
+            "AND",
+            "eur",
+            "TITLE",
+            "ALLE STREAMER · GESAMT",
+        ]
+        grid = SimpleNamespace(
+            png=b"png",
+            caption="caption",
+            digest="digest",
+            count=46,
+        )
+        with patch(
+            "telegram_service.build_streamer_grid", return_value=grid
+        ) as builder:
+            await service._cmd_collage(update, context)
+        builder.assert_called_once()
+        self.assertEqual(builder.call_args.args[0], "all")
+        self.assertEqual(builder.call_args.args[1], "eur")
+        service._send_chart_image.assert_awaited_once()
+
     def test_help_examples_use_real_streamer_and_group_data(self):
         service = TelegramBotService()
         text = service._collage_help_text(

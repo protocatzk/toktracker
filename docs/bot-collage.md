@@ -72,6 +72,25 @@ werden unterstützt.
 /collage SELECT verlauf AS 'TOP 1' FROM @alice WHERE 24h AND eur UNION ALL SELECT verlauf AS 'TOP 2' FROM @bob WHERE 24h AND coins GRID 2x1
 ```
 
+## Streamer-Grid: alle Streamer auf einem Bild
+
+`cards` rendert **eine kompakte Karte pro Streamer** in einem einzigen PNG.
+Enthalten sind Rang, Username, Live-Status, Netto-Umsatz, Coins und
+Gift-Events. Der Modus ist für die Gesamtansicht aller Streamer gedacht:
+
+```text
+/collage SELECT cards FROM ALL WHERE all AND eur TITLE 'ALLE STREAMER · GESAMT'
+```
+
+Auch andere Zeiträume und Metriken sind möglich:
+
+```text
+/collage SELECT cards FROM ALL WHERE 7d AND eur TITLE 'ALLE STREAMER · 7T'
+/collage SELECT cards FROM ALL WHERE 30d AND coins TITLE 'ALLE STREAMER · 30T'
+```
+
+Aktuell wird `FROM ALL` unterstützt; `cards` muss allein in `SELECT` stehen.
+
 ## Klassische Syntax
 
 Die bisherige Syntax bleibt vollständig gültig:

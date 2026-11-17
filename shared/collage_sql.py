@@ -28,11 +28,13 @@ from typing import List, Optional, Sequence, Tuple
 
 from shared.chart_collage import (
     MAX_COLLAGE_TILES,
+    STREAMER_CARDS_VIEW,
     CollageError,
     CollageRequest,
     CollageTileRequest,
     _parse_layout,
     infer_grid,
+    is_card_view,
     normalize_scope_ref,
     validate_grid,
 )
@@ -172,6 +174,9 @@ class _SqlCollageParser:
             for part in token.split(","):
                 part = part.strip()
                 if not part:
+                    continue
+                if is_card_view(part):
+                    items.append({"view": STREAMER_CARDS_VIEW, "label": ""})
                     continue
                 if not is_view_alias(part):
                     raise CollageError(f"SQL-Modus: Unbekannte Ansicht '{part}'.")

@@ -54,6 +54,24 @@ DEFAULT_COLLAGE_VIEWS: Tuple[str, ...] = (
     "gifts",
 )
 
+# Sonderansicht: eine kompakte Karte pro Streamer statt einer Chart-Kachel.
+STREAMER_CARDS_VIEW = "cards"
+CARD_VIEW_ALIASES = frozenset(
+    {
+        "cards",
+        "card",
+        "streamer_cards",
+        "streamercards",
+        "streamer-grid",
+        "streamergrid",
+        "streamer_grid",
+    }
+)
+
+
+def is_card_view(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in CARD_VIEW_ALIASES
+
 _CACHE_TTL_SECONDS = 300.0
 _CACHE_MAX_ENTRIES = 32
 
@@ -228,9 +246,12 @@ def _parse_tile_spec(spec: str, request: CollageRequest) -> CollageTileRequest:
 
         if separator:
             if key_lower in ("view", "ansicht"):
-                if not is_view_alias(value):
+                if is_card_view(value):
+                    view = STREAMER_CARDS_VIEW
+                elif is_view_alias(value):
+                    view = normalize_view(value)
+                else:
                     raise CollageError(f"Unbekannte Ansicht '{value}'.")
-                view = normalize_view(value)
             elif key_lower in ("period", "zeitraum", "zeit"):
                 if not is_period_alias(value):
                     raise CollageError(f"Unbekannter Zeitraum '{value}'.")
@@ -253,11 +274,14 @@ def _parse_tile_spec(spec: str, request: CollageRequest) -> CollageTileRequest:
 
         lowered = field.lower()
         if not view:
-            if not is_view_alias(field):
+            if is_card_view(field):
+                view = STREAMER_CARDS_VIEW
+            elif not is_view_alias(field):
                 raise CollageError(
                     f"Kachel muss mit einer Ansicht beginnen (z. B. verlauf), nicht '{field}'."
                 )
-            view = normalize_view(field)
+            else:
+                view = normalize_view(field)
         elif _looks_like_scope(field):
             scope = normalize_scope_ref(field)
         elif is_period_alias(field):
@@ -371,7 +395,7 @@ def parse_collage_args(
             period = normalize_period(token)
         elif is_metric_alias(token):
             metric = normalize_metric(token)
-        elif is_view_alias(token) or "|" in token:
+        elif is_view_alias(token) or is_card_view(token) or "|" in token:
             specs = _split_tile_specs(token)
             if not specs:
                 raise CollageError("Leere Kachel-Angabe.")

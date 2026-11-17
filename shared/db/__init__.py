@@ -36,6 +36,7 @@ from shared.db.analytics import (  # noqa: F401
     get_chart_timeline,
     get_dashboard_overview,
     get_streamer_detail,
+    get_streamer_grid_stats,
     invalidate_overview_cache,
 )
 from shared.db.battles import (  # noqa: F401
@@ -303,6 +304,7 @@ __all__ = [
     "get_streamer_detail",
     "get_analytics_data",
     "get_chart_timeline",
+    "get_streamer_grid_stats",
     "build_streamer_bot_report",
     "batch_record_chat_messages",
     "cleanup_old_chat_messages",

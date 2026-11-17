@@ -80,6 +80,7 @@ from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_format import BRAND as BOT_BRAND
 from shared.bus import get_bus
 from shared.chart_collage import (
+    STREAMER_CARDS_VIEW,
     CollageError,
     CollageRequest,
     CollageTile,
@@ -114,6 +115,7 @@ from shared.permissions import (
     permissions_for,
     role_label,
 )
+from shared.streamer_grid import build_streamer_grid
 from shared.widget_chart import build_chart_widget, format_coins, format_eur
 from tiktok_service import fetch_tiktok_user_info
 
@@ -2714,6 +2716,10 @@ class TelegramBotService:
                 f"▪ <code>/collage SELECT verlauf, streamer, tageszeit, geschenke "
                 f"FROM @{first} WHERE 7d AND eur GRID 2x2</code>"
             )
+            examples.append(
+                "▪ <code>/collage SELECT cards FROM ALL WHERE all AND eur "
+                "TITLE 'ALLE STREAMER · GESAMT'</code>"
+            )
         if group_names:
             group = html.escape(self._sql_quote(group_names[0]), quote=False)
             examples.append(
@@ -2765,6 +2771,8 @@ class TelegramBotService:
                 "▪ <b>WHERE:</b> <code>period=7d AND metric=eur</code> "
                 "oder kurz <code>7d AND eur</code>; Zeiträume "
                 "<code>today, 24h, 7d, 30d, all</code>",
+                "▪ <b>STREAMER-GRID:</b> <code>SELECT cards FROM ALL WHERE all AND eur</code> "
+                "— alle Streamer als Karten auf einem Bild",
                 "▪ <b>UNION ALL:</b> weitere Kacheln mit eigenem "
                 "<code>FROM</code>/<code>WHERE</code> und <code>AS 'Label'</code>",
                 "▪ <b>Optional:</b> <code>GRID</code>/<code>LAYOUT</code>, "
@@ -2926,26 +2934,54 @@ class TelegramBotService:
 
             started_at = time.perf_counter()
             try:
-                tiles = await self._resolve_collage_tiles(request)
-                collage = await asyncio.to_thread(
-                    build_chart_collage,
-                    tiles,
-                    request.rows,
-                    request.cols,
-                    request.title,
-                    request.force_refresh,
-                )
+                card_tiles = [
+                    tile
+                    for tile in request.tiles
+                    if tile.view == STREAMER_CARDS_VIEW
+                ]
+                if card_tiles:
+                    if len(request.tiles) != 1:
+                        raise CollageError(
+                            "CARDS muss allein in SELECT stehen. "
+                            "Nutze z. B. SELECT cards FROM ALL WHERE all AND eur."
+                        )
+                    card_tile = request.tiles[0]
+                    if card_tile.scope_ref:
+                        raise CollageError(
+                            "Der Streamer-Grid-Modus unterstützt aktuell nur FROM ALL."
+                        )
+                    image = await asyncio.to_thread(
+                        build_streamer_grid,
+                        card_tile.period,
+                        card_tile.metric,
+                        request.title,
+                        request.force_refresh,
+                    )
+                    rendered_label = f"Streamer-Grid mit {image.count} Karten"
+                else:
+                    tiles = await self._resolve_collage_tiles(request)
+                    image = await asyncio.to_thread(
+                        build_chart_collage,
+                        tiles,
+                        request.rows,
+                        request.cols,
+                        request.title,
+                        request.force_refresh,
+                    )
+                    rendered_label = (
+                        f"Bilderkollage {request.cols}x{request.rows} "
+                        f"mit {len(tiles)} Kacheln"
+                    )
                 elapsed = time.perf_counter() - started_at
                 self._log(
                     "DEBUG",
-                    f"Bilderkollage {request.cols}x{request.rows} "
-                    f"mit {len(tiles)} Kacheln gerendert in {elapsed:.2f}s "
-                    f"({len(collage.png)} Bytes).",
+                    f"{rendered_label} gerendert in {elapsed:.2f}s "
+                    f"({len(image.png)} Bytes).",
                 )
                 await self._send_chart_image(
                     context.bot,
                     int(update.effective_chat.id),
-                    collage,
+                    image,
                 )
             except CollageError as exc:
                 await update.effective_message.reply_text(

@@ -1176,6 +1176,64 @@ def build_streamer_bot_report(
     }
 
 
+def get_streamer_grid_stats(period: str = "all") -> List[Dict[str, Any]]:
+    """
+    Leichtgewichtige Streamer-Aggregate für die Grid-Kollage.
+
+    Anders als ``get_analytics_data`` berechnet diese Funktion nur die
+    Kennzahlen pro Streamer. Das reicht für die Karten und vermeidet die
+    teuren Timeline-, Gift- und Spender-Aggregationen.
+    """
+    norm = period if period in ("today", "24h", "7d", "30d", "all") else "all"
+    cutoff = _get_period_cutoff(norm)
+
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                s.id,
+                s.username,
+                s.display_name,
+                s.is_live,
+                s.current_viewers,
+                s.follower_count,
+                COALESCE(SUM(g.total_coins), 0) AS total_coins,
+                COALESCE(SUM(g.eur_net), 0) AS eur_net,
+                COUNT(g.id) AS gift_events_count
+            FROM streamers s
+            LEFT JOIN gift_events g
+                ON g.streamer_id = s.id
+               AND (? IS NULL OR g.created_at >= ?)
+            GROUP BY
+                s.id, s.username, s.display_name, s.is_live,
+                s.current_viewers, s.follower_count
+            """,
+            (cutoff, cutoff),
+        ).fetchall()
+
+    total_coins = sum(int(row["total_coins"] or 0) for row in rows)
+    result: List[Dict[str, Any]] = []
+    for row in rows:
+        coins = int(row["total_coins"] or 0)
+        result.append(
+            {
+                "id": int(row["id"]),
+                "username": str(row["username"] or ""),
+                "display_name": str(row["display_name"] or row["username"] or ""),
+                "is_live": bool(row["is_live"]),
+                "current_viewers": int(row["current_viewers"] or 0),
+                "follower_count": int(row["follower_count"] or 0),
+                "total_coins": coins,
+                "eur_net": round(float(row["eur_net"] or 0.0), 2),
+                "gift_events_count": int(row["gift_events_count"] or 0),
+                "pct_of_total": round(coins / total_coins * 100.0, 1)
+                if total_coins > 0
+                else 0.0,
+            }
+        )
+    return result
+
+
 def get_chart_timeline(
     period: str = "24h",
     streamer_id: Optional[int] = None,

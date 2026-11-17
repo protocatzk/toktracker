@@ -114,6 +114,16 @@ class TestCollageSqlParser(unittest.TestCase):
         self.assertEqual(request.tiles[0].period, "all")
         self.assertEqual(request.tiles[1].period, "all")
 
+    def test_cards_view(self):
+        request = _parse(
+            "SELECT cards FROM ALL WHERE all AND eur "
+            "TITLE 'ALLE STREAMER · GESAMT'"
+        )
+        self.assertEqual(len(request.tiles), 1)
+        self.assertEqual(request.tiles[0].view, "cards")
+        self.assertEqual(request.tiles[0].period, "all")
+        self.assertEqual(request.title, "ALLE STREAMER · GESAMT")
+
     def test_where_comma_and_unquoted_title(self):
         request = _parse(
             "SELECT verlauf FROM @alpha WHERE period=7d,metric=coins "
