@@ -40,6 +40,25 @@ class TestSessionSecretHardening(unittest.TestCase):
         self.assertEqual(cfg.session_cookie_secure, "auto")
 
 
+class TestTimezone(unittest.TestCase):
+    def test_config_exposes_default_timezone(self):
+        self.assertEqual(AppConfig().app_timezone, "Europe/Berlin")
+
+    def test_apply_timezone_sets_process_timezone(self):
+        import os
+        import time
+
+        from shared.config import apply_timezone, config
+
+        original = os.environ.get("TZ")
+        try:
+            apply_timezone("Europe/Berlin")
+            self.assertEqual(os.environ["TZ"], "Europe/Berlin")
+            self.assertIn(time.strftime("%z"), ("+0100", "+0200"))
+        finally:
+            apply_timezone(original or config.app_timezone)
+
+
 class TestCookieSecureFlag(unittest.TestCase):
     """Secure-Flag des Session-Cookies: Auto-Erkennung hinter Nginx (X-Forwarded-Proto)."""
 

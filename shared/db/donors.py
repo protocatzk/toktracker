@@ -5,7 +5,7 @@ TokTracker - Spender-Radar, Whale-Tiers, Donor-CRM und Loyalty-Auswertungen.
 import copy
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
@@ -458,7 +458,7 @@ def get_donor_details(username: str) -> Optional[Dict[str, Any]]:
             }
 
         # Frontenwechsler-Check (Historisch vs. Letzte 14 Tage)
-        cutoff_14d = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+        cutoff_14d = (datetime.now() - timedelta(days=14)).isoformat()
         period_rows = conn.execute(
             """
             SELECT
@@ -572,7 +572,7 @@ def save_donor_crm(
     Vollständig portabel für SQLite und MySQL.
     """
     clean_uname = username.strip().lstrip("@").lower()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now().isoformat(timespec="seconds")
 
     tags_str: Optional[str] = None
     if tags is not None:
@@ -692,7 +692,9 @@ def get_network_loyalty_and_overlap(
             return copy.deepcopy(cached[1])
 
     with get_db() as conn:
-        now_dt = datetime.now(timezone.utc)
+        # gift_events.created_at ist lokale naive Zeit (datetime.now()) – daher
+        # ebenfalls ohne timezone.utc rechnen, sonst verschiebt sich das Fenster.
+        now_dt = datetime.now()
         # Zeitspanne der vorhandenen Events prüfen für adaptive Fenster-Teilung
         span_row = conn.execute("SELECT MIN(created_at), MAX(created_at) FROM gift_events").fetchone()
         if span_row and span_row[0] and span_row[1]:

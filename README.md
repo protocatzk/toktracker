@@ -108,6 +108,7 @@ Alle Variablen liegen in `.env` (siehe [`.env.example`](./.env.example)). Die wi
 | `ACCESS_GATE` | `whitelist` (Default): nur per Telegram freigeschaltete Nutzer/API-Key kommen an die App, alle anderen landen auf `/login`. `off` = öffentlicher Betrieb |
 | `LANDING_PAGE_ENABLED` | `1` (Default): `/` zeigt die öffentliche Infoseite. `0`: `/` zeigt wieder das öffentliche Live-Panel (und unterliegt dem Gate) |
 | `APP_BASE_PATH` | Optionaler URL-Prefix, z.B. `/track` für `https://domain/track`. Leer = Root-Betrieb. Setzt einen passenden Proxy mit `X-Forwarded-Prefix` voraus |
+| `APP_TIMEZONE` | IANA-Zeitzone für alle Zeitstempel (DB, Dashboard, Reports). Default: `Europe/Berlin`. Wird beim Start per `TZ`/`tzset()` gesetzt |
 | `TIKTOK_SIGN_API_KEY` | Euler-Stream-Sign-Key; hebt das Sign-API-Rate-Limit und aktiviert den globalen Cooldown |
 | `TIKTOK_WS_PROXY` | Optionaler Proxy nur für die TikTok-WebSocket-Verbindung. Leer = Fallback auf `TIKTOK_WEB_PROXY` |
 | `TIKTOK_STALL_TIMEOUT_SECONDS` | Zeit ohne WebSocket-Frame, nach der der Worker die Verbindung zwangsweise neu aufbaut (Default: `120`) |

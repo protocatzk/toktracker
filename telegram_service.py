@@ -1715,9 +1715,11 @@ class TelegramBotService:
         if not dt_val:
             return "nie"
         try:
-            now = datetime.utcnow()
+            # Zeitstempel liegen als lokale (naive) Zeit in der DB – daher
+            # datetime.now() statt utcnow(), sonst ist jede Relativzeit 1h falsch.
+            now = datetime.now()
             if isinstance(dt_val, (int, float)):
-                dt = datetime.utcfromtimestamp(dt_val)
+                dt = datetime.fromtimestamp(dt_val)
             elif isinstance(dt_val, datetime):
                 dt = dt_val.replace(tzinfo=None) if dt_val.tzinfo else dt_val
             elif isinstance(dt_val, str):

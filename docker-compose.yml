@@ -63,6 +63,8 @@ services:
       - APP_HOST=0.0.0.0
       - APP_PORT=5000
       - APP_BASE_PATH=/track
+      - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
+      - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - SERVICE_ROLE=api
       - REDIS_URL=redis://redis:6379/0
       - DB_ENGINE=mysql
@@ -108,6 +110,8 @@ services:
       - .env
     environment:
       - SERVICE_ROLE=ingest
+      - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
+      - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - REDIS_URL=redis://redis:6379/0
       - DB_ENGINE=mysql
       - MYSQL_HOST=db
@@ -140,6 +144,8 @@ services:
       - .env
     environment:
       - SERVICE_ROLE=bot
+      - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
+      - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - REDIS_URL=redis://redis:6379/0
       - DB_ENGINE=mysql
       - MYSQL_HOST=db
@@ -174,6 +180,8 @@ services:
       - .env
     environment:
       - SERVICE_ROLE=scheduler
+      - APP_TIMEZONE=${APP_TIMEZONE:-Europe/Berlin}
+      - TZ=${APP_TIMEZONE:-Europe/Berlin}
       - REDIS_URL=redis://redis:6379/0
       - DB_ENGINE=mysql
       - MYSQL_HOST=db
@@ -205,6 +213,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-toktracker}
       MYSQL_USER: ${MYSQL_USER:-toktracker_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-user_change_me_in_production}
+      TZ: ${APP_TIMEZONE:-Europe/Berlin}
     volumes:
       - mariadb_data:/var/lib/mysql
     ports:

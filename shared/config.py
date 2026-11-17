@@ -2,6 +2,7 @@ import hashlib
 import logging
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Set
 from urllib.parse import urlparse
@@ -47,6 +48,25 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def apply_timezone(tz_name: str) -> str:
+    """
+    Setzt die Prozess-Zeitzone für alle `datetime.now()`-Aufrufe.
+
+    Alle Zeitstempel (DB, Reports, Dashboard) werden als lokale, naive Zeit
+    gespeichert. Ohne TZ laufen Docker-Container in UTC – dann sind alle
+    Anzeigen eine Stunde hinter der deutschen Zeit. `TZ` + `tzset()` sorgt
+    dafür, dass unabhängig von der Container-Konfiguration dieselbe Zone gilt.
+    """
+    name = (tz_name or "").strip() or "Europe/Berlin"
+    os.environ["TZ"] = name
+    if hasattr(time, "tzset"):
+        try:
+            time.tzset()
+        except Exception:  # pragma: no cover - nur auf exotischen Plattformen
+            logger.warning("Zeitzone %r konnte nicht angewendet werden", name)
+    return name
+
+
 @dataclass
 class AppConfig:
     # Server
@@ -57,6 +77,10 @@ class AppConfig:
     # (z.B. "/track" für https://example.com/track). Leer = Root-Deployment.
     # Der Proxy muss denselben Wert als X-Forwarded-Prefix senden.
     app_base_path: str = os.getenv("APP_BASE_PATH", "").strip()
+
+    # Zeitzone für alle Zeitstempel (DB, Reports, Dashboard).
+    # Muss eine IANA-Zone aus /usr/share/zoneinfo sein, z.B. "Europe/Berlin".
+    app_timezone: str = os.getenv("APP_TIMEZONE", "Europe/Berlin").strip() or "Europe/Berlin"
 
     # Service Role ("all", "api", "ingest", "bot", "scheduler")
     service_role: str = os.getenv("SERVICE_ROLE", "all").strip().lower()
@@ -288,6 +312,7 @@ class AppConfig:
         return {
             "env_file_loaded": os.path.exists(ENV_PATH),
             "service_role": self.service_role,
+            "app_timezone": self.app_timezone,
             "has_redis": self.has_redis,
             "db_engine": "mysql" if self.is_mysql else "sqlite",
             "db_target": (
@@ -328,3 +353,6 @@ class AppConfig:
 
 
 config = AppConfig()
+# Muss vor dem ersten datetime.now() laufen – shared.config wird von allen
+# Services (App, Ingest, Bot, Scheduler) zuerst importiert.
+apply_timezone(config.app_timezone)
