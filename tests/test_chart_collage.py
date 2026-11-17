@@ -199,9 +199,42 @@ class TestCollageCommand(unittest.IsolatedAsyncioTestCase):
         service, update, context = self._service()
         update.effective_message.text = "/collage"
         context.args = []
-        await service._cmd_collage(update, context)
+        with (
+            patch(
+                "telegram_service.list_streamers_for_picker",
+                return_value=[{"username": "alpha", "is_live": 1}],
+            ),
+            patch(
+                "telegram_service.list_streamer_groups",
+                return_value=[{"name": "Team Alpha", "member_count": 2}],
+            ),
+        ):
+            await service._cmd_collage(update, context)
         update.effective_message.reply_text.assert_awaited_once()
+        text = update.effective_message.reply_text.await_args.args[0]
+        self.assertIn("/collage @alpha 7d eur 2x2", text)
+        self.assertIn("scope=gruppe:Team+Alpha", text)
         service._send_chart_image.assert_not_awaited()
+
+    def test_help_examples_use_real_streamer_and_group_data(self):
+        service = TelegramBotService()
+        text = service._collage_help_text(
+            [{"username": "alpha"}, {"username": "beta"}],
+            [
+                {"name": "Team Alpha", "member_count": 2},
+                {"name": "Leere Gruppe", "member_count": 0},
+            ],
+        )
+        self.assertIn("/collage @alpha 7d eur 2x2", text)
+        self.assertIn("scope=gruppe:Team+Alpha", text)
+        self.assertIn("streamer|@beta|7d|coins", text)
+        self.assertNotIn("@alice", text)
+        self.assertNotIn("gruppe:Leere+Gruppe", text)
+
+    def test_help_examples_fall_back_without_data(self):
+        service = TelegramBotService()
+        text = service._collage_help_text([], [])
+        self.assertIn("Noch keine Streamer oder Gruppen", text)
 
 
 if __name__ == "__main__":

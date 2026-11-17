@@ -2672,7 +2672,63 @@ class TelegramBotService:
                 pass
         return list(context.args or [])
 
-    def _collage_help_text(self) -> str:
+    @staticmethod
+    def _collage_group_token(name: str) -> str:
+        """Baut aus einem echten Gruppennamen einen kopierbaren Scope-Token."""
+        return "gruppe:" + str(name or "").strip().replace(" ", "+")
+
+    def _collage_examples(
+        self,
+        streamers: Optional[List[Dict[str, Any]]] = None,
+        groups: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[str]:
+        """Erzeugt Help-Beispiele aus den tatsächlich vorhandenen Daten."""
+        streamer_names: List[str] = []
+        for row in streamers or []:
+            username = str(row.get("username") or "").strip().lstrip("@")
+            if username and username not in streamer_names:
+                streamer_names.append(username)
+
+        group_names: List[str] = []
+        for group in groups or []:
+            name = str(group.get("name") or "").strip()
+            if (
+                name
+                and int(group.get("member_count") or 0) > 0
+                and name not in group_names
+            ):
+                group_names.append(name)
+
+        examples: List[str] = []
+        if streamer_names:
+            examples.append(
+                f"▪ <code>/collage @{html.escape(streamer_names[0])} 7d eur 2x2</code>"
+            )
+        if group_names:
+            token = html.escape(self._collage_group_token(group_names[0]))
+            examples.append(
+                f"▪ <code>/collage scope={token} period=30d metric=coins "
+                "views=verlauf,streamer,geschenke</code>"
+            )
+        if len(streamer_names) >= 2:
+            first = html.escape(streamer_names[0])
+            second = html.escape(streamer_names[1])
+            examples.append(
+                f'▪ <code>/collage views="verlauf|@{first}|24h|eur,'
+                f'streamer|@{second}|7d|coins"</code>'
+            )
+        if not examples:
+            examples.append(
+                "▪ Noch keine Streamer oder Gruppen vorhanden. "
+                "Nach <code>/add</code> erscheinen hier automatisch echte Beispiele."
+            )
+        return examples
+
+    def _collage_help_text(
+        self,
+        streamers: Optional[List[Dict[str, Any]]] = None,
+        groups: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
         max_tiles = int(config.telegram_collage_max_tiles or 9)
         cooldown = int(config.telegram_collage_cooldown_seconds or 0)
         return "\n".join(
@@ -2704,12 +2760,8 @@ class TelegramBotService:
                 "<i>Nicht gesetzte Felder erben die globalen Optionen. "
                 "Leerzeichen in Gruppennamen als <code>+</code> schreiben.</i>",
                 "",
-                "<b>BEISPIELE</b>",
-                "▪ <code>/collage @alice 7d eur 2x2</code>",
-                "▪ <code>/collage scope=gruppe:Team period=30d metric=coins "
-                "views=verlauf,streamer,geschenke</code>",
-                "▪ <code>/collage views=\"verlauf|@alice|24h|eur,"
-                "streamer|@bob|7d|coins\"</code>",
+                "<b>BEISPIELE AUS DEINER INSTANZ</b>",
+                *self._collage_examples(streamers, groups),
             ]
         )
 
@@ -2776,8 +2828,20 @@ class TelegramBotService:
 
         args = self._raw_command_args(update, context)
         if not args or str(args[0]).lower() in ("help", "hilfe", "?", "h"):
+            streamers: List[Dict[str, Any]] = []
+            groups: List[Dict[str, Any]] = []
+            try:
+                streamers, groups = await asyncio.gather(
+                    asyncio.to_thread(list_streamers_for_picker),
+                    asyncio.to_thread(list_streamer_groups),
+                )
+            except Exception as exc:
+                self._log(
+                    "DEBUG",
+                    f"Kollagen-Beispiele konnten nicht geladen werden: {exc}",
+                )
             await update.effective_message.reply_text(
-                self._collage_help_text(),
+                self._collage_help_text(streamers, groups),
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )

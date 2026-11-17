@@ -50,6 +50,10 @@ Nicht gesetzte Felder erben die globalen Optionen. Beispiel:
 
 ## Beispiele
 
+Die Beispiele unter `/collage help` werden dynamisch aus den tatsächlich
+vorhandenen Streamern und Gruppen der Instanz erzeugt. Die folgenden Aufrufe
+zeigen die Syntax unabhängig von konkreten Daten:
+
 ```text
 /collage @alice 7d eur 2x2
 /collage scope=gruppe:Team period=30d metric=coins views=verlauf,streamer,geschenke
