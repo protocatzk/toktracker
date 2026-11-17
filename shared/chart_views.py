@@ -123,6 +123,7 @@ _ANALYTICS_TTL = {
     "24h": 30.0,
     "7d": 120.0,
     "30d": 300.0,
+    "all": 600.0,
 }
 _ANALYTICS_CACHE_MAX = 128
 _analytics_cache: "OrderedDict[str, Tuple[float, Dict[str, Any]]]" = OrderedDict()

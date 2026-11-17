@@ -54,6 +54,7 @@ WHERE 7d AND eur
 WHERE period = 7d UND metric = coins
 ```
 
+Zeiträume: `today`, `24h`, `7d`, `30d`, `all` (= gesamter Datenbestand).
 Kurzform und deutsche Aliase (`UND`, `WO`, `VON`, `TITEL`, `RASTER`, `NEU`)
 werden unterstützt.
 
@@ -80,7 +81,7 @@ Die bisherige Syntax bleibt vollständig gültig:
 | `scope=@name` | Streamer-Scope |
 | `scope=gruppe:Name` | Streamer-Gruppe (Leerzeichen als `+`) |
 | `scope=all` | Globaler Scope |
-| `period=today\|24h\|7d\|30d` | Zeitraum |
+| `period=today\|24h\|7d\|30d\|all` | Zeitraum (`all` = gesamter Datenbestand) |
 | `metric=eur\|coins` | Metrik |
 | `layout=SPALTENxZEILEN` | Raster, z. B. `2x2` (max. `3x3`) |
 | `views=...` | Komma-getrennte Kacheln |

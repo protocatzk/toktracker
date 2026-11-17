@@ -22,7 +22,7 @@ WIDGET_MAX_HTML_BYTES = 32768
 WIDGET_MAX_COMPRESSED_BYTES = 4096
 WIDGET_HEIGHT = 232
 
-CHART_PERIODS = ("today", "24h", "7d", "30d")
+CHART_PERIODS = ("today", "24h", "7d", "30d", "all")
 CHART_METRICS = ("eur", "coins")
 
 PERIOD_LABELS = {
@@ -30,6 +30,7 @@ PERIOD_LABELS = {
     "24h": "24 STUNDEN",
     "7d": "7 TAGE",
     "30d": "30 TAGE",
+    "all": "GESAMT",
 }
 
 METRIC_LABELS = {
@@ -49,6 +50,11 @@ _PERIOD_ALIASES = {
     "30d": "30d",
     "monat": "30d",
     "month": "30d",
+    "all": "all",
+    "gesamt": "all",
+    "total": "all",
+    "alltime": "all",
+    "all-time": "all",
 }
 
 _METRIC_ALIASES = {

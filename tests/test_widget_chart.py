@@ -144,6 +144,14 @@ class TestChartTimeline(unittest.TestCase):
             self.assertIn("eur_net", row)
             self.assertIn("coins", row)
 
+    def test_all_time_period_is_supported(self):
+        from shared.database import get_chart_timeline
+
+        data = get_chart_timeline("all", force_refresh=True)
+        self.assertEqual(data["period"], "all")
+        self.assertIn("timeline", data)
+        self.assertIn("eur_net", data["totals"])
+
     def test_streamer_filter(self):
         from datetime import datetime
 
@@ -214,6 +222,7 @@ class TestChartWidget(unittest.TestCase):
     def test_period_and_metric_normalization(self):
         self.assertEqual(wc.normalize_period("Woche"), "7d")
         self.assertEqual(wc.normalize_period("monat"), "30d")
+        self.assertEqual(wc.normalize_period("gesamt"), "all")
         self.assertEqual(wc.normalize_period("unbekannt"), "24h")
         self.assertEqual(wc.normalize_metric("€"), "eur")
         self.assertEqual(wc.normalize_metric("diamonds"), "coins")

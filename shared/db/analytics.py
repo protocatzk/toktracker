@@ -34,7 +34,7 @@ _OVERVIEW_CACHE_TTL = 6.0  # verhindert Doppel-Berechnungen bei raschen/parallel
 # Aggregation ist mit 20-55 s zu teuer für interaktive Bot-Charts.
 _chart_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _chart_cache_lock = threading.Lock()
-_CHART_CACHE_TTL = {"today": 30.0, "24h": 30.0, "7d": 120.0, "30d": 300.0}
+_CHART_CACHE_TTL = {"today": 30.0, "24h": 30.0, "7d": 120.0, "30d": 300.0, "all": 600.0}
 
 
 def _scope_streamer_ids(
@@ -1191,7 +1191,7 @@ def get_chart_timeline(
     Ergebnisse werden pro Zeitraum/Scope kurz gecacht (30 s für Today/24h,
     2-5 Minuten für 7d/30d).
     """
-    norm = period if period in ("today", "24h", "7d", "30d") else "24h"
+    norm = period if period in ("today", "24h", "7d", "30d", "all") else "24h"
     sid = int(streamer_id) if streamer_id else None
     scope_ids = _scope_streamer_ids(sid, group_id)
     cache_key = f"{norm}:{('s' + str(sid)) if sid else ('g' + str(group_id) if group_id else 'all')}"
@@ -1208,8 +1208,12 @@ def get_chart_timeline(
     hourly = norm in ("today", "24h")
     substr_len = 13 if hourly else 10
     scope_condition, scope_params = _scope_sql("streamer_id", scope_ids)
-    where_sql = f"created_at >= ? AND {scope_condition}"
-    params: List[Any] = [cutoff, *scope_params]
+    if cutoff is None:
+        where_sql = scope_condition
+        params: List[Any] = list(scope_params)
+    else:
+        where_sql = f"created_at >= ? AND {scope_condition}"
+        params = [cutoff, *scope_params]
 
     with get_db() as conn:
         rows = conn.execute(

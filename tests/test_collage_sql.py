@@ -109,6 +109,11 @@ class TestCollageSqlParser(unittest.TestCase):
         request = _parse("SELECT verlauf FROM ALL WHERE 7d")
         self.assertEqual(request.tiles[0].scope_ref, "")
 
+    def test_all_time_period(self):
+        request = _parse("SELECT verlauf, streamer FROM ALL WHERE all AND eur")
+        self.assertEqual(request.tiles[0].period, "all")
+        self.assertEqual(request.tiles[1].period, "all")
+
     def test_where_comma_and_unquoted_title(self):
         request = _parse(
             "SELECT verlauf FROM @alpha WHERE period=7d,metric=coins "

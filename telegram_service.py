@@ -1460,7 +1460,7 @@ class TelegramBotService:
             sections.append(
                 bf.eyebrow("📊 02 / STATISTIK") + "\n"
                 "▪ 📊 <code>/overview [heute|24h|7d|30d|all] [gruppe:&lt;name&gt;]</code> — Finanz-Dashboard\n"
-                "▪ 📈 <code>/chart [@streamer|gruppe:&lt;name&gt;] [24h|7d|30d] [eur|coins] [verlauf|streamer|tageszeit|geschenke|spender]</code> — Chart (Picker via 📺)\n"
+                "▪ 📈 <code>/chart [@streamer|gruppe:&lt;name&gt;] [today|24h|7d|30d|gesamt] [eur|coins] [verlauf|streamer|tageszeit|geschenke|spender]</code> — Chart (Picker via 📺)\n"
                 "▪ 📋 <code>/report [stunden] [gruppe:&lt;name&gt;]</code> — Gesamtbericht (optional je Gruppe)\n"
                 "▪ 🔍 <code>/streamer &lt;username&gt; [stunden]</code> — Detailbericht\n"
                 "▪ ⚙️ <code>/status</code> — Laufzeit-Status der TikTokLive-Worker"
@@ -2474,6 +2474,8 @@ class TelegramBotService:
                 period = "7d"
             elif arg in ("30d", "monat", "month"):
                 period = "30d"
+            elif arg in ("gesamt", "total", "alltime", "all-time"):
+                period = "all"
             elif arg in ("eur", "euro", "€", "netto"):
                 metric = "eur"
             elif arg in ("coins", "coin", "diamonds"):
@@ -2761,7 +2763,8 @@ class TelegramBotService:
                 "▪ <b>Scope:</b> <code>@name</code>, <code>STREAMER name</code>, "
                 "<code>GROUP \"Team Name\"</code>, <code>ALL</code>",
                 "▪ <b>WHERE:</b> <code>period=7d AND metric=eur</code> "
-                "oder kurz <code>7d AND eur</code>",
+                "oder kurz <code>7d AND eur</code>; Zeiträume "
+                "<code>today, 24h, 7d, 30d, all</code>",
                 "▪ <b>UNION ALL:</b> weitere Kacheln mit eigenem "
                 "<code>FROM</code>/<code>WHERE</code> und <code>AS 'Label'</code>",
                 "▪ <b>Optional:</b> <code>GRID</code>/<code>LAYOUT</code>, "
