@@ -57,7 +57,7 @@ Dieses Dokument dient KI-Agenten und Entwicklern als schneller, präziser Leitfa
 
 | Datei / Verzeichnis | Rolle & Hauptaufgaben |
 | :--- | :--- |
-| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `api_deps.py` (FastAPI-Auth-Dependencies), `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
+| [`shared/`](./shared) | **Monorepo Shared Package**: Beinhaltet `config.py`, `schemas.py`, `contracts.py`, `auth_store.py`, `api_deps.py` (FastAPI-Auth-Dependencies), `monitor_client.py`, `bot_client.py`, `privacy.py`, `ratelimit.py`, die Chart-Renderer (`widget_chart.py`, `chart_image.py`, `chart_views.py`), die Produktversion (`version.py`, Single Source of Truth) sowie die Bus-Abstraktionen (`shared/bus/redis_bus.py`, `memory_bus.py`). |
 | [`shared/db/`](./shared/db) | **Datenbank-Paket**: `_base` (Pool, MariaDB-Verbindung, `get_db`), `schema`, `settings`, `users`, `streamers`, `groups`, `gifts`, `battles`, `donors`, `analytics`, `chat`, `web_analytics`. [`shared/database.py`](./shared/database.py) ist nur noch Re-Export-Fassade. |
 | [`services/api/`](./services/api) / [`app.py`](./app.py) | **Web-Dashboard & REST-API Service (FastAPI)**. Verwaltet Web-Routen (`/`, `/panel`, `/public`, `/login`, `/admin`), REST-API (`/api/*`), Auth und CSV-Exporte. Läuft in Produktion mit 2 Uvicorn-Workern und `uvloop`. |
 | [`routers/`](./routers) | **Ausgelagerte FastAPI-Router**: `revenue`, `exports`, `system`, `access`. Sie werden in `app.py` per `include_router` registriert; Pfade und Berechtigungen bleiben unverändert. Neue fachliche Schnitte gehören hierher, nicht in `app.py`. |
@@ -260,7 +260,9 @@ Kurzregeln für neue Seiten:
 - Nur Tokens/Komponenten aus [`static/brand.css`](./static/brand.css) verwenden. Keine Inline-Styles, Gradients, Glows oder hardcodierten Farben.
 - Dark **und** Light prüfen; die Mini-App ist eingefroren (Legacy) und bleibt dark-only.
 - Sichtbare Marke ist `brand_name`/`brand_wordmark` (`TT-INTELLIGENCE`). Technische Identifier (`toktracker_session`, `toktracker_*`, Redis-/Docker-/DB-Namen) bleiben unverändert.
-- Bei CSS-/JS-Änderungen die `?v=`-Version in den Templates erhöhen.
+- Bei CSS-/JS-Änderungen die `?v=`-Version der betroffenen Datei in den Templates erhöhen.
+  Diese Asset-Token sind Datei-Cache-Buster und **unabhängig** von der Produktversion
+  (`shared/version.py`); die Produktversion wird im Footer und in `/api/health` angezeigt.
 - [`tests/test_branding.py`](./tests/test_branding.py) und [`tests/test_frontend_assets.py`](./tests/test_frontend_assets.py) bei neuen Seiten/Assets mitpflegen.
 
 ---

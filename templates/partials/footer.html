@@ -1,6 +1,6 @@
 <footer class="app-footer">
     <div class="footer-inner">
-        <div>{{ brand_name }} · {{ brand_tagline }}</div>
+        <div>{{ brand_name }} · {{ brand_tagline }} <span class="mono muted">v{{ app_version }}</span></div>
         <nav class="footer-links" aria-label="Footer">
             <a href="public">Public Panel</a>
             {% if miniapp_enabled() %}<a href="miniapp" target="_blank" rel="noopener">Mini-App ↗</a>{% endif %}

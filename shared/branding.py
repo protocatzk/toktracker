@@ -10,6 +10,8 @@ erfolgen kann.
 
 from typing import Dict
 
+from shared.version import __version__
+
 # Marke (durchgehend uppercase, industrieller Stil der Startseite)
 BRAND_NAME = "TT-INTELLIGENCE"
 BRAND_WORDMARK = "TT-INTELLIGENCE"
@@ -30,4 +32,5 @@ def brand_context() -> Dict[str, str]:
         "brand_short": BRAND_SHORT,
         "brand_tagline": BRAND_TAGLINE,
         "brand_legacy": BRAND_LEGACY,
+        "app_version": __version__,
     }

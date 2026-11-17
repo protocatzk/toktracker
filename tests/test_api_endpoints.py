@@ -62,6 +62,7 @@ class TestApiEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["status"], "ok")
         self.assertEqual(body["database"], "ok")
         self.assertIn("bus", body)
+        self.assertRegex(body["version"], r"^\d+\.\d+\.\d+$")
 
     async def test_api_docs_are_disabled_by_default(self):
         for path in ("/docs", "/redoc", "/openapi.json"):

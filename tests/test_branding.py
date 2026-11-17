@@ -120,5 +120,20 @@ class TestBotFormatting(unittest.TestCase):
         self.assertTrue(all(len(chunk) <= 1000 for chunk in chunks))
 
 
+class TestVersioning(unittest.TestCase):
+    def test_version_is_central_and_semver(self):
+        from shared.branding import brand_context
+        from shared.version import VERSION, __version__
+
+        self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(VERSION, __version__)
+        self.assertEqual(__version__, "3.0.0")
+        self.assertEqual(brand_context()["app_version"], __version__)
+
+    def test_footer_shows_version(self):
+        footer = _read("templates", "partials", "footer.html")
+        self.assertIn("app_version", footer)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@
 > Datenbank-Namen) bleiben aus Kompatibilitätsgründen unter `toktracker`.
 > Die Marken-Konstanten liegen zentral in [`shared/branding.py`](./shared/branding.py).
 
+![Version](https://img.shields.io/badge/version-3.0.0-2ea043)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)

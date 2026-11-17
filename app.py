@@ -130,6 +130,7 @@ from shared.permissions import (
 )
 from shared.privacy import apply_public_privacy, mask_donor_rows
 from shared.ratelimit import check_rate_limit, reset_rate_limit
+from shared.version import __version__
 from system_service import get_system_health
 from telegram_service import (
     generate_full_report_data,
@@ -2859,7 +2860,7 @@ async def api_health():
     Schlanker Healthcheck: prüft DB-Verbindung und (falls konfiguriert) den Bus.
     Liefert 200 bei OK und 503 bei Degradierung – ohne interne Details preiszugeben.
     """
-    health = {"status": "ok", "database": "ok", "bus": "ok"}
+    health = {"status": "ok", "database": "ok", "bus": "ok", "version": __version__}
 
     try:
         await asyncio.to_thread(_db_ping_sync)
