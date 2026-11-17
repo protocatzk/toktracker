@@ -184,12 +184,6 @@ class DailyBotReportResponse(BaseModel):
     telegram_html: str
 
 
-class SqliteImportRequest(BaseModel):
-    file_path: Optional[str] = None
-    tables: Optional[List[str]] = None
-    mode: str = "merge"  # "merge" oder "clean"
-
-
 class MiniAppAuthRequest(BaseModel):
     init_data: str = Field(..., description="Raw window.Telegram.WebApp.initData query string")
 
