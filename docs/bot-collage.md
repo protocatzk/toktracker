@@ -14,12 +14,66 @@ gezielt an einzelne Konten vergeben oder entzogen werden.
 ## Aufruf
 
 ```text
-/collage [optionen] [kacheln]
+/collage SELECT <ansichten> FROM <scope> WHERE <filter> GRID <raster> TITLE '<titel>'
 ```
 
-Ohne Argumente oder mit `/collage help` zeigt der Bot die kompakte Hilfe.
+Ohne Argumente oder mit `/collage help` zeigt der Bot die kompakte Hilfe mit
+Beispielen aus der eigenen Instanz.
 
-### Globale Optionen
+## SQL-Modus (empfohlen)
+
+Die SQL-inspirierte Syntax wird vollständig auf die bestehenden sicheren
+Kollagen-Parameter abgebildet. Es wird **kein SQL** an die Datenbank gesendet.
+
+| Klausel | Bedeutung |
+| :--- | :--- |
+| `SELECT` | Chart-Ansichten / Kacheln |
+| `FROM` | Streamer, Gruppe oder `ALL` |
+| `WHERE` | Zeitraum und Metrik |
+| `AS` | optionales Kachel-Label |
+| `UNION ALL` | weitere Kacheln mit eigenem `FROM`/`WHERE` |
+| `GRID` / `LAYOUT` | Raster, z. B. `2x2` (max. `3x3`) |
+| `TITLE` | Kopfzeile |
+| `REFRESH` | Caches umgehen |
+
+### Scopes
+
+```text
+FROM @streamer
+FROM STREAMER streamer
+FROM GROUP "Team Name"
+FROM gruppe:Team+Name
+FROM ALL
+```
+
+### WHERE
+
+```text
+WHERE period=7d AND metric=eur
+WHERE 7d AND eur
+WHERE period = 7d UND metric = coins
+```
+
+Kurzform und deutsche Aliase (`UND`, `WO`, `VON`, `TITEL`, `RASTER`, `NEU`)
+werden unterstützt.
+
+### Beispiele
+
+```text
+/collage SELECT verlauf, streamer, tageszeit, geschenke FROM @alice WHERE 7d AND eur GRID 2x2 TITLE 'ALICE · 7T'
+```
+
+```text
+/collage SELECT streamer, geschenke, spender FROM GROUP "Team Alpha" WHERE 30d AND coins
+```
+
+```text
+/collage SELECT verlauf AS 'TOP 1' FROM @alice WHERE 24h AND eur UNION ALL SELECT verlauf AS 'TOP 2' FROM @bob WHERE 24h AND coins GRID 2x1
+```
+
+## Klassische Syntax
+
+Die bisherige Syntax bleibt vollständig gültig:
 
 | Option | Bedeutung |
 | :--- | :--- |
@@ -46,18 +100,6 @@ Nicht gesetzte Felder erben die globalen Optionen. Beispiel:
 
 ```text
 /collage views="verlauf|@alice|24h|eur,streamer|@bob|7d|coins,geschenke|all|30d|eur|label=Q4"
-```
-
-## Beispiele
-
-Die Beispiele unter `/collage help` werden dynamisch aus den tatsächlich
-vorhandenen Streamern und Gruppen der Instanz erzeugt. Die folgenden Aufrufe
-zeigen die Syntax unabhängig von konkreten Daten:
-
-```text
-/collage @alice 7d eur 2x2
-/collage scope=gruppe:Team period=30d metric=coins views=verlauf,streamer,geschenke
-/collage title="Wochenreport" views=verlauf,streamer,tageszeit,geschenke,spender
 ```
 
 ## Schutzmechanismen

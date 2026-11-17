@@ -95,6 +95,7 @@ from shared.chart_views import (
 from shared.chart_views import (
     VIEW_LABELS as CHART_VIEW_LABELS,
 )
+from shared.collage_sql import parse_collage_sql
 from shared.contracts import CHANNEL_LIVE_STATUS
 from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
@@ -1316,9 +1317,13 @@ class TelegramBotService:
                 if token.lower().lstrip("/") == bot_tag:
                     cleaned = cleaned.replace(token, "", 1).strip()
 
-        parts = cleaned.split()
+        parts = cleaned.split(None, 1)
         cmd = parts[0].lower().lstrip("/") if parts else "help"
-        context.args = parts[1:] if len(parts) > 1 else []
+        raw_args = parts[1] if len(parts) > 1 else ""
+        try:
+            context.args = shlex.split(raw_args)
+        except ValueError:
+            context.args = raw_args.split()
 
         if cmd not in GROUP_TEXT_COMMANDS:
             # Replies auf Bot-Nachrichten ohne echten Befehl bleiben stumm.
@@ -2673,16 +2678,17 @@ class TelegramBotService:
         return list(context.args or [])
 
     @staticmethod
-    def _collage_group_token(name: str) -> str:
-        """Baut aus einem echten Gruppennamen einen kopierbaren Scope-Token."""
-        return "gruppe:" + str(name or "").strip().replace(" ", "+")
+    def _sql_quote(value: str) -> str:
+        """Quoted-Bezeichner für die SQL-DSL (shlex-kompatibel)."""
+        text = str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{text}"'
 
     def _collage_examples(
         self,
         streamers: Optional[List[Dict[str, Any]]] = None,
         groups: Optional[List[Dict[str, Any]]] = None,
     ) -> List[str]:
-        """Erzeugt Help-Beispiele aus den tatsächlich vorhandenen Daten."""
+        """Erzeugt SQL-Beispiele aus den tatsächlich vorhandenen Daten."""
         streamer_names: List[str] = []
         for row in streamers or []:
             username = str(row.get("username") or "").strip().lstrip("@")
@@ -2701,21 +2707,24 @@ class TelegramBotService:
 
         examples: List[str] = []
         if streamer_names:
+            first = html.escape(streamer_names[0], quote=False)
             examples.append(
-                f"▪ <code>/collage @{html.escape(streamer_names[0])} 7d eur 2x2</code>"
+                f"▪ <code>/collage SELECT verlauf, streamer, tageszeit, geschenke "
+                f"FROM @{first} WHERE 7d AND eur GRID 2x2</code>"
             )
         if group_names:
-            token = html.escape(self._collage_group_token(group_names[0]))
+            group = html.escape(self._sql_quote(group_names[0]), quote=False)
             examples.append(
-                f"▪ <code>/collage scope={token} period=30d metric=coins "
-                "views=verlauf,streamer,geschenke</code>"
+                f"▪ <code>/collage SELECT streamer, geschenke, spender "
+                f"FROM GROUP {group} WHERE 30d AND coins</code>"
             )
         if len(streamer_names) >= 2:
-            first = html.escape(streamer_names[0])
-            second = html.escape(streamer_names[1])
+            first = html.escape(streamer_names[0], quote=False)
+            second = html.escape(streamer_names[1], quote=False)
             examples.append(
-                f'▪ <code>/collage views="verlauf|@{first}|24h|eur,'
-                f'streamer|@{second}|7d|coins"</code>'
+                f"▪ <code>/collage SELECT verlauf AS 'TOP 1' FROM @{first} "
+                f"WHERE 24h AND eur UNION ALL SELECT verlauf AS 'TOP 2' "
+                f"FROM @{second} WHERE 24h AND coins GRID 2x1</code>"
             )
         if not examples:
             examples.append(
@@ -2744,21 +2753,21 @@ class TelegramBotService:
                     ]
                 ),
                 bf.rule(),
-                "<b>AUFRUF</b>",
-                "<code>/collage [optionen] [kacheln]</code>",
-                "",
-                "<b>GLOBALE OPTIONEN</b>",
-                "▪ <code>scope=@name|gruppe:Name|all</code>",
-                "▪ <code>period=today|24h|7d|30d</code>",
-                "▪ <code>metric=eur|coins</code>",
-                "▪ <code>layout=SPALTENxZEILEN</code> — z. B. <code>2x2</code>",
-                "▪ <code>views=verlauf,streamer,tageszeit,geschenke,spender</code>",
-                "▪ <code>title=...</code> und <code>refresh=1</code>",
-                "",
-                "<b>KACHEL-SYNTAX</b>",
-                "<code>ansicht|scope|zeitraum|metrik|label=...</code>",
-                "<i>Nicht gesetzte Felder erben die globalen Optionen. "
-                "Leerzeichen in Gruppennamen als <code>+</code> schreiben.</i>",
+                "<b>SQL-MODUS</b>",
+                "<code>/collage SELECT ansichten FROM scope "
+                "WHERE 7d AND eur GRID 2x2 TITLE '...'</code>",
+                "▪ <b>Ansichten:</b> <code>verlauf, streamer, tageszeit, "
+                "geschenke, spender</code>",
+                "▪ <b>Scope:</b> <code>@name</code>, <code>STREAMER name</code>, "
+                "<code>GROUP \"Team Name\"</code>, <code>ALL</code>",
+                "▪ <b>WHERE:</b> <code>period=7d AND metric=eur</code> "
+                "oder kurz <code>7d AND eur</code>",
+                "▪ <b>UNION ALL:</b> weitere Kacheln mit eigenem "
+                "<code>FROM</code>/<code>WHERE</code> und <code>AS 'Label'</code>",
+                "▪ <b>Optional:</b> <code>GRID</code>/<code>LAYOUT</code>, "
+                "<code>TITLE</code>, <code>REFRESH</code>",
+                "<i>Die klassische Syntax <code>/collage @name 7d eur 2x2</code> "
+                "bleibt weiterhin gültig.</i>",
                 "",
                 "<b>BEISPIELE AUS DEINER INSTANZ</b>",
                 *self._collage_examples(streamers, groups),
@@ -2856,10 +2865,12 @@ class TelegramBotService:
             return
 
         try:
-            request = parse_collage_args(
-                args,
-                max_tiles=int(config.telegram_collage_max_tiles or 9),
-            )
+            max_tiles = int(config.telegram_collage_max_tiles or 9)
+            first_arg = str(args[0]).lower() if args else ""
+            if first_arg in ("select", "sql", "query"):
+                request = parse_collage_sql(args, max_tiles=max_tiles)
+            else:
+                request = parse_collage_args(args, max_tiles=max_tiles)
         except CollageError as exc:
             await update.effective_message.reply_text(
                 bf.eyebrow("⚠️ KOLLAGE-PARAMETER")

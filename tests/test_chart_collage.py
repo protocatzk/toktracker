@@ -212,9 +212,40 @@ class TestCollageCommand(unittest.IsolatedAsyncioTestCase):
             await service._cmd_collage(update, context)
         update.effective_message.reply_text.assert_awaited_once()
         text = update.effective_message.reply_text.await_args.args[0]
-        self.assertIn("/collage @alpha 7d eur 2x2", text)
-        self.assertIn("scope=gruppe:Team+Alpha", text)
+        self.assertIn(
+            "SELECT verlauf, streamer, tageszeit, geschenke FROM @alpha "
+            "WHERE 7d AND eur GRID 2x2",
+            text,
+        )
+        self.assertIn('FROM GROUP "Team Alpha"', text)
         service._send_chart_image.assert_not_awaited()
+
+    async def test_command_accepts_sql_mode(self):
+        service, update, context = self._service()
+        update.effective_message.text = (
+            "/collage SELECT verlauf, streamer FROM @alice "
+            "WHERE 7d AND eur GRID 2x1"
+        )
+        context.args = [
+            "SELECT",
+            "verlauf,",
+            "streamer",
+            "FROM",
+            "@alice",
+            "WHERE",
+            "7d",
+            "AND",
+            "eur",
+            "GRID",
+            "2x1",
+        ]
+        collage = SimpleNamespace(png=b"png", caption="caption", digest="digest")
+        with patch(
+            "telegram_service.build_chart_collage", return_value=collage
+        ) as builder:
+            await service._cmd_collage(update, context)
+        self.assertEqual(builder.call_count, 1)
+        service._send_chart_image.assert_awaited_once()
 
     def test_help_examples_use_real_streamer_and_group_data(self):
         service = TelegramBotService()
@@ -225,11 +256,12 @@ class TestCollageCommand(unittest.IsolatedAsyncioTestCase):
                 {"name": "Leere Gruppe", "member_count": 0},
             ],
         )
-        self.assertIn("/collage @alpha 7d eur 2x2", text)
-        self.assertIn("scope=gruppe:Team+Alpha", text)
-        self.assertIn("streamer|@beta|7d|coins", text)
+        self.assertIn("FROM @alpha WHERE 7d AND eur", text)
+        self.assertIn('FROM GROUP "Team Alpha" WHERE 30d AND coins', text)
+        self.assertIn("FROM @beta WHERE 24h AND coins", text)
+        self.assertIn("UNION ALL", text)
         self.assertNotIn("@alice", text)
-        self.assertNotIn("gruppe:Leere+Gruppe", text)
+        self.assertNotIn("Leere Gruppe", text)
 
     def test_help_examples_fall_back_without_data(self):
         service = TelegramBotService()
