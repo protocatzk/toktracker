@@ -131,8 +131,13 @@ class TestVersioning(unittest.TestCase):
         self.assertEqual(brand_context()["app_version"], __version__)
 
     def test_footer_shows_version(self):
-        footer = _read("templates", "partials", "footer.html")
-        self.assertIn("app_version", footer)
+        for parts in (
+            ("templates", "partials", "footer.html"),
+            ("templates", "index.html"),
+            ("templates", "landing.html"),
+        ):
+            with self.subTest(template="/".join(parts)):
+                self.assertIn("app_version", _read(*parts))
 
 
 if __name__ == "__main__":
