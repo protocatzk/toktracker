@@ -177,6 +177,14 @@ class AppConfig:
     telegram_chart_renderer: str = os.getenv(
         "TELEGRAM_CHART_RENDERER", "image"
     ).strip().lower()
+    # Schutz vor Missbrauch der ressourcenintensiven Bilderkollagen:
+    # Mindestabstand pro Nutzer in Sekunden und maximale Kachelanzahl (1-9).
+    telegram_collage_cooldown_seconds: int = int(
+        os.getenv("TELEGRAM_COLLAGE_COOLDOWN_SECONDS", "10")
+    )
+    telegram_collage_max_tiles: int = int(
+        os.getenv("TELEGRAM_COLLAGE_MAX_TILES", "9")
+    )
     # Mini-App ist eingefroren (Legacy). Bei 0 werden /miniapp, /app und /webapp
     # auf das responsive Web-Panel umgeleitet und alle UI-/Bot-Einstiege ausgeblendet.
     miniapp_enabled: bool = os.getenv("MINIAPP_ENABLED", "0").strip().lower() in (
@@ -221,6 +229,12 @@ class AppConfig:
                 self.telegram_chart_renderer,
             )
             self.telegram_chart_renderer = "image"
+        self.telegram_collage_cooldown_seconds = max(
+            0, int(self.telegram_collage_cooldown_seconds or 0)
+        )
+        self.telegram_collage_max_tiles = min(
+            9, max(1, int(self.telegram_collage_max_tiles or 9))
+        )
 
     def _init_session_secret(self) -> None:
         """

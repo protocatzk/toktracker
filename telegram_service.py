@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import shlex
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta
@@ -78,6 +79,13 @@ from shared import bot_format as bf
 from shared.auth_store import AdminAuthManager, admin_auth_manager
 from shared.bot_format import BRAND as BOT_BRAND
 from shared.bus import get_bus
+from shared.chart_collage import (
+    CollageError,
+    CollageRequest,
+    CollageTile,
+    build_chart_collage,
+    parse_collage_args,
+)
 from shared.chart_image import build_chart_image
 from shared.chart_views import (
     CHART_VIEWS,
@@ -92,6 +100,7 @@ from shared.monitor_client import monitor_client as monitor_manager
 from shared.permissions import (
     PERM_BOT_ADMIN_LOGIN,
     PERM_BOT_ANALYTICS_VIEW,
+    PERM_BOT_COLLAGE_RENDER,
     PERM_BOT_CRM_EDIT,
     PERM_BOT_PUBLIC_VIEW,
     PERM_BOT_RADAR_VIEW,
@@ -127,6 +136,13 @@ GROUP_TEXT_COMMANDS = frozenset(
         "charts",
         "graph",
         "diagramm",
+        "collage",
+        "kollage",
+        "collagen",
+        "kollagen",
+        "bildcollage",
+        "bilderkollage",
+        "mosaik",
         "radar",
         "whales_radar",
         "whales",
@@ -324,6 +340,8 @@ class TelegramBotService:
         self._live_alert_subscribed: bool = False
         self._live_alert_lock: Optional[asyncio.Lock] = None
         self._chart_file_ids: "OrderedDict[str, str]" = OrderedDict()
+        self._collage_lock: Optional[asyncio.Lock] = None
+        self._collage_last_run: Dict[int, float] = {}
 
     def _log(self, level: str, msg: str) -> None:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -400,6 +418,21 @@ class TelegramBotService:
             self._app.add_handler(CommandHandler(["overview", "dashboard", "finanzen"], self._cmd_overview))
             self._app.add_handler(
                 CommandHandler(["chart", "charts", "graph", "diagramm"], self._cmd_chart)
+            )
+            self._app.add_handler(
+                CommandHandler(
+                    [
+                        "collage",
+                        "kollage",
+                        "collagen",
+                        "kollagen",
+                        "bildcollage",
+                        "bilderkollage",
+                        "mosaik",
+                        "mosaic",
+                    ],
+                    self._cmd_collage,
+                )
             )
             self._app.add_handler(CommandHandler(["radar", "whales_radar"], self._cmd_radar))
             self._app.add_handler(CommandHandler(["whales", "whale_alerts", "alerts"], self._cmd_whales))
@@ -507,6 +540,7 @@ class TelegramBotService:
             BotCommand("start", "🏠 Hauptmenü & Befehlsübersicht öffnen"),
             BotCommand("overview", "📊 Finanz-Dashboard (Heute, 24h, 7d; optional gruppe:<name>)"),
             BotCommand("chart", "📈 Charts: Verlauf, Streamer, Tageszeit, Geschenke, Spender"),
+            BotCommand("collage", "🖼️ [Admin] Bilderkollage aus mehreren Chart-Ansichten"),
             BotCommand("radar", "🎯 Spender-Radar & Rangliste nach Tiers (Whales, Sharks)"),
             BotCommand("whales", "🐋 Live-Stream der neuesten Großspenden"),
             BotCommand("donor", "👤 Spender-Dossier, Stammkanal & VIP (<username>)"),
@@ -718,6 +752,9 @@ class TelegramBotService:
         except Exception:
             pass
         self._app = None
+        # Locks sind an den laufenden Event-Loop gebunden; ein Neustart des
+        # Bots darf keinen Lock aus einem geschlossenen Loop wiederverwenden.
+        self._collage_lock = None
 
     # =================================================================
     # TELEGRAM ADMIN-PANEL AUTHENTIFIZIERUNG (OTP + 1-KLICK FREIGABE)
@@ -1296,6 +1333,17 @@ class TelegramBotService:
             await self._cmd_overview(update, context)
         elif cmd in ("chart", "charts", "graph", "diagramm"):
             await self._cmd_chart(update, context)
+        elif cmd in (
+            "collage",
+            "kollage",
+            "collagen",
+            "kollagen",
+            "bildcollage",
+            "bilderkollage",
+            "mosaik",
+            "mosaic",
+        ):
+            await self._cmd_collage(update, context)
         elif cmd in ("radar", "whales_radar"):
             await self._cmd_radar(update, context)
         elif cmd in ("whales", "whale_alerts", "alerts"):
@@ -1426,6 +1474,10 @@ class TelegramBotService:
         admin_lines: List[str] = []
         if PERM_BOT_ADMIN_LOGIN in perms:
             admin_lines.append("▪ 🔐 <code>/login</code> — Einmal-Code für das Web-Panel")
+        if PERM_BOT_COLLAGE_RENDER in perms:
+            admin_lines.append(
+                "▪ 🖼️ <code>/collage help</code> — Bilderkollage aus mehreren Chart-Kacheln"
+            )
         if PERM_BOT_STREAMERS_MANAGE in perms:
             admin_lines.append("▪ ➕ <code>/add &lt;username&gt;</code> — Streamer anlegen")
             admin_lines.append("▪ ▶️ <code>/track</code> | ⏹️ <code>/stop &lt;username&gt;</code> — Worker steuern")
@@ -1925,7 +1977,7 @@ class TelegramBotService:
         bot: Any,
         chat_id: int,
         image: Any,
-        keyboard: InlineKeyboardMarkup,
+        keyboard: Optional[InlineKeyboardMarkup] = None,
     ) -> Any:
         cached = self._chart_file_id(image.digest)
         try:
@@ -2605,6 +2657,236 @@ class TelegramBotService:
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
+
+    @staticmethod
+    def _raw_command_args(update: Update, context: ContextTypes.DEFAULT_TYPE) -> List[str]:
+        """Liest Argumente möglichst quote-sicher aus dem Rohtext eines Slash-Befehls."""
+        message = getattr(update, "effective_message", None)
+        text = str(getattr(message, "text", "") or "").strip()
+        if text.startswith("/"):
+            parts = text.split(None, 1)
+            rest = parts[1] if len(parts) > 1 else ""
+            try:
+                return shlex.split(rest)
+            except ValueError:
+                pass
+        return list(context.args or [])
+
+    def _collage_help_text(self) -> str:
+        max_tiles = int(config.telegram_collage_max_tiles or 9)
+        cooldown = int(config.telegram_collage_cooldown_seconds or 0)
+        return "\n".join(
+            [
+                bf.header(2, "🖼️ BILDERKOLLAGE"),
+                "<b>MEHRERE CHART-ANSICHTEN IN EINEM BILD</b>",
+                bf.kv_table(
+                    [
+                        ("RECHT", "bot.collage.render"),
+                        ("MAX KACHELN", str(max_tiles)),
+                        ("RASTER", "1x1 bis 3x3"),
+                        ("COOLDOWN", f"{cooldown} s"),
+                    ]
+                ),
+                bf.rule(),
+                "<b>AUFRUF</b>",
+                "<code>/collage [optionen] [kacheln]</code>",
+                "",
+                "<b>GLOBALE OPTIONEN</b>",
+                "▪ <code>scope=@name|gruppe:Name|all</code>",
+                "▪ <code>period=today|24h|7d|30d</code>",
+                "▪ <code>metric=eur|coins</code>",
+                "▪ <code>layout=SPALTENxZEILEN</code> — z. B. <code>2x2</code>",
+                "▪ <code>views=verlauf,streamer,tageszeit,geschenke,spender</code>",
+                "▪ <code>title=...</code> und <code>refresh=1</code>",
+                "",
+                "<b>KACHEL-SYNTAX</b>",
+                "<code>ansicht|scope|zeitraum|metrik|label=...</code>",
+                "<i>Nicht gesetzte Felder erben die globalen Optionen. "
+                "Leerzeichen in Gruppennamen als <code>+</code> schreiben.</i>",
+                "",
+                "<b>BEISPIELE</b>",
+                "▪ <code>/collage @alice 7d eur 2x2</code>",
+                "▪ <code>/collage scope=gruppe:Team period=30d metric=coins "
+                "views=verlauf,streamer,geschenke</code>",
+                "▪ <code>/collage views=\"verlauf|@alice|24h|eur,"
+                "streamer|@bob|7d|coins\"</code>",
+            ]
+        )
+
+    async def _resolve_collage_tiles(
+        self, request: CollageRequest
+    ) -> List[CollageTile]:
+        """Löst Scope-Referenzen der Kacheln gegen die Datenbank auf."""
+        group_cache: Dict[str, Any] = {}
+        streamer_cache: Dict[str, Any] = {}
+        resolved: List[CollageTile] = []
+
+        for tile in request.tiles:
+            scope = str(tile.scope_ref or "").strip()
+            streamer_id: Optional[int] = None
+            streamer_name = ""
+            group_id: Optional[int] = None
+            group_name = ""
+            lowered = scope.lower()
+
+            if lowered.startswith(("gruppe:", "group:", "g:")):
+                name = scope.split(":", 1)[1].strip()
+                key = name.lower()
+                if key not in group_cache:
+                    group_cache[key] = await asyncio.to_thread(
+                        resolve_streamer_group, name
+                    )
+                group = group_cache[key]
+                if not group:
+                    raise CollageError(f"Gruppe '{name}' nicht gefunden.")
+                group_id = int(group["id"])
+                group_name = str(group.get("name") or name)
+            elif scope:
+                username = scope.lstrip("@").strip()
+                key = username.lower()
+                if key not in streamer_cache:
+                    streamer_cache[key] = await asyncio.to_thread(
+                        get_streamer_by_id_or_username, username
+                    )
+                row = streamer_cache[key]
+                if not row:
+                    raise CollageError(f"Streamer @{username} nicht gefunden.")
+                streamer_id = int(row["id"])
+                streamer_name = str(row.get("username") or username)
+
+            resolved.append(
+                CollageTile(
+                    view=tile.view,
+                    period=tile.period,
+                    metric=tile.metric,
+                    streamer_id=streamer_id,
+                    streamer_name=streamer_name,
+                    group_id=group_id,
+                    group_name=group_name,
+                    label=tile.label,
+                )
+            )
+        return resolved
+
+    async def _cmd_collage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_message or not update.effective_chat:
+            return
+        if not await self._authorize(update, require_permission=PERM_BOT_COLLAGE_RENDER):
+            return
+
+        args = self._raw_command_args(update, context)
+        if not args or str(args[0]).lower() in ("help", "hilfe", "?", "h"):
+            await update.effective_message.reply_text(
+                self._collage_help_text(),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            return
+
+        if not config.telegram_widget_charts:
+            await update.effective_message.reply_text(
+                "<b>CHARTS DEAKTIVIERT</b>\n"
+                "Aktiviere <code>TELEGRAM_WIDGET_CHARTS=1</code>, um Kollagen zu nutzen.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        try:
+            request = parse_collage_args(
+                args,
+                max_tiles=int(config.telegram_collage_max_tiles or 9),
+            )
+        except CollageError as exc:
+            await update.effective_message.reply_text(
+                bf.eyebrow("⚠️ KOLLAGE-PARAMETER")
+                + f"\n<b>{html.escape(str(exc))}</b>\n\n"
+                "Hilfe: <code>/collage help</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        user_id = int(update.effective_user.id) if update.effective_user else 0
+        now = time.monotonic()
+        cooldown = int(config.telegram_collage_cooldown_seconds or 0)
+        last_run = self._collage_last_run.get(user_id, 0.0)
+        if cooldown and (now - last_run) < cooldown:
+            remaining = cooldown - (now - last_run)
+            await update.effective_message.reply_text(
+                f"<b>BITTE WARTEN</b>\n"
+                f"Die nächste Kollage ist in <b>{remaining:.1f} s</b> möglich.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        if self._collage_lock is None:
+            self._collage_lock = asyncio.Lock()
+        if self._collage_lock.locked():
+            await update.effective_message.reply_text(
+                "<b>RENDER LÄUFT BEREITS</b>\n"
+                "Bitte warte, bis die aktuelle Kollage fertig ist.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        async with self._collage_lock:
+            self._collage_last_run[user_id] = time.monotonic()
+            if len(self._collage_last_run) > 256:
+                cutoff = now - 3600
+                self._collage_last_run = {
+                    uid: ts
+                    for uid, ts in self._collage_last_run.items()
+                    if ts >= cutoff
+                }
+
+            try:
+                await context.bot.send_chat_action(
+                    chat_id=int(update.effective_chat.id),
+                    action="upload_photo",
+                )
+            except Exception:
+                pass
+
+            started_at = time.perf_counter()
+            try:
+                tiles = await self._resolve_collage_tiles(request)
+                collage = await asyncio.to_thread(
+                    build_chart_collage,
+                    tiles,
+                    request.rows,
+                    request.cols,
+                    request.title,
+                    request.force_refresh,
+                )
+                elapsed = time.perf_counter() - started_at
+                self._log(
+                    "DEBUG",
+                    f"Bilderkollage {request.cols}x{request.rows} "
+                    f"mit {len(tiles)} Kacheln gerendert in {elapsed:.2f}s "
+                    f"({len(collage.png)} Bytes).",
+                )
+                await self._send_chart_image(
+                    context.bot,
+                    int(update.effective_chat.id),
+                    collage,
+                )
+            except CollageError as exc:
+                await update.effective_message.reply_text(
+                    bf.eyebrow("⚠️ KOLLAGE NICHT MÖGLICH")
+                    + f"\n<b>{html.escape(str(exc))}</b>\n\n"
+                    "Hilfe: <code>/collage help</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as exc:
+                self._log(
+                    "ERROR",
+                    f"Bilderkollage fehlgeschlagen: {type(exc).__name__}: {exc}",
+                )
+                await update.effective_message.reply_text(
+                    bf.eyebrow("⚠️ KOLLAGE FEHLGESCHLAGEN")
+                    + "\nDie Kollage konnte nicht gerendert werden.\n"
+                    "Bitte Parameter prüfen oder später erneut versuchen.",
+                    parse_mode=ParseMode.HTML,
+                )
 
     def _chart_failure_text(self, period: str) -> str:
         try:

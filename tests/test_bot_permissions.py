@@ -21,6 +21,7 @@ from shared.permissions import (
     BOT_COMMAND_PERMISSIONS,
     PERM_BOT_ADMIN_LOGIN,
     PERM_BOT_ANALYTICS_VIEW,
+    PERM_BOT_COLLAGE_RENDER,
     PERM_BOT_CRM_EDIT,
     PERM_BOT_PUBLIC_VIEW,
     PERM_BOT_RADAR_VIEW,
@@ -226,6 +227,16 @@ class TestBotRoleMatrix(unittest.TestCase):
             BOT_COMMAND_PERMISSIONS["alert"],
             PERM_BOT_STREAMERS_MANAGE,
         )
+
+    def test_collage_command_is_admin_only(self):
+        self.assertEqual(
+            BOT_COMMAND_PERMISSIONS["collage"],
+            PERM_BOT_COLLAGE_RENDER,
+        )
+        self.assertIn(PERM_BOT_COLLAGE_RENDER, permissions_for(ROLE_ADMIN))
+        self.assertNotIn(PERM_BOT_COLLAGE_RENDER, permissions_for(ROLE_MODERATOR))
+        self.assertTrue(bot_command_allowed("kollage", ROLE_ADMIN))
+        self.assertFalse(bot_command_allowed("kollage", ROLE_MODERATOR))
 
 
 if __name__ == "__main__":

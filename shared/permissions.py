@@ -91,6 +91,8 @@ PERM_BOT_STREAMERS_MANAGE = "bot.streamers.manage"
 PERM_BOT_USERS_MANAGE = "bot.users.manage"
 PERM_BOT_SETTINGS_MANAGE = "bot.settings.manage"
 PERM_BOT_ADMIN_LOGIN = "bot.admin.login"
+# Ressourcenintensives Bild-Rendering: absichtlich nur in der Admin-Rolle.
+PERM_BOT_COLLAGE_RENDER = "bot.collage.render"
 
 # Persönliche Rechte-Overrides
 PERMISSION_EFFECT_GRANT = "grant"
@@ -123,6 +125,7 @@ ALL_PERMISSIONS: FrozenSet[str] = frozenset({
     PERM_BOT_USERS_MANAGE,
     PERM_BOT_SETTINGS_MANAGE,
     PERM_BOT_ADMIN_LOGIN,
+    PERM_BOT_COLLAGE_RENDER,
 })
 
 ROLE_PERMISSIONS: Dict[str, FrozenSet[str]] = {
@@ -176,6 +179,7 @@ PERMISSION_LABELS: Dict[str, str] = {
     PERM_BOT_USERS_MANAGE: "Bot: Whitelist & Rollen verwalten",
     PERM_BOT_SETTINGS_MANAGE: "Bot: Zugriffsmodus umschalten",
     PERM_BOT_ADMIN_LOGIN: "Bot: Web-Admin-Login freigeben",
+    PERM_BOT_COLLAGE_RENDER: "Bot: Bilderkollagen rendern (ressourcenintensiv)",
 }
 
 # ---------------------------------------------------------------------------
@@ -194,6 +198,7 @@ BOT_COMMAND_PERMISSIONS: Dict[str, Optional[str]] = {
     "gifts": PERM_BOT_PUBLIC_VIEW,
     "overview": PERM_BOT_ANALYTICS_VIEW,
     "chart": PERM_BOT_ANALYTICS_VIEW,
+    "collage": PERM_BOT_COLLAGE_RENDER,
     "report": PERM_BOT_ANALYTICS_VIEW,
     "streamer": PERM_BOT_ANALYTICS_VIEW,
     "radar": PERM_BOT_RADAR_VIEW,
@@ -228,6 +233,14 @@ BOT_COMMAND_ALIASES: Dict[str, str] = {
     "graph": "chart",
     "graphs": "chart",
     "diagramm": "chart",
+    "collage": "collage",
+    "kollage": "collage",
+    "collagen": "collage",
+    "kollagen": "collage",
+    "bildcollage": "collage",
+    "bilderkollage": "collage",
+    "mosaik": "collage",
+    "mosaic": "collage",
     "radar": "radar",
     "whales_radar": "radar",
     "whales": "whales",
@@ -276,6 +289,8 @@ BOT_COMMAND_LABELS: Dict[str, str] = {
     "live": "/live",
     "gifts": "/gifts, /geschenke, /ticker",
     "overview": "/overview, /dashboard, /finanzen",
+    "chart": "/chart, /charts",
+    "collage": "/collage, /kollage",
     "report": "/report",
     "streamer": "/streamer, /stats",
     "radar": "/radar",

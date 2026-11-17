@@ -117,6 +117,16 @@ def normalize_period(value: Optional[str]) -> str:
     return _PERIOD_ALIASES.get((value or "").strip().lower(), "24h")
 
 
+def is_period_alias(value: Optional[str]) -> bool:
+    """True, wenn der Wert ein bekannter Zeitraum (inkl. Alias) ist."""
+    return (value or "").strip().lower() in _PERIOD_ALIASES
+
+
+def is_metric_alias(value: Optional[str]) -> bool:
+    """True, wenn der Wert eine bekannte Metrik (inkl. Alias) ist."""
+    return (value or "").strip().lower() in _METRIC_ALIASES
+
+
 def normalize_metric(value: Optional[str]) -> str:
     return _METRIC_ALIASES.get((value or "").strip().lower(), "eur")
 
